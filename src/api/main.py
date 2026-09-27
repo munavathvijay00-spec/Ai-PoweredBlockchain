@@ -4,6 +4,7 @@ Run with: uvicorn src.api.main:app --reload --port 8000
 """
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from src.api.routes import router
@@ -28,6 +29,15 @@ app = FastAPI(
     description="AI-powered Ethereum transaction analysis",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+# CORS — allow browser requests from any origin (including Vercel)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include all API routes

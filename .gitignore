@@ -83,3 +83,4 @@ yarn-error.log*
 postgres-data/
 redis-data/backups/
 backups/
+.vercel

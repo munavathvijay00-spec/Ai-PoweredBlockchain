@@ -1,9 +1,11 @@
 /**
  * API client for the Blockchain Intelligence backend.
- * Centralizes all HTTP calls to the API.
+ * Uses VITE_API_URL env var in production, falls back to /api in dev.
  */
 
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_URL 
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : '/api';
 
 async function request(path) {
   const response = await fetch(`${API_BASE}${path}`);

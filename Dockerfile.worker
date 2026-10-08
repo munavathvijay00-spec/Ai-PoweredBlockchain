@@ -1,0 +1,21 @@
+# Worker-specific Docker image for the ingest loop
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+# Default interval: 15 seconds between iterations
+ENV INGEST_INTERVAL=15
+
+# Run the loop daemon (not uvicorn — this is a worker, not a web server)
+CMD ["python", "-m", "src.ingest.loop", "--interval", "15"]

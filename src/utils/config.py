@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     llm_provider: str = "ollama"
     llm_model: str = "llama3.2:1b"
     ollama_url: str = "http://localhost:11434"
+    groq_api_key: str = "not-set"
 
     # API
     api_key: str

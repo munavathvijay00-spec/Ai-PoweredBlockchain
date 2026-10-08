@@ -11,10 +11,13 @@ except ImportError:
     AsyncGroq = None
 
 
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+
 class GroqProvider:
     """Groq provider for LLM inference."""
 
-    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile"):
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL):
         if AsyncGroq is None:
             raise ImportError("groq package not installed. Run: pip install groq")
         self.client = AsyncGroq(api_key=api_key)
@@ -40,8 +43,8 @@ class GroqProvider:
 _provider: Optional[GroqProvider] = None
 
 
-def get_groq_provider(api_key: str) -> GroqProvider:
+def get_groq_provider(api_key: str, model: str = DEFAULT_MODEL) -> GroqProvider:
     global _provider
     if _provider is None:
-        _provider = GroqProvider(api_key=api_key)
+        _provider = GroqProvider(api_key=api_key, model=model)
     return _provider

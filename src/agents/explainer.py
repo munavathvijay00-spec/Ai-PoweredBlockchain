@@ -52,8 +52,6 @@ Detected risk factors:
 
 Write a clear, specific explanation. Avoid technical jargon."""
 
-    # ---------- Ollama (local) ----------
-
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=1, max=3))
     async def _call_ollama(self, prompt: str) -> str:
         """Call Ollama's local API."""
@@ -69,15 +67,14 @@ Write a clear, specific explanation. Avoid technical jargon."""
             response.raise_for_status()
             return response.json().get("response", "").strip()
 
-    # ---------- Groq (cloud) ----------
-
     async def _call_groq(self, prompt: str) -> Optional[str]:
         """Call Groq's cloud API."""
         from src.agents.providers.groq import get_groq_provider
-        provider = get_groq_provider(self.settings.groq_api_key)
+        provider = get_groq_provider(
+            api_key=self.settings.groq_api_key,
+            model=self.settings.llm_model,
+        )
         return await provider.generate(prompt)
-
-    # ---------- Main entry point ----------
 
     async def explain(self, tx: Dict, factors: List[Dict]) -> Optional[str]:
         """Generate a plain-English explanation. Returns None if provider unavailable."""
@@ -103,12 +100,10 @@ Write a clear, specific explanation. Avoid technical jargon."""
             return None
 
 
-# Singleton
 _explainer: Optional[TransactionExplainer] = None
 
 
 def get_explainer() -> TransactionExplainer:
-    """Get or create the global explainer instance."""
     global _explainer
     if _explainer is None:
         _explainer = TransactionExplainer()

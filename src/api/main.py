@@ -3,9 +3,10 @@ FastAPI application entry point.
 Run with: uvicorn src.api.main:app --reload --port 8000
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from prometheus_client import generate_latest, REGISTRY
 
 from src.api.routes import router
 from src.api.models import HealthResponse
@@ -54,4 +55,13 @@ async def root():
         version="1.0.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
+    )
+
+
+@app.get("/metrics", tags=["monitoring"])
+async def metrics():
+    """Prometheus metrics endpoint."""
+    return Response(
+        content=generate_latest(REGISTRY),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
     )

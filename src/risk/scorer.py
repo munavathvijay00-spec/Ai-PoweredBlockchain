@@ -42,7 +42,7 @@ class RiskScorer:
             })
             return {"score": 100, "factors": factors}
 
-                value_wei = tx.get('value', 0) or 0
+        value_wei = tx.get('value', 0) or 0
         value_eth = value_wei / 10**18
 
         if value_eth >= 1000:

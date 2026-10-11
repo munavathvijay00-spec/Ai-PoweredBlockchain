@@ -83,11 +83,11 @@ async def ingest_loop(interval_seconds: int = 15):
                 )
 
                 # Retention cleanup — every 100 iterations (~25 min)
-                if iteration % 20 == 0:
+                if iteration % 10 == 0:
                     try:
                         deleted = await db.execute("""
                             DELETE FROM transactions 
-                            WHERE timestamp < NOW() - INTERVAL '1 hour'
+                            WHERE timestamp < NOW() - INTERVAL '30 minutes'
                         """)
                         logger.info(f"🗑️ Retention cleanup: {deleted}")
                     except Exception as cleanup_err:
@@ -130,3 +130,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

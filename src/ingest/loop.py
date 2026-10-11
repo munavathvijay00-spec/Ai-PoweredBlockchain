@@ -3,7 +3,7 @@ Ingest loop — runs forever, ingesting new blocks every N seconds.
 
 Usage:
     python -m src.ingest.loop
-    python -m src.ingest.loop --interval 30   # custom interval
+    python -m src.ingest.loop --interval 30
 
 Press Ctrl+C to stop gracefully.
 """
@@ -36,12 +36,14 @@ async def ingest_loop(interval_seconds: int = 15):
     """Infinite loop: fetch latest block → process → sleep → repeat."""
     logger.info(f"🚀 Starting ingest loop (interval: {interval_seconds}s)")
 
+    # Connect to blockchain
     client = BlockchainClient()
     connected = await client.connect()
     if not connected:
         logger.error("❌ Blockchain connection failed. Exiting.")
         return
 
+    # Set up database + dependencies
     db = await get_db()
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
@@ -55,19 +57,8 @@ async def ingest_loop(interval_seconds: int = 15):
 
     try:
         while not _shutdown_requested:
-                     iteration += 1
-        now = datetime.now().strftime("%H:%M:%S")
-
-        # Every 100 iterations (~25 min), clean up old data
-        if iteration % 100 == 0:
-            try:
-                deleted = await db.execute("""
-                    DELETE FROM transactions 
-                    WHERE timestamp < NOW() - INTERVAL '3 days'
-                """)
-                logger.info(f"🗑️ Retention cleanup: {deleted}")
-            except Exception as e:
-                logger.warning(f"Cleanup error: {e}")
+            iteration += 1
+            now = datetime.now().strftime("%H:%M:%S")
 
             try:
                 logger.info(f"[{now}] 🔄 Iteration {iteration} — fetching latest block...")
@@ -91,9 +82,21 @@ async def ingest_loop(interval_seconds: int = 15):
                     f"Flagged: {total_flagged}"
                 )
 
+                # Retention cleanup — every 100 iterations (~25 min)
+                if iteration % 100 == 0:
+                    try:
+                        deleted = await db.execute("""
+                            DELETE FROM transactions 
+                            WHERE timestamp < NOW() - INTERVAL '3 days'
+                        """)
+                        logger.info(f"🗑️ Retention cleanup: {deleted}")
+                    except Exception as cleanup_err:
+                        logger.warning(f"Cleanup error (non-fatal): {cleanup_err}")
+
             except Exception as e:
                 logger.exception(f"❌ Error in iteration {iteration}: {e}")
 
+            # Sleep before next iteration
             if not _shutdown_requested:
                 logger.debug(f"😴 Sleeping {interval_seconds}s...")
                 await asyncio.sleep(interval_seconds)
@@ -106,7 +109,7 @@ async def ingest_loop(interval_seconds: int = 15):
 
 
 def main():
-    """Entry point — parses args, sets up signal handlers, runs loop."""
+    """Entry point."""
     interval = 15
     if "--interval" in sys.argv:
         try:

@@ -70,6 +70,6 @@ CREATE TABLE IF NOT EXISTS blacklist (
 CREATE INDEX IF NOT EXISTS idx_blacklist_address ON blacklist(address);
 
 -- Insert one example to prove it works
-INSERT INTO blacklist (address, reason, source) VALUES
-    ('0x0000000000000000000000000000000000000000', 'Null address — burn address', 'system')
-ON CONFLICT (address) DO NOTHING;
+-- Note: Do NOT seed the null address (0x0000...0000) into the blacklist.
+-- It is used for legitimate contract creation and burns.
+-- Real blacklist entries should be known scammers/sanctioned addresses only.

@@ -84,3 +84,4 @@ postgres-data/
 redis-data/backups/
 backups/
 .vercel
+requirements.txt.full

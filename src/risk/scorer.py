@@ -42,12 +42,36 @@ class RiskScorer:
             })
             return {"score": 100, "factors": factors}
 
-        if tx.get('value', 0) > self.large_tx_threshold_wei:
-            score += 20
+                value_wei = tx.get('value', 0) or 0
+        value_eth = value_wei / 10**18
+
+        if value_eth >= 1000:
+            score += 40
+            factors.append({
+                "factor": "whale_transaction",
+                "points": 40,
+                "reason": f"{value_eth:,.0f} ETH transfer — whale tier"
+            })
+        elif value_eth >= 100:
+            score += 30
             factors.append({
                 "factor": "large_transaction",
+                "points": 30,
+                "reason": f"{value_eth:,.1f} ETH transfer — large tier"
+            })
+        elif value_eth >= 10:
+            score += 20
+            factors.append({
+                "factor": "notable_transaction",
                 "points": 20,
-                "reason": f"Value > {self.large_tx_threshold_wei / 10**18:.0f} ETH"
+                "reason": f"{value_eth:,.2f} ETH transfer — notable tier"
+            })
+        elif value_eth >= 1:
+            score += 10
+            factors.append({
+                "factor": "medium_transaction",
+                "points": 10,
+                "reason": f"{value_eth:,.4f} ETH transfer"
             })
 
         if self._detect_bursty(address_history):

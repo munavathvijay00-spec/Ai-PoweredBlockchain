@@ -143,4 +143,3 @@ MIT
 👤 Author
 
 Munavath Vijay
-GitHub: @munavathvijay00-spec

@@ -55,8 +55,19 @@ async def ingest_loop(interval_seconds: int = 15):
 
     try:
         while not _shutdown_requested:
-            iteration += 1
-            now = datetime.now().strftime("%H:%M:%S")
+                     iteration += 1
+        now = datetime.now().strftime("%H:%M:%S")
+
+        # Every 100 iterations (~25 min), clean up old data
+        if iteration % 100 == 0:
+            try:
+                deleted = await db.execute("""
+                    DELETE FROM transactions 
+                    WHERE timestamp < NOW() - INTERVAL '3 days'
+                """)
+                logger.info(f"🗑️ Retention cleanup: {deleted}")
+            except Exception as e:
+                logger.warning(f"Cleanup error: {e}")
 
             try:
                 logger.info(f"[{now}] 🔄 Iteration {iteration} — fetching latest block...")

@@ -79,6 +79,16 @@ def decode_log(log: dict) -> dict | None:
         return {**common, "event": "approval", "standard": "ERC721-compatible",
                 "owner": _address(topics[1]), "approved": _address(topics[2]),
                 "token_id": str(int(topics[3], 16))}
+    if signature == TRANSFER_SINGLE and len(topics) == 4:
+        raw = data.removeprefix("0x")
+        if len(raw) != 128:
+            raise ValueError("invalid ERC1155 single transfer payload")
+        return {**common, "event": "transfer_single", "standard": "ERC1155-compatible",
+                "operator": _address(topics[1]),
+                "from_address": _address(topics[2]),
+                "to_address": _address(topics[3]),
+                "token_id": str(int(raw[:64], 16)),
+                "raw_amount": str(int(raw[64:], 16))}
     if signature == SWAP_V2 and len(topics) == 3:
         raw = data.removeprefix("0x")
         if len(raw) != 64 * 4:

@@ -10,7 +10,7 @@ Press Ctrl+C to stop gracefully.
 import asyncio
 import signal
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from loguru import logger
 
 from src.blockchain.client import BlockchainClient
@@ -24,8 +24,6 @@ from src.ingest.cursor import ensure_cursor_schema, load_cursor, save_cursor
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
-from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
-from src.risk.wallet_exposure import ensure_exposure_schema
 
 
 _shutdown_requested = False
@@ -60,12 +58,6 @@ async def ingest_loop(interval_seconds: int = 15):
 
     # Set up database + dependencies
     db = await get_db()
-    try:
-        await ensure_intelligence_schema(db)
-        await ensure_exposure_schema(db)
-        await refresh_ofac(db)
-    except Exception as intelligence_err:
-        logger.warning(f'Intelligence initialization failed (ingestion continues): {intelligence_err}')
     # Checkpoint is essential for gap-free recovery; fail startup if unavailable.
     await ensure_cursor_schema(db)
     addresses = AddressRepository(db)
@@ -74,7 +66,6 @@ async def ingest_loop(interval_seconds: int = 15):
     scorer = get_scorer()
     explainer = get_explainer()
 
-    next_ofac_refresh = datetime.now() + timedelta(hours=24)
     iteration = 0
     total_inserted = 0
     total_flagged = 0
@@ -135,13 +126,6 @@ async def ingest_loop(interval_seconds: int = 15):
                     f"📊 Session totals — Inserted: {total_inserted:,} | "
                     f"Flagged: {total_flagged}"
                 )
-
-                if datetime.now() >= next_ofac_refresh:
-                    next_ofac_refresh = datetime.now() + timedelta(hours=24)
-                    try:
-                        await refresh_ofac(db)
-                    except Exception as intelligence_err:
-                        logger.warning(f'Intelligence refresh unavailable: {intelligence_err}')
 
                 # Periodic lightweight size diagnostics (~15 minutes at default cadence).
                 if iteration == 1 or iteration % 60 == 0:

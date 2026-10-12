@@ -36,6 +36,15 @@ def _handle_shutdown(signum, frame):
     logger.info("🛑 Shutdown requested. Finishing current iteration...")
 
 
+def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list[int]:
+    """Return contiguous, bounded block numbers; no duplicates at a stable tip."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    if last_processed is None or latest < last_processed:
+        last_processed = latest - 1
+    return list(range(last_processed + 1, min(latest, last_processed + limit) + 1))
+
+
 async def ingest_loop(interval_seconds: int = 15):
     """Infinite loop: fetch latest block → process → sleep → repeat."""
     logger.info(f"🚀 Starting ingest loop (interval: {interval_seconds}s)")
@@ -65,6 +74,8 @@ async def ingest_loop(interval_seconds: int = 15):
     iteration = 0
     total_inserted = 0
     total_flagged = 0
+    last_processed_block = None  # In-process cursor; reset to chain tip after restart.
+    max_blocks_per_iteration = 3
 
     try:
         while not _shutdown_requested:
@@ -74,20 +85,37 @@ async def ingest_loop(interval_seconds: int = 15):
             try:
                 logger.info(f"[{now}] 🔄 Iteration {iteration} — fetching latest block...")
 
-                summary = await process_one_block(
-                    client, normalizer, transactions, addresses, scorer, explainer
-                )
+                latest_block = await client.get_latest_block_number()
+                if last_processed_block is None or latest_block < last_processed_block:
+                    # Start at tip on restart; reset if the chain head moves backwards.
+                    last_processed_block = latest_block - 1
 
-                total_inserted += summary['inserted']
-                total_flagged += summary['flagged']
-
-                logger.success(
-                    f"✅ Block #{summary['block_number']:,} | "
-                    f"{summary['total_transactions']} txs | "
-                    f"{summary['flagged']} flagged | "
-                    f"{summary['explained']} explained | "
-                    f"{summary['elapsed_seconds']}s"
-                )
+                pending = latest_block - last_processed_block
+                if pending > max_blocks_per_iteration:
+                    logger.info(
+                        f"Block catch-up: {pending} pending; "
+                        f"processing up to {max_blocks_per_iteration} sequentially"
+                    )
+                for block_number in next_blocks(
+                    last_processed_block, latest_block, max_blocks_per_iteration
+                ):
+                    summary = await process_one_block(
+                        client, normalizer, transactions, addresses, scorer, explainer,
+                        block_number=block_number,
+                    )
+                    # Advance only after successful processing; retry on failure.
+                    last_processed_block = block_number
+                    total_inserted += summary['inserted']
+                    total_flagged += summary['flagged']
+                    logger.success(
+                        f"✅ Block #{summary['block_number']:,} | "
+                        f"{summary['total_transactions']} txs | "
+                        f"{summary['flagged']} flagged | "
+                        f"{summary['explained']} explained | "
+                        f"{summary['elapsed_seconds']}s"
+                    )
+                if pending == 0:
+                    logger.debug("No new blocks at chain head")
                 logger.info(
                     f"📊 Session totals — Inserted: {total_inserted:,} | "
                     f"Flagged: {total_flagged}"

@@ -36,13 +36,15 @@ async def process_one_block(
     addresses: AddressRepository,
     scorer,
     explainer,
+    block_number: int | None = None,
 ) -> Dict:
     """Fetch the latest block, store transactions using bulk ops, score + explain."""
     start_time = time.time()
 
     with timer(ingest_iteration_duration_seconds):
         # 1. Fetch block
-        block_number = await client.get_latest_block_number()
+        if block_number is None:
+            block_number = await client.get_latest_block_number()
         block = await client.get_block(block_number, full_transactions=True)
         raw_txs = [dict(tx) for tx in block.get('transactions', [])]
 

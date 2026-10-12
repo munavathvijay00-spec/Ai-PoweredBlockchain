@@ -58,7 +58,7 @@ async def load_cursor_checkpoint(db):
 async def save_cursor_checkpoint(db, block_number: int, block_hash: str):
     """Advance only; store the block hash with the corresponding height atomically."""
     validate_block_hash(block_hash)
-    await db.execute("""
+    row = await db.fetchrow("""
         INSERT INTO ingest_cursor (stream, last_block, block_hash)
         VALUES ($1, $2, $3)
         ON CONFLICT (stream) DO UPDATE
@@ -66,7 +66,16 @@ async def save_cursor_checkpoint(db, block_number: int, block_hash: str):
             block_hash = EXCLUDED.block_hash,
             updated_at = NOW()
         WHERE ingest_cursor.last_block < EXCLUDED.last_block
+        RETURNING last_block, block_hash
     """, CURSOR_KEY, block_number, block_hash)
+    if (
+        not row
+        or int(row["last_block"]) != block_number
+        or row["block_hash"] != block_hash
+    ):
+        raise RuntimeError(
+            "CHECKPOINT_CONFLICT: checkpoint did not advance to requested canonical block"
+        )
 
 
 async def backfill_cursor_hash(db, block_number: int, block_hash: str) -> str:

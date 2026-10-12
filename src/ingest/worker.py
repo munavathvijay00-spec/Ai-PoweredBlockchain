@@ -128,7 +128,10 @@ async def process_one_block(
 
         # 9. Explain flagged with bounded provider concurrency
         explained = 0
-        flagged_scores = [s for s in scores if s['score'] >= 20]
+        flagged_scores = sorted(
+            (s for s in scores if s['score'] >= 20),
+            key=lambda s: s['score'], reverse=True,
+        )[:3]  # Limit AI cost and latency; all risk scores are still persisted.
         if flagged_scores:
             tx_by_hash = {tx['hash']: tx for tx in normalized}
             tasks = []

@@ -111,7 +111,7 @@ async def ingest_loop(interval_seconds: int = 15):
                     last_block_hash = await backfill_cursor_hash(
                         db, last_processed_block, _block_hash(legacy_block['hash'])
                     )
-                    logger.warning('Legacy checkpoint anchored at block %s; earlier data is not reorg-verified', last_processed_block)
+                    logger.warning(f'Legacy checkpoint anchored at block {last_processed_block}; earlier data is not reorg-verified')
 
                 # A stored hash is an immutable chain continuity assertion.
                 # Stop rather than silently mix orphaned transfers into evidence.

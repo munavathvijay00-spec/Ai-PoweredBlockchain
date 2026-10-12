@@ -46,23 +46,33 @@ class AddressRepository:
         if not addresses:
             return set()
         normalized = [a.lower() for a in addresses]
-        rows = await self.db.fetch("""
-            SELECT address FROM blacklist WHERE lower(address) = ANY($1::text[])
-            UNION
-            SELECT address FROM verified_address_intelligence
-            WHERE source = 'OFAC_SDN_ETH' AND address = ANY($1::text[])
-        """, normalized)
+        try:
+            rows = await self.db.fetch("""
+                SELECT address FROM blacklist WHERE lower(address) = ANY($1::text[])
+                UNION
+                SELECT address FROM verified_address_intelligence
+                WHERE source = 'OFAC_SDN_ETH' AND address = ANY($1::text[])
+            """, normalized)
+        except Exception as exc:
+            logger.warning(f'Verified intelligence lookup unavailable; using manual blacklist: {exc}')
+            rows = await self.db.fetch("""
+                SELECT address FROM blacklist WHERE lower(address) = ANY($1::text[])
+            """, normalized)
         return {row['address'].lower() for row in rows}
 
     async def get_verified_matches(self, addresses: list) -> dict:
         """Source-attributed sanctions matches for transaction risk evidence."""
         if not addresses:
             return {}
-        rows = await self.db.fetch("""
-            SELECT address, source, entity_id, entity_name, checked_at
-            FROM verified_address_intelligence
-            WHERE address = ANY($1::text[])
-        """, [a.lower() for a in addresses])
+        try:
+            rows = await self.db.fetch("""
+                SELECT address, source, entity_id, entity_name, checked_at
+                FROM verified_address_intelligence
+                WHERE address = ANY($1::text[])
+            """, [a.lower() for a in addresses])
+        except Exception as exc:
+            logger.warning(f'Verified intelligence evidence unavailable: {exc}')
+            return {}
         return {r["address"]: dict(r) for r in rows}
 
     async def bulk_get_or_create_addresses(self, addresses: list) -> dict:

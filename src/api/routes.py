@@ -2,6 +2,7 @@
 API route handlers.
 Each function handles one HTTP endpoint.
 """
+import json
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -21,6 +22,14 @@ router = APIRouter(prefix="/api", tags=["blockchain"])
 def _format_tx(row: dict) -> TransactionResponse:
     """Convert a raw DB row into a TransactionResponse."""
     value_wei = int(row.get('value', 0))
+    factors = row.get('risk_factors') or []
+    if isinstance(factors, str):
+        try:
+            factors = json.loads(factors)
+        except (ValueError, TypeError):
+            factors = []
+    if not isinstance(factors, list):
+        factors = []
     return TransactionResponse(
         hash=row['hash'],
         from_address=row['from_address'],
@@ -31,6 +40,7 @@ def _format_tx(row: dict) -> TransactionResponse:
         timestamp=row['timestamp'],
         risk_score=row.get('risk_score', 0),
         ai_explanation=row.get('ai_explanation'),
+        risk_factors=[factor for factor in factors if isinstance(factor, dict)],
     )
 
 

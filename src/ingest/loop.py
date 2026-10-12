@@ -59,6 +59,7 @@ def is_chain_integrity_failure(error: Exception) -> bool:
     return (
         'REORG_DETECTED:' in message
         or 'TRANSACTION_PROVENANCE_CONFLICT:' in message
+        or 'CHECKPOINT_CONFLICT:' in message
     )
 
 

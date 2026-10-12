@@ -53,7 +53,7 @@ export default function WalletInvestigator() {
       const next = await api.getWalletTransfers(wallet, {
         outgoing_page_key: cursors.outgoing,
         incoming_page_key: cursors.incoming,
-      });
+      }, { outgoing: Boolean(cursors.outgoing), incoming: Boolean(cursors.incoming) });
       const key = t => [t.hash, t.from_address, t.to_address, t.category, t.asset, t.block_number_hex, t.value].join('|');
       setTransfers(old => {
         const seen = new Set(old.map(key));

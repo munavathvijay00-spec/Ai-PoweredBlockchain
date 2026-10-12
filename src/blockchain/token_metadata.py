@@ -31,7 +31,7 @@ def parse_symbol(data):
     try:
         payload = bytes.fromhex(raw)
         if len(payload) == 32:
-            return payload.rstrip(b"\\x00").decode("utf-8").strip()[:32] or None
+            return payload.rstrip(b"\x00").decode("utf-8").strip()[:32] or None
         if len(payload) >= 96 and int.from_bytes(payload[:32], "big") == 32:
             size = int.from_bytes(payload[32:64], "big")
             if 0 < size <= 64 and len(payload) >= 64 + size:

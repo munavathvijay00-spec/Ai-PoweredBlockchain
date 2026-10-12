@@ -73,3 +73,76 @@ async def test_graph_edges_reference_real_transaction_hashes(monkeypatch):
     assert graph["edges"][0]["tx_hash"] == tx_hash
     assert graph["next_page_keys"]["outgoing"] == "next"
     assert graph["historical_completeness"] is False
+
+
+@pytest.mark.asyncio
+async def test_provider_rejects_non_json_payload():
+    class FakeResponse:
+        status = 200
+        async def json(self, content_type=None):
+            return ["unexpected", "payload"]
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+
+    class FakeSession:
+        def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    with pytest.raises(HTTPException) as error:
+        await routes._transfer_page(
+            FakeSession(), "https://eth-mainnet.g.alchemy.com/v2/test",
+            "0x" + "a" * 40, "fromAddress", 2
+        )
+    assert error.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_transfer_pagination_and_self_transfer_dedup(monkeypatch):
+    address = "0x" + "a" * 40
+    tx_hash = "0x" + "3" * 64
+
+    class Settings:
+        ethereum_rpc_url = "https://eth-mainnet.g.alchemy.com/v2/test"
+
+    calls = []
+
+    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None):
+        calls.append((direction, count, page_key))
+        return {
+            "transfers": [{
+                "uniqueId": "unique-transfer-1",
+                "hash": tx_hash,
+                "from": address,
+                "to": address,
+                "category": "external",
+                "asset": "ETH",
+                "value": 0.5,
+                "blockNum": "0x123",
+            }],
+            "pageKey": "next-" + direction,
+        }
+
+    monkeypatch.setattr(routes, "get_settings", lambda: Settings())
+    monkeypatch.setattr(routes, "_transfer_page", fake_page)
+    result = await routes.wallet_indexed_transfers(
+        address, 2, "outgoing-cursor", "incoming-cursor"
+    )
+    assert result["returned"] == 1
+    assert result["outgoing_next_page_key"] == "next-fromAddress"
+    assert result["incoming_next_page_key"] == "next-toAddress"
+    assert ("fromAddress", 2, "outgoing-cursor") in calls
+    assert ("toAddress", 2, "incoming-cursor") in calls
+    assert result["historical_completeness"] is False
+
+
+@pytest.mark.asyncio
+async def test_rejects_malicious_lookalike_alchemy_host(monkeypatch):
+    class Settings:
+        ethereum_rpc_url = "https://alchemy.com.attacker.example/v2/test"
+
+    monkeypatch.setattr(routes, "get_settings", lambda: Settings())
+    with pytest.raises(HTTPException) as error:
+        await routes.wallet_indexed_transfers("0x" + "a" * 40)
+    assert error.value.status_code == 503

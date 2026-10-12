@@ -34,7 +34,7 @@ def test_transaction_block_hash_without_header_hash_rejected():
     with pytest.raises(ValueError, match="block hash differs"):
         validate_block_snapshot({
             "number": 123,
-            "transactions": [{"blockHash": BLOCK_HASH}],
+            "transactions": [{"blockNumber": 123, "blockHash": BLOCK_HASH}],
         }, 123)
 
 
@@ -42,4 +42,20 @@ def test_invalid_header_hash_rejected():
     with pytest.raises(ValueError, match="hexadecimal"):
         validate_block_snapshot({
             "number": 123, "hash": "0x" + "g" * 64, "transactions": [],
+        }, 123)
+
+
+def test_missing_transaction_block_number_rejected():
+    with pytest.raises(ValueError, match="block number missing"):
+        validate_block_snapshot({
+            "number": 123, "hash": BLOCK_HASH,
+            "transactions": [{"blockHash": BLOCK_HASH}],
+        }, 123)
+
+
+def test_missing_transaction_block_hash_rejected():
+    with pytest.raises(ValueError, match="block hash missing"):
+        validate_block_snapshot({
+            "number": 123, "hash": BLOCK_HASH,
+            "transactions": [{"blockNumber": 123}],
         }, 123)

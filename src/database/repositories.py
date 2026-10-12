@@ -171,6 +171,33 @@ class TransactionRepository:
         if not hashes:
             return 0
 
+        # A hash already indexed at a different height or with different
+        # native transfer facts must not be treated as an idempotent retry.
+        # The ingestion loop's atomic transaction will roll back on conflict.
+        existing = await self.db.fetch("""
+            SELECT t.hash, t.block_number, t.from_address_id, t.to_address_id,
+                   t.value
+            FROM transactions t
+            WHERE t.hash = ANY($1::text[])
+        """, hashes)
+        incoming = {
+            h: (int(b), int(src), int(dst), int(value))
+            for h, b, src, dst, value in zip(
+                hashes, block_numbers, from_ids, to_ids, values
+            )
+        }
+        for row in existing:
+            expected = incoming[row['hash']]
+            observed = (
+                int(row['block_number']), int(row['from_address_id']),
+                int(row['to_address_id']), int(row['value'])
+            )
+            if observed != expected:
+                raise RuntimeError(
+                    f"TRANSACTION_PROVENANCE_CONFLICT: {row['hash']} differs from stored transfer; "
+                    "manual reorg investigation required"
+                )
+
         query = """
             INSERT INTO transactions 
             (hash, from_address_id, to_address_id, value, gas_price, gas_used,

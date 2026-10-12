@@ -94,21 +94,23 @@ async def process_one_block(
         if scores:
             await transactions.bulk_update_risk_scores(scores)
 
-        # 9. Explain flagged in parallel
+        # 9. Explain flagged with bounded provider concurrency
         explained = 0
         flagged_scores = [s for s in scores if s['score'] >= 20]
         if flagged_scores:
             tx_by_hash = {tx['hash']: tx for tx in normalized}
             tasks = []
+            task_scores = []
             for s in flagged_scores:
                 tx = tx_by_hash.get(s['hash'])
                 if tx:
-                    tasks.append(explainer.explain(tx, s['factors']))
+                    tasks.append(explainer.explain({**tx, 'risk_score': s['score']}, s['factors']))
+                    task_scores.append(s)
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             to_save = []
-            for s, result in zip(flagged_scores, results):
+            for s, result in zip(task_scores, results):
                 if isinstance(result, str) and result:
                     to_save.append({
                         'hash': s['hash'],

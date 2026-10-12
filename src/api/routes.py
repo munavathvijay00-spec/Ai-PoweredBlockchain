@@ -51,7 +51,7 @@ async def list_transactions(
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
     """List recent transactions with pagination."""
-    rows = await repo.list_recent(limit=limit)
+    rows = await repo.list_recent(limit=limit, offset=offset)
     total = await repo.count()
 
     return TransactionListResponse(

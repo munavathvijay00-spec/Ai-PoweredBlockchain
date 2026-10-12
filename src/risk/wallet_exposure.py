@@ -31,28 +31,29 @@ def find_direct_exposures(txs, verified_matches):
 
 
 async def save_direct_exposures(db, exposures):
-    if not exposures:
-        return
+    """Persist and prune atomically, even on blocks with no new exposure."""
     async with db.acquire() as conn:
-        await conn.executemany("""
-        INSERT INTO wallet_direct_exposure
-            (address, sanctioned_address, evidence_tx_hash, direction, observed_at)
-        VALUES ($1, $2, $3, $4, NOW())
-        ON CONFLICT (address) DO UPDATE SET
-            sanctioned_address = EXCLUDED.sanctioned_address,
-            evidence_tx_hash = EXCLUDED.evidence_tx_hash,
-            direction = EXCLUDED.direction,
-            observed_at = EXCLUDED.observed_at
-        """, [(address, *evidence) for address, evidence in exposures.items()])
-    await db.execute("""
-        DELETE FROM wallet_direct_exposure
-        WHERE observed_at < NOW() - INTERVAL '7 days'
-           OR address IN (
-               SELECT address FROM wallet_direct_exposure
-               ORDER BY observed_at DESC, address DESC
-               OFFSET 5000
-           )
-    """)
+        async with conn.transaction():
+            if exposures:
+                await conn.executemany("""
+                    INSERT INTO wallet_direct_exposure
+                        (address, sanctioned_address, evidence_tx_hash, direction, observed_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                    ON CONFLICT (address) DO UPDATE SET
+                        sanctioned_address = EXCLUDED.sanctioned_address,
+                        evidence_tx_hash = EXCLUDED.evidence_tx_hash,
+                        direction = EXCLUDED.direction,
+                        observed_at = EXCLUDED.observed_at
+                """, [(address, *evidence) for address, evidence in exposures.items()])
+            await conn.execute("""
+                DELETE FROM wallet_direct_exposure
+                WHERE observed_at < NOW() - INTERVAL '7 days'
+                   OR address IN (
+                       SELECT address FROM wallet_direct_exposure
+                       ORDER BY observed_at DESC, address DESC
+                       OFFSET 5000
+                   )
+            """)
 
 
 async def get_direct_exposures(db, addresses):

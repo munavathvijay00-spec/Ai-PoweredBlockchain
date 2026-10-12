@@ -50,7 +50,9 @@ export default function TransactionModal({ tx, onClose }) {
   if (!tx) return null;
 
   const amountOnly = amountOnlyEvidence(tx);
-  const risk = amountOnly ? { text: 'Amount review only', color: 'text-amber-300' } : riskLabel(tx.risk_score);
+  const evidence = tx.evidence_assessment;
+  const insufficient = evidence?.assessment === 'insufficient_evidence';
+  const risk = insufficient ? { text: 'Insufficient evidence', color: 'text-amber-300' } : amountOnly ? { text: 'Amount review only', color: 'text-amber-300' } : riskLabel(tx.risk_score);
 
   return (
     <div
@@ -86,6 +88,7 @@ export default function TransactionModal({ tx, onClose }) {
                 {tx.risk_score}/100 — {risk.text}
               </span>
             </div>
+            {evidence?.engine_version && <p className="text-slate-300 text-sm mb-3" role="note">Evidence engine {evidence.engine_version}: {evidence.rationale} Confidence: {evidence.confidence}. Not a calibrated probability.</p>}
             {amountOnly && <p className="text-amber-200 text-sm mb-3" role="note">This score is based only on transfer size, not verified suspicious behavior. It is not a calibrated probability or evidence of wrongdoing. Historical scores will be revised when the new risk engine is deployed.</p>}
             <div className="w-full bg-slate-700 rounded-full h-3 overflow-hidden">
               <div

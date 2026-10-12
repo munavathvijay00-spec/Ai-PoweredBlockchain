@@ -1,5 +1,6 @@
 """Low-impact PostgreSQL storage diagnostics; no destructive maintenance."""
 from loguru import logger
+from src.ingest.health_monitor import assess_storage_health
 
 
 async def log_storage_health(db):
@@ -28,3 +29,10 @@ async def log_storage_health(db):
     size = await db.fetchval("SELECT pg_database_size(current_database())")
     logger.info("Storage health: database logical size={:.1f}MB (Railway volume may differ)",
                 size / 1048576)
+
+    # Logical size is only an early-warning proxy; Railway's physical volume also
+    # contains WAL and PostgreSQL internals and MUST be monitored in Railway.
+    health = assess_storage_health(size)
+    if health["level"] != "ok":
+        logger.warning("Storage {}: logical database {:.1f}% of {}MB budget; check Railway physical volume usage separately",
+                       health["level"], health["percent"], health["budget_mb"])

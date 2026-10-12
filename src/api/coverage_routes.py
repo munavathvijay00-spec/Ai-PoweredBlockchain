@@ -16,6 +16,19 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
                COUNT(DISTINCT block_number) AS blocks_with_stored_transactions
         FROM transactions
     """)
+    cursor = await repo.db.fetchrow("""
+        SELECT last_block, block_hash, updated_at
+        FROM ingest_cursor WHERE stream = 'ethereum_mainnet'
+    """)
+    checkpoint = {
+        'status': 'checkpoint_hash_recorded' if cursor and cursor['block_hash'] else 'not_verified',
+        'checkpoint_block': cursor['last_block'] if cursor else None,
+        'checkpoint_hash': cursor['block_hash'] if cursor else None,
+        'updated_at': cursor['updated_at'] if cursor else None,
+        'automatic_rollback': False,
+        'historical_completeness': False,
+        'note': 'The ingestion worker checks canonical checkpoint hashes and parent continuity. This does not verify older records, recover orphaned transactions, or prove full chain coverage.',
+    }
     return {
         "chain_id": 1,
         "network": "ethereum-mainnet",
@@ -32,7 +45,7 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         },
         "token_events": {"status": "on_demand_only", "historical_completeness": False},
         "internal_traces": {"status": "not_indexed", "historical_completeness": False},
-        "reorg_verification": {"status": "not_verified"},
+        "reorg_verification": checkpoint,
         "wallet_history": {"status": "sampled_from_retained_native_transactions", "historical_completeness": False},
         "limitations": [
             "No complete address-indexed Ethereum history is available from this database.",

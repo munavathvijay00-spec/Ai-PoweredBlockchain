@@ -28,4 +28,5 @@ export const api = {
   getTransactions: (limit = 50) => request(`/transactions?limit=${limit}`),
   getFlagged: (minScore = 20) => request(`/flagged?min_score=${minScore}`),
   getTransaction: (hash) => request(`/transactions/${hash}`),
+  getTransactionEvents: (hash) => request(`/transactions/${encodeURIComponent(hash)}/events`),
 };

@@ -1,3 +1,4 @@
+import ReceiptEvents from './ReceiptEvents';
 function formatEth(tx) {
   if (tx.value_wei != null && /^\d+$/.test(String(tx.value_wei))) {
     const amount = BigInt(String(tx.value_wei));
@@ -166,6 +167,8 @@ export default function TransactionModal({ tx, onClose }) {
               </div>
             </div>
           </div>
+
+          <ReceiptEvents key={tx.hash} hash={tx.hash} />
 
           {/* External link */}
           <div className="pt-4 border-t border-slate-700">

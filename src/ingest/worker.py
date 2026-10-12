@@ -34,7 +34,13 @@ def require_complete_normalization(raw_txs: list, normalized: list) -> None:
             f'Incomplete block normalization: {len(normalized)} of {len(raw_txs)} transactions; refusing checkpoint'
         )
     hashes = [tx.get('hash') for tx in normalized]
-    if any(not isinstance(h, str) or not h.startswith('0x') or len(h) != 66 for h in hashes):
+    if any(
+        not isinstance(h, str)
+        or not h.startswith('0x')
+        or len(h) != 66
+        or any(ch not in '0123456789abcdefABCDEF' for ch in h[2:])
+        for h in hashes
+    ):
         raise ValueError('Normalized block contains invalid transaction hashes')
     if len(set(hashes)) != len(hashes):
         raise ValueError('Normalized block contains duplicate transaction hashes')

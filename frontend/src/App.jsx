@@ -13,33 +13,51 @@ function App() {
   const [transactions, setTransactions] = useState([]);
   const [flagged, setFlagged] = useState([]);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [selectedTx, setSelectedTx] = useState(null);
   const [view, setView] = useState('investigate');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
-  async function loadData() {
-    try {
-      const [statsData, txsData, flaggedData] = await Promise.all([
-        api.getStats(),
-        api.getTransactions(50),
-        api.getFlagged(20),
-      ]);
-      setStats(statsData);
-      setTransactions(txsData.transactions);
-      setFlagged(flaggedData.transactions);
-      setLastUpdate(new Date());
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
   useEffect(() => {
+    let active = true;
+    let busy = false;
+
+    async function loadData() {
+      if (busy || document.visibilityState === 'hidden') return;
+      busy = true;
+      try {
+        const results = await Promise.allSettled([
+          api.getStats(),
+          api.getTransactions(50),
+          api.getFlagged(20),
+        ]);
+        if (!active) return;
+        const [statsResult, txsResult, flaggedResult] = results;
+        if (statsResult.status === 'fulfilled') setStats(statsResult.value);
+        if (txsResult.status === 'fulfilled') setTransactions(txsResult.value.transactions ?? []);
+        if (flaggedResult.status === 'fulfilled') setFlagged(flaggedResult.value.transactions ?? []);
+        const failures = results.filter(result => result.status === 'rejected');
+        setError(failures.length ? 'Some live data is temporarily unavailable. Showing the latest successful results.' : null);
+        if (failures.length !== results.length) setLastUpdate(new Date());
+      } catch {
+        if (active) setError('Unable to refresh live data. Retrying automatically.');
+      } finally {
+        busy = false;
+        if (active) setLoading(false);
+      }
+    }
+
     loadData();
-    const interval = setInterval(loadData, 5000);
-    return () => clearInterval(interval);
+    const interval = setInterval(loadData, 15000);
+    const onVisible = () => { if (document.visibilityState === 'visible') loadData(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const counts = useMemo(() => ({
@@ -58,9 +76,9 @@ function App() {
     if (search.trim()) {
       const s = search.toLowerCase();
       list = list.filter((tx) =>
-        tx.hash.toLowerCase().includes(s) ||
-        tx.from_address.toLowerCase().includes(s) ||
-        tx.to_address.toLowerCase().includes(s)
+        (tx.hash ?? '').toLowerCase().includes(s) ||
+        (tx.from_address ?? '').toLowerCase().includes(s) ||
+        (tx.to_address ?? '').toLowerCase().includes(s)
       );
     }
 
@@ -107,6 +125,7 @@ function App() {
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-white mb-2">Follow the money. <span className="text-cyan-400">Surface the signals.</span></h2>
           <p className="text-slate-400 text-sm">Live transaction monitoring, evidence-backed risk detection, and interactive wallet investigations.</p>
         </div>
+        {loading && <p role="status" className="text-sm text-slate-400 mb-4">Connecting to Ethereum intelligence feed…</p>}
         <StatsBar stats={stats} />
         <div className="flex gap-2 my-7 border-b border-slate-700/60 pb-3">
           <button onClick={() => setView('investigate')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'investigate' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>◎ Investigation graph</button>

@@ -13,7 +13,7 @@ async def test_recent_transactions_use_limit_and_offset():
     await repo.list_recent(limit=20, offset=40)
     sql, limit, offset = db.fetch.await_args.args
     assert "LIMIT $1 OFFSET $2" in sql
-    assert "ORDER BY t.block_number DESC, t.id DESC" in sql
+    assert "ORDER BY t.timestamp DESC, t.id DESC" in sql
     assert (limit, offset) == (20, 40)
 
 

@@ -23,6 +23,7 @@ from src.ingest.worker import process_one_block
 from src.ingest.cursor import ensure_cursor_schema, load_cursor, save_cursor
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
+from src.ingest.health_monitor import log_ingestion_health
 from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
 from src.risk.wallet_exposure import ensure_exposure_schema
 
@@ -97,10 +98,13 @@ async def ingest_loop(interval_seconds: int = 15):
                     await save_cursor(db, last_processed_block)
                 elif latest_block < last_processed_block:
                     # Never silently roll a durable checkpoint backwards.
+                    log_ingestion_health(latest_block, last_processed_block)
                     logger.warning('Chain head below saved checkpoint; waiting for recovery')
                     continue
 
                 pending = latest_block - last_processed_block
+                if iteration == 1 or iteration % 4 == 0:
+                    log_ingestion_health(latest_block, last_processed_block)
                 if pending > max_blocks_per_iteration:
                     logger.info(
                         f"Block catch-up: {pending} pending; "

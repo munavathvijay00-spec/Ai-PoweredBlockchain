@@ -17,6 +17,13 @@ function formatEth(tx) {
  */
 import { useEffect } from 'react';
 
+const AMOUNT_ONLY = new Set(['whale_transaction', 'large_transaction', 'notable_transaction', 'medium_transaction']);
+
+function amountOnlyEvidence(tx) {
+  return Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 &&
+    tx.risk_factors.every(f => AMOUNT_ONLY.has(f.factor));
+}
+
 function riskLabel(score) {
   if (score >= 80) return { text: 'Critical', color: 'text-red-500' };
   if (score >= 40) return { text: 'High', color: 'text-orange-500' };
@@ -42,7 +49,8 @@ export default function TransactionModal({ tx, onClose }) {
 
   if (!tx) return null;
 
-  const risk = riskLabel(tx.risk_score);
+  const amountOnly = amountOnlyEvidence(tx);
+  const risk = amountOnly ? { text: 'Amount review only', color: 'text-amber-300' } : riskLabel(tx.risk_score);
 
   return (
     <div
@@ -78,9 +86,10 @@ export default function TransactionModal({ tx, onClose }) {
                 {tx.risk_score}/100 — {risk.text}
               </span>
             </div>
+            {amountOnly && <p className="text-amber-200 text-sm mb-3" role="note">This score is based only on transfer size, not verified suspicious behavior. It is not a calibrated probability or evidence of wrongdoing. Historical scores will be revised when the new risk engine is deployed.</p>}
             <div className="w-full bg-slate-700 rounded-full h-3 overflow-hidden">
               <div
-                className={`h-full ${riskBarColor(tx.risk_score)} transition-all`}
+                className={`h-full ${amountOnly ? 'bg-amber-400' : riskBarColor(tx.risk_score)} transition-all`}
                 style={{ width: `${tx.risk_score}%` }}
               />
             </div>

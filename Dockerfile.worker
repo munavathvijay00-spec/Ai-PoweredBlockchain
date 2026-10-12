@@ -18,4 +18,4 @@ COPY scripts/ ./scripts/
 ENV INGEST_INTERVAL=15
 
 # Run the loop daemon (not uvicorn — this is a worker, not a web server)
-CMD ["python", "-m", "src.ingest.loop", "--interval", "15"]
+CMD ["sleep", "infinity"]

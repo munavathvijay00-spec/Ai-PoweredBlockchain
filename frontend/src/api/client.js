@@ -29,4 +29,13 @@ export const api = {
   getFlagged: (minScore = 20) => request(`/flagged?min_score=${minScore}`),
   getTransaction: (hash) => request(`/transactions/${hash}`),
   getTransactionEvents: (hash) => request(`/transactions/${encodeURIComponent(hash)}/events`),
+  getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`),
+  getWalletTransfers: (address, cursors = {}) => {
+    const params = new URLSearchParams({ per_direction: '25' });
+    if (cursors.outgoing_page_key) params.set('outgoing_page_key', cursors.outgoing_page_key);
+    if (cursors.incoming_page_key) params.set('incoming_page_key', cursors.incoming_page_key);
+    return request(`/wallets/${encodeURIComponent(address)}/transfers?${params}`);
+  },
+  getWalletGraph: address => request(`/wallets/${encodeURIComponent(address)}/indexed-graph`),
+  getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report`),
 };

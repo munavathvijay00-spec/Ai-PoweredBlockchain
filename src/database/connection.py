@@ -112,8 +112,13 @@ async def get_db() -> Database:
     """Get or create the global database instance."""
     global _db
     if _db is None:
-        _db = Database()
-        await _db.connect()
+        candidate = Database()
+        if not await candidate.connect() or candidate.pool is None:
+            # Never publish a disconnected singleton: callers must not proceed
+            # with ingestion or checkpoint writes on a failed DB startup.
+            await candidate.close()
+            raise RuntimeError('PostgreSQL connection failed')
+        _db = candidate
     return _db
 
 

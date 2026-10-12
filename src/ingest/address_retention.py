@@ -78,6 +78,7 @@ async def prune_addresses(db, *, enabled=False, batch_size=250, minutes=30):
         )
         DELETE FROM addresses a USING candidates c
         WHERE a.id = c.id
+          AND {conditions}
     """, minutes, batch_size)
     deleted = int(result.split()[-1])
     logger.info(f"Address retention: removed {deleted} unreferenced addresses")

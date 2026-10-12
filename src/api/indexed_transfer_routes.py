@@ -148,3 +148,69 @@ async def wallet_indexed_graph(
         "scope": result["coverage"],
         "provenance_warning": "Transfer edges establish recorded movements, not common ownership, laundering, beneficial ownership, or final destination.",
     }
+
+
+@router.get("/{address}/investigation-report")
+async def wallet_evidence_report(
+    address: str,
+    per_direction: int = Query(25, ge=1, le=50),
+    outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
+):
+    """Deterministic, source-linked investigation summary without unverified AI claims."""
+    result = await wallet_indexed_transfers(
+        address, per_direction, outgoing_page_key, incoming_page_key
+    )
+    root = address.lower()
+    transfers = result["transfers"]
+    incoming = [t for t in transfers if (t.get("to_address") or "").lower() == root]
+    outgoing = [t for t in transfers if (t.get("from_address") or "").lower() == root]
+    counterparties = {}
+    for tx in transfers:
+        src = (tx.get("from_address") or "").lower()
+        dst = (tx.get("to_address") or "").lower()
+        for other in (src, dst):
+            if other != root and ADDRESS.fullmatch(other):
+                item = counterparties.setdefault(other, {"address": other, "evidence_hashes": []})
+                if tx.get("hash") and tx["hash"] not in item["evidence_hashes"]:
+                    item["evidence_hashes"].append(tx["hash"])
+    citations = []
+    for tx in transfers:
+        if tx.get("hash"):
+            citations.append({
+                "tx_hash": tx["hash"],
+                "url": tx.get("evidence_url"),
+                "category": tx.get("category"),
+                "asset": tx.get("asset"),
+            })
+    return {
+        "address": root,
+        "chain_id": 1,
+        "report_type": "deterministic_evidence_summary",
+        "summary": (
+            f"Observed {len(transfers)} unique indexed transfer records in the requested "
+            f"pages, including {len(incoming)} incoming and {len(outgoing)} outgoing "
+            "records (self-transfers count in both directions)."
+        ),
+        "observed_unique_transfers": len(transfers),
+        "incoming_count": len(incoming),
+        "outgoing_count": len(outgoing),
+        "unique_counterparties": len(counterparties),
+        "counterparties": sorted(counterparties.values(), key=lambda item: (-len(item["evidence_hashes"]), item["address"])),
+        "evidence": citations,
+        "pagination": {
+            "outgoing_next_page_key": result["outgoing_next_page_key"],
+            "incoming_next_page_key": result["incoming_next_page_key"],
+        },
+        "coverage": result["coverage"],
+        "historical_completeness": False,
+        "risk_assessment": {
+            "status": "not_assessed",
+            "reason": "Transfer counts and counterparties alone do not establish fraud, sanctions exposure, or illicit behavior.",
+        },
+        "limitations": [
+            "This report covers only fetched pages and supported provider transfer categories.",
+            "Evidence URLs are references to source transactions, not independent sanctions verification.",
+            "No entity attribution, behavioral detection-quality claim, or multi-hop tracing is made.",
+        ],
+    }

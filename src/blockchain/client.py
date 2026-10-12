@@ -37,6 +37,10 @@ class BlockchainClient:
             is_connected = await self.w3.is_connected()
             if is_connected:
                 chain_id = await self.w3.eth.chain_id
+                if chain_id != 1:
+                    logger.error(f"Refusing Ethereum mainnet ingestion: RPC returned chain_id={chain_id}")
+                    await self.close()
+                    return False
                 block_number = await self.w3.eth.block_number
                 logger.success(
                     f"✅ Connected to chain {chain_id} "

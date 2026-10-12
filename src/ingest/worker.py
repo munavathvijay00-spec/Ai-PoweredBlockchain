@@ -13,7 +13,7 @@ from src.database.connection import get_db, close_db
 from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.risk.behavior import analyze_block_behavior, apply_behavior_risk
-from src.agents.explainer import get_explainer
+from src.agents.explainer import get_explainer, evidence_explanation
 from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
 from src.risk.wallet_exposure import (ensure_exposure_schema, find_direct_exposures, save_direct_exposures,
                                       get_direct_exposures, apply_exposure_risk)
@@ -126,37 +126,50 @@ async def process_one_block(
         if scores:
             await transactions.bulk_update_risk_scores(scores)
 
-        # 9. Explain flagged with bounded provider concurrency
-        explained = 0
+        # 9. Every flagged transaction receives an evidence-based explanation.
+        # Only the three highest-risk items request AI wording, preserving cost.
         flagged_scores = sorted(
-            (s for s in scores if s['score'] >= 20),
-            key=lambda s: s['score'], reverse=True,
-        )[:3]  # Limit AI cost and latency; all risk scores are still persisted.
-        if flagged_scores:
-            tx_by_hash = {tx['hash']: tx for tx in normalized}
-            tasks = []
-            task_scores = []
-            for s in flagged_scores:
-                tx = tx_by_hash.get(s['hash'])
-                if tx:
-                    tasks.append(explainer.explain({**tx, 'risk_score': s['score']}, s['factors']))
-                    task_scores.append(s)
+            (item for item in scores if item['score'] >= 20),
+            key=lambda item: item['score'], reverse=True,
+        )
+        tx_by_hash = {tx['hash']: tx for tx in normalized}
+        to_save = []
+        for item in flagged_scores:
+            tx = tx_by_hash.get(item['hash'])
+            if tx:
+                to_save.append({
+                    'hash': item['hash'],
+                    'explanation': evidence_explanation(
+                        {**tx, 'risk_score': item['score']}, item['factors']
+                    ),
+                })
 
+        ai_candidates = flagged_scores[:3]
+        tasks = []
+        task_scores = []
+        for item in ai_candidates:
+            tx = tx_by_hash.get(item['hash'])
+            if tx:
+                tasks.append(explainer.explain(
+                    {**tx, 'risk_score': item['score']}, item['factors']
+                ))
+                task_scores.append(item)
+
+        if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            to_save = []
-            for s, result in zip(task_scores, results):
+            overrides = {}
+            for item, result in zip(task_scores, results):
                 if isinstance(result, str) and result:
-                    to_save.append({
-                        'hash': s['hash'],
-                        'explanation': result,
-                    })
-                    explained += 1
+                    overrides[item['hash']] = result
                 elif isinstance(result, Exception):
-                    logger.warning(f"Explain error {s['hash'][:20]}: {result}")
+                    logger.warning(f"Explain error {item['hash'][:20]}: {result}")
+            for row in to_save:
+                if row['hash'] in overrides:
+                    row['explanation'] = overrides[row['hash']]
 
-            if to_save:
-                await transactions.bulk_update_explanations(to_save)
+        if to_save:
+            await transactions.bulk_update_explanations(to_save)
+        explained = len(to_save)
 
         ingest_blocks_total.inc()
         elapsed = time.time() - start_time

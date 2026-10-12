@@ -11,6 +11,30 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.utils.config import get_settings
 
 
+def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
+    """Evidence-based fallback; does not claim to be AI-generated."""
+    score = max(0, min(100, int(tx.get("risk_score") or 0)))
+    reasons = []
+    for factor in factors or []:
+        reason = str(factor.get("reason") or "").strip().rstrip(".")
+        if reason and reason not in reasons:
+            reasons.append(reason)
+        if len(reasons) == 3:
+            break
+    if reasons:
+        details = "; ".join(reasons)
+        return (
+            f"Rule-based risk assessment: this transaction scored {score}/100. "
+            f"Detected evidence: {details}. "
+            "These indicators warrant review but do not independently prove wrongdoing."
+        )
+    return (
+        f"Rule-based risk assessment: this transaction scored {score}/100. "
+        "The available scoring data does not include a specific supporting factor; "
+        "review the transaction details before drawing conclusions."
+    )
+
+
 class TransactionExplainer:
     """Generates plain-English explanations for risky transactions."""
 
@@ -77,27 +101,24 @@ Write a clear, specific explanation. Avoid technical jargon."""
         )
         return await provider.generate(prompt)
 
-    async def explain(self, tx: Dict, factors: List[Dict]) -> Optional[str]:
-        """Generate a plain-English explanation. Returns None if provider unavailable."""
+    async def explain(self, tx: Dict, factors: List[Dict]) -> str:
+        """Prefer AI wording, but always return a clearly labeled evidence fallback."""
+        fallback = evidence_explanation(tx, factors)
         try:
             prompt = self._build_prompt(tx, factors)
-
             async with self._semaphore:
                 if self.provider == "ollama":
                     explanation = await self._call_ollama(prompt)
                 elif self.provider == "groq":
-                    if not self.settings.groq_api_key or self.settings.groq_api_key == 'not-set':
-                        logger.warning('GROQ_API_KEY is missing; cannot generate AI explanations')
-                        return None
+                    if not self.settings.groq_api_key or self.settings.groq_api_key == "not-set":
+                        return fallback
                     explanation = await self._call_groq(prompt)
                 else:
-                    logger.warning(f"Provider '{self.provider}' not implemented")
-                    return None
-            return explanation or None
-
-        except Exception as e:
-            logger.warning(f"Explainer request failed ({type(e).__name__}): {e}; future requests will retry.")
-            return None
+                    return fallback
+            return explanation.strip() if isinstance(explanation, str) and explanation.strip() else fallback
+        except Exception as exc:
+            logger.warning(f"AI explanation unavailable ({type(exc).__name__}); using rule-based evidence")
+            return fallback
 
 
 _explainer: Optional[TransactionExplainer] = None

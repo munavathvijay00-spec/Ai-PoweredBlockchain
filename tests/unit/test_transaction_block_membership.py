@@ -34,7 +34,7 @@ def test_transaction_block_hash_without_header_hash_rejected():
     with pytest.raises(ValueError, match="block hash differs"):
         validate_block_snapshot({
             "number": 123,
-            "transactions": [{"blockHash": BLOCK_HASH}],
+            "transactions": [{"blockNumber": 123, "blockHash": BLOCK_HASH}],
         }, 123)
 
 

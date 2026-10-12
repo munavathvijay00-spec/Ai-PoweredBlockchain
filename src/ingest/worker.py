@@ -55,14 +55,13 @@ def validate_block_snapshot(block: Dict, expected_number: int) -> None:
     if any(not isinstance(tx, dict) and not hasattr(tx, 'items') for tx in block['transactions']):
         raise ValueError('Transaction hashes alone are not a full block snapshot')
 
-    # When the RPC supplies transaction membership fields, they must agree
-    # with the exact canonical block snapshot selected by the ingest loop.
-    # Missing optional fields are not treated as proof of membership.
+    # A block without its canonical hash cannot establish provenance,
+    # including when it has no transactions.
     from src.ingest.cursor import validate_block_hash
-    block_hash = block.get('hash')
-    if block_hash is not None:
-        block_hash = TransactionNormalizer._to_hex_string(block_hash).lower()
-        validate_block_hash(block_hash)
+    if block.get('hash') is None:
+        raise ValueError('Canonical block hash missing from full block snapshot')
+    block_hash = TransactionNormalizer._to_hex_string(block['hash']).lower()
+    validate_block_hash(block_hash)
     for tx in block['transactions']:
         tx_number = tx.get('blockNumber')
         if tx_number is None:

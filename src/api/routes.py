@@ -31,6 +31,7 @@ def _format_tx(row: dict) -> TransactionResponse:
         timestamp=row['timestamp'],
         risk_score=row.get('risk_score', 0),
         ai_explanation=row.get('ai_explanation'),
+        risk_factors=row.get('risk_factors') or [],
     )
 
 

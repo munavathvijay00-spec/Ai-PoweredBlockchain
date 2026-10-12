@@ -62,10 +62,11 @@ async def ingest_loop(interval_seconds: int = 15):
     try:
         await ensure_intelligence_schema(db)
         await ensure_exposure_schema(db)
-        await ensure_cursor_schema(db)
         await refresh_ofac(db)
     except Exception as intelligence_err:
         logger.warning(f'Intelligence initialization failed (ingestion continues): {intelligence_err}')
+    # Checkpoint is essential for gap-free recovery; fail startup if unavailable.
+    await ensure_cursor_schema(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()
@@ -93,6 +94,7 @@ async def ingest_loop(interval_seconds: int = 15):
                 if last_processed_block is None:
                     # First deployment: begin at tip; subsequent restarts resume.
                     last_processed_block = latest_block - 1
+                    await save_cursor(db, last_processed_block)
                 elif latest_block < last_processed_block:
                     # Never silently roll a durable checkpoint backwards.
                     logger.warning('Chain head below saved checkpoint; waiting for recovery')

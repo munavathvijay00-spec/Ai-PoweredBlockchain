@@ -8,9 +8,9 @@ const API_BASE = configuredBase
   ? `${configuredBase}${configuredBase.endsWith('/api') ? '' : '/api'}`
   : '/api';
 
-async function request(path) {
+async function request(path, timeoutMs = 12000) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
     response = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
@@ -36,8 +36,8 @@ export const api = {
     params.set('include_incoming', String(directions.incoming));
     if (cursors.outgoing_page_key) params.set('outgoing_page_key', cursors.outgoing_page_key);
     if (cursors.incoming_page_key) params.set('incoming_page_key', cursors.incoming_page_key);
-    return request(`/wallets/${encodeURIComponent(address)}/transfers?${params}`);
+    return request(`/wallets/${encodeURIComponent(address)}/transfers?${params}`, 25000);
   },
-  getWalletGraph: address => request(`/wallets/${encodeURIComponent(address)}/indexed-graph`),
-  getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report`),
+  getWalletGraph: address => request(`/wallets/${encodeURIComponent(address)}/indexed-graph`, 25000),
+  getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report`, 25000),
 };

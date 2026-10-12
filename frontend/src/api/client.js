@@ -30,8 +30,10 @@ export const api = {
   getTransaction: (hash) => request(`/transactions/${hash}`),
   getTransactionEvents: (hash) => request(`/transactions/${encodeURIComponent(hash)}/events`),
   getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`),
-  getWalletTransfers: (address, cursors = {}) => {
+  getWalletTransfers: (address, cursors = {}, directions = { outgoing: true, incoming: true }) => {
     const params = new URLSearchParams({ per_direction: '25' });
+    params.set('include_outgoing', String(directions.outgoing));
+    params.set('include_incoming', String(directions.incoming));
     if (cursors.outgoing_page_key) params.set('outgoing_page_key', cursors.outgoing_page_key);
     if (cursors.incoming_page_key) params.set('incoming_page_key', cursors.incoming_page_key);
     return request(`/wallets/${encodeURIComponent(address)}/transfers?${params}`);

@@ -7,6 +7,7 @@ import SearchBar from './components/SearchBar';
 import FilterTabs from './components/FilterTabs';
 import RiskChart from './components/RiskChart';
 import InvestigationGraph from './components/InvestigationGraph';
+import WalletInvestigator from './components/WalletInvestigator';
 
 function App() {
   const [stats, setStats] = useState(null);
@@ -16,7 +17,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [selectedTx, setSelectedTx] = useState(null);
-  const [view, setView] = useState('investigate');
+  const [view, setView] = useState('wallet');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
@@ -127,10 +128,12 @@ function App() {
         </div>
         {loading && <p role="status" className="text-sm text-slate-400 mb-4">Connecting to Ethereum intelligence feed…</p>}
         <StatsBar stats={stats} />
-        <div className="flex gap-2 my-7 border-b border-slate-700/60 pb-3">
+        <div className="flex flex-wrap gap-2 my-7 border-b border-slate-700/60 pb-3">
+          <button onClick={() => setView('wallet')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'wallet' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>⌕ Wallet intelligence</button>
           <button onClick={() => setView('investigate')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'investigate' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>◎ Investigation graph</button>
           <button onClick={() => setView('transactions')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'transactions' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>≡ Transaction explorer</button>
         </div>
+        {view === 'wallet' && <div className="mb-7"><WalletInvestigator /></div>}
         {view === 'investigate' && <div className="mb-7"><InvestigationGraph transactions={flagged} onSelect={inspectTransaction} /></div>}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

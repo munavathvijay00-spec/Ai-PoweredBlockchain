@@ -42,18 +42,10 @@ class TransactionNormalizer:
             return "0x0000000000000000000000000000000000000000"
 
         s = str(address).lower()
-
         if not s.startswith('0x'):
             s = '0x' + s
-
-        # Trim if too long (defensive)
-        if len(s) > 42:
-            s = s[:42]
-
-        # Pad if too short (shouldn't happen, but defensive)
-        if len(s) < 42:
-            s = '0x' + s[2:].zfill(40)
-
+        if len(s) != 42 or any(ch not in '0123456789abcdef' for ch in s[2:]):
+            raise ValueError(f'Invalid Ethereum address: {address!r}')
         return s
 
     def normalize(self, raw_tx: Dict, block: Dict) -> Dict:

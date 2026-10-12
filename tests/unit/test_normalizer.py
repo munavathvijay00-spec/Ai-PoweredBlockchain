@@ -48,13 +48,11 @@ class TestNormalizer:
         assert len(result) == 42
         assert result.startswith('0x')
 
-    def test_address_padding_for_short_input(self):
-        """Short addresses should be zero-padded to 42 chars."""
+    def test_short_address_is_rejected(self):
+        """Never fabricate a wallet identity by padding a malformed address."""
         normalizer = TransactionNormalizer()
-        result = normalizer._to_address_string('0xabc123')
-        assert len(result) == 42
-        assert result.startswith('0x')
-        assert result.endswith('abc123')
+        with pytest.raises(ValueError, match="Invalid Ethereum address"):
+            normalizer._to_address_string('0xabc123')
 
     def test_address_handles_none(self):
         """Should return null address for None."""

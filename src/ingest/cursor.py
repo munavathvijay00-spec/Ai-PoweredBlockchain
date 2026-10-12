@@ -4,6 +4,19 @@ from loguru import logger
 CURSOR_KEY = "ethereum_mainnet"
 
 
+def validate_block_hash(block_hash: str) -> None:
+    """Require an exact 32-byte hexadecimal Ethereum block hash."""
+    if (
+        not isinstance(block_hash, str)
+        or len(block_hash) != 66
+        or not block_hash.startswith("0x")
+        or any(char not in "0123456789abcdefABCDEF" for char in block_hash[2:])
+    ):
+        raise ValueError("Expected a 32-byte hexadecimal block hash")
+
+
+
+
 async def ensure_cursor_schema(db):
     await db.execute("""
         CREATE TABLE IF NOT EXISTS ingest_cursor (
@@ -44,8 +57,7 @@ async def load_cursor_checkpoint(db):
 
 async def save_cursor_checkpoint(db, block_number: int, block_hash: str):
     """Advance only; store the block hash with the corresponding height atomically."""
-    if not isinstance(block_hash, str) or not block_hash.startswith("0x") or len(block_hash) != 66:
-        raise ValueError("Expected a 32-byte block hash")
+    validate_block_hash(block_hash)
     await db.execute("""
         INSERT INTO ingest_cursor (stream, last_block, block_hash)
         VALUES ($1, $2, $3)
@@ -63,8 +75,7 @@ async def backfill_cursor_hash(db, block_number: int, block_hash: str) -> str:
     Never overwrite an existing hash or alter the saved height. A concurrent
     cursor advance must cause this operation to fail closed.
     """
-    if not isinstance(block_hash, str) or not block_hash.startswith("0x") or len(block_hash) != 66:
-        raise ValueError("Expected a 32-byte block hash")
+    validate_block_hash(block_hash)
     row = await db.fetchrow("""
         UPDATE ingest_cursor
         SET block_hash = $3, updated_at = NOW()

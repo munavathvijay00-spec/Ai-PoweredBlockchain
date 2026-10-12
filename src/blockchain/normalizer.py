@@ -51,7 +51,10 @@ class TransactionNormalizer:
     def normalize(self, raw_tx: Dict, block: Dict) -> Dict:
         """Convert a raw Web3 transaction into our database format."""
         tx_hash = self._to_hex_string(raw_tx.get('hash'))
-        from_addr = self._to_address_string(raw_tx.get('from'))
+        sender = raw_tx.get('from')
+        if sender is None or sender == '':
+            raise ValueError('Transaction sender address is missing')
+        from_addr = self._to_address_string(sender)
 
         # 'to' is None for contract creation
         to_raw = raw_tx.get('to')

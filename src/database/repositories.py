@@ -54,6 +54,17 @@ class AddressRepository:
         """, normalized)
         return {row['address'].lower() for row in rows}
 
+    async def get_verified_matches(self, addresses: list) -> dict:
+        """Source-attributed sanctions matches for transaction risk evidence."""
+        if not addresses:
+            return {}
+        rows = await self.db.fetch("""
+            SELECT address, source, entity_id, entity_name, checked_at
+            FROM verified_address_intelligence
+            WHERE address = ANY($1::text[])
+        """, [a.lower() for a in addresses])
+        return {r["address"]: dict(r) for r in rows}
+
     async def bulk_get_or_create_addresses(self, addresses: list) -> dict:
         """
         Insert multiple addresses at once, return {address: id} map.

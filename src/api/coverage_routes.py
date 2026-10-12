@@ -16,10 +16,14 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
                COUNT(DISTINCT block_number) AS blocks_with_stored_transactions
         FROM transactions
     """)
-    cursor = await repo.db.fetchrow("""
-        SELECT last_block, block_hash, updated_at
-        FROM ingest_cursor WHERE stream = 'ethereum_mainnet'
-    """)
+    try:
+        cursor = await repo.db.fetchrow("""
+            SELECT last_block, block_hash, updated_at
+            FROM ingest_cursor WHERE stream = 'ethereum_mainnet'
+        """)
+    except Exception:
+        # API can start before the ingestion worker has created its cursor table.
+        cursor = None
     checkpoint = {
         'status': 'checkpoint_hash_recorded' if cursor and cursor['block_hash'] else 'not_verified',
         'checkpoint_block': cursor['last_block'] if cursor else None,

@@ -84,7 +84,7 @@ async def list_flagged(
     rows = await repo.list_flagged(min_score=min_score, limit=limit)
     return TransactionListResponse(
         transactions=[_format_tx(r) for r in rows],
-        total=len(rows),
+        total=await repo.count_flagged(min_score=min_score),
         limit=limit,
         offset=0,
     )
@@ -98,7 +98,6 @@ async def get_stats(
     """Get system-wide statistics."""
     total_txs = await tx_repo.count()
     total_addrs = await addr_repo.count()
-    flagged = await tx_repo.list_flagged(min_score=20, limit=10000)
 
     stats = await tx_repo.db.fetchrow("""
         SELECT 
@@ -111,7 +110,7 @@ async def get_stats(
     return StatsResponse(
         total_transactions=total_txs,
         total_addresses=total_addrs,
-        flagged_transactions=len(flagged),
+        flagged_transactions=await tx_repo.count_flagged(min_score=20),
         avg_risk_score=round(float(stats['avg_score']), 2),
         max_risk_score=int(stats['max_score']),
         explained_transactions=int(stats['explained']),

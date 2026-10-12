@@ -146,3 +146,31 @@ async def test_rejects_malicious_lookalike_alchemy_host(monkeypatch):
     with pytest.raises(HTTPException) as error:
         await routes.wallet_indexed_transfers("0x" + "a" * 40)
     assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_only_pending_direction_is_queried(monkeypatch):
+    address = "0x" + "a" * 40
+    class Settings:
+        ethereum_rpc_url = "https://eth-mainnet.g.alchemy.com/v2/test"
+    calls = []
+    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None):
+        calls.append((direction, page_key))
+        return {"transfers": [], "pageKey": None}
+    monkeypatch.setattr(routes, "get_settings", lambda: Settings())
+    monkeypatch.setattr(routes, "_transfer_page", fake_page)
+    result = await routes.wallet_indexed_transfers(
+        address, 25, None, "next-incoming", False, True
+    )
+    assert calls == [("toAddress", "next-incoming")]
+    assert result["queried_directions"] == ["incoming"]
+    assert result["outgoing_next_page_key"] is None
+
+
+@pytest.mark.asyncio
+async def test_both_directions_disabled_is_invalid():
+    with pytest.raises(HTTPException) as error:
+        await routes.wallet_indexed_transfers(
+            "0x" + "a" * 40, 25, None, None, False, False
+        )
+    assert error.value.status_code == 422

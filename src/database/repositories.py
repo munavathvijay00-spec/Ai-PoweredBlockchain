@@ -42,22 +42,14 @@ class AddressRepository:
         return await self.db.fetchval(query, address.lower())
 
     async def get_blacklisted_set(self, addresses: list) -> set:
-        """Return manual blacklist and verified OFAC ETH matches."""
+        """Return manually blacklisted addresses only."""
         if not addresses:
             return set()
         normalized = [a.lower() for a in addresses]
-        try:
-            rows = await self.db.fetch("""
-                SELECT address FROM blacklist WHERE lower(address) = ANY($1::text[])
-                UNION
-                SELECT address FROM verified_address_intelligence
-                WHERE source = 'OFAC_SDN_ETH' AND address = ANY($1::text[])
-            """, normalized)
-        except Exception as exc:
-            logger.warning(f'Verified intelligence lookup unavailable; using manual blacklist: {exc}')
-            rows = await self.db.fetch("""
-                SELECT address FROM blacklist WHERE lower(address) = ANY($1::text[])
-            """, normalized)
+        rows = await self.db.fetch(
+            "SELECT address FROM blacklist WHERE lower(address) = ANY($1::text[])",
+            normalized,
+        )
         return {row['address'].lower() for row in rows}
 
     async def get_verified_matches(self, addresses: list) -> dict:

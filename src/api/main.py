@@ -9,6 +9,7 @@ from loguru import logger
 from prometheus_client import generate_latest, REGISTRY
 
 from src.api.routes import router
+from src.api.agent_routes import router as agent_router
 from src.api.models import HealthResponse
 from src.database.connection import get_db, close_db
 from src.utils.config import get_settings
@@ -43,6 +44,7 @@ app.add_middleware(
 
 # Include all API routes
 app.include_router(router)
+app.include_router(agent_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])

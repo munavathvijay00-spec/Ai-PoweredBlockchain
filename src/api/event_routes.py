@@ -28,7 +28,6 @@ async def transaction_events(tx_hash: str):
             w3 = AsyncWeb3(provider)
             try:
                 receipt = await asyncio.wait_for(w3.eth.get_transaction_receipt(tx_hash), timeout=10)
-            finally:
                 decoded = decode_receipt(dict(receipt))
                 contracts = list(dict.fromkeys(e['contract'] for e in decoded['events'] if e.get('standard') == 'ERC20-compatible'))[:8]
                 if contracts:

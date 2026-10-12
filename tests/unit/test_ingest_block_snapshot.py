@@ -29,3 +29,8 @@ def test_hash_only_transactions_rejected():
 def test_missing_transaction_payload_rejected():
     with pytest.raises(ValueError, match="Full transaction"):
         validate_block_snapshot({"number": 123}, 123)
+
+
+def test_empty_block_without_canonical_hash_rejected():
+    with pytest.raises(ValueError, match="Canonical block hash missing"):
+        validate_block_snapshot({"number": 123, "transactions": []}, 123)

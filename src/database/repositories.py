@@ -265,10 +265,10 @@ class TransactionRepository:
             FROM transactions t
             JOIN addresses a_from ON t.from_address_id = a_from.id
             JOIN addresses a_to ON t.to_address_id = a_to.id
-            ORDER BY t.timestamp DESC
-            LIMIT $1
+            ORDER BY t.timestamp DESC, t.id DESC
+            LIMIT $1 OFFSET $2
         """
-        return await self.db.fetch(query, limit)
+        return await self.db.fetch(query, limit, offset)
 
     async def list_all(self, limit: int = 1000) -> List[Dict]:
         """Fetch all transactions for batch risk scoring."""

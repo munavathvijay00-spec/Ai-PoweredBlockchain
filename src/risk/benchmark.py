@@ -15,6 +15,7 @@ def evaluate_labeled_cases(cases):
             raise ValueError("invalid benchmark label or prediction")
         if prediction == "insufficient_evidence":
             counts["abstained"] += 1
+            counts["false_negative" if label == 1 else "true_negative"] += 1
             continue
         if label == 1:
             counts["true_positive"] += 1
@@ -22,21 +23,20 @@ def evaluate_labeled_cases(cases):
             counts["false_positive"] += 1
     n = len(cases)
     tp, fp = counts["true_positive"], counts["false_positive"]
-    # There is no negative decision in the current evidence classifier.
-    # FN/TN are not measurable until a validated negative decision exists.
+    # Operational triage evaluation: an abstained positive is a missed alert.\n    # Abstention is NOT a claim that the transaction is benign.
     return {
         "sample_size": n,
         "reviewed": tp + fp,
         "abstained": counts["abstained"],
         "true_positive": tp,
         "false_positive": fp,
-        "false_negative": None,
-        "true_negative": None,
+        "false_negative": counts["false_negative"],
+        "true_negative": counts["true_negative"],
         "precision_on_reviewed": tp / (tp + fp) if tp + fp else None,
-        "recall": None,
-        "false_positive_rate": None,
-        "false_negative_rate": None,
+        "recall": tp / (tp + counts["false_negative"]) if tp + counts["false_negative"] else None,
+        "false_positive_rate": fp / (fp + counts["true_negative"]) if fp + counts["true_negative"] else None,
+        "false_negative_rate": counts["false_negative"] / (tp + counts["false_negative"]) if tp + counts["false_negative"] else None,
         "coverage": (tp + fp) / n if n else None,
         "calibrated": False,
-        "note": "Abstentions are not negatives. No probability or sensitivity claims without a representative, independently labeled validation set.",
+        "note": "Operational missed-alert accounting counts abstained positives as false negatives; abstention is not a benign classification. Rates are meaningful only with a representative, independently labeled validation set.",
     }

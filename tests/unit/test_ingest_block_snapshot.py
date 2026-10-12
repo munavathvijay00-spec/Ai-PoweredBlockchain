@@ -4,7 +4,15 @@ from src.ingest.worker import validate_block_snapshot
 
 
 def test_valid_full_block_snapshot():
-    validate_block_snapshot({"number": 123, "transactions": [{"hash": "0xabc"}]}, 123)
+    validate_block_snapshot({
+        "number": 123,
+        "hash": "0x" + "a" * 64,
+        "transactions": [{
+            "hash": "0x" + "b" * 64,
+            "blockNumber": 123,
+            "blockHash": "0x" + "a" * 64,
+        }],
+    }, 123)
     validate_block_snapshot({"number": 123, "transactions": []}, 123)
 
 

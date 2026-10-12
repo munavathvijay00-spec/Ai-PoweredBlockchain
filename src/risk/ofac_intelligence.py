@@ -82,6 +82,16 @@ async def sync_ofac(db, payload: bytes):
                     PRIMARY KEY (source, address)
                 )
             """)
+            previous_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM verified_address_intelligence WHERE source = $1", SOURCE
+            )
+            # Reject a sudden large drop: a partially downloaded CSV can be valid CSV.
+            # Keep the last known-good sanctions snapshot until reviewed.
+            if previous_count >= 10 and len(matches) < previous_count // 2:
+                raise ValueError(
+                    f"OFAC feed unexpectedly shrank from {previous_count} to "
+                    f"{len(matches)} ETH addresses; preserving existing snapshot"
+                )
             await conn.execute("DELETE FROM verified_address_intelligence WHERE source = $1", SOURCE)
             await conn.executemany("""
                 INSERT INTO verified_address_intelligence

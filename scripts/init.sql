@@ -73,3 +73,13 @@ CREATE INDEX IF NOT EXISTS idx_blacklist_address ON blacklist(address);
 -- Note: Do NOT seed the null address (0x0000...0000) into the blacklist.
 -- It is used for legitimate contract creation and burns.
 -- Real blacklist entries should be known scammers/sanctioned addresses only.
+-- Source-attributed verified sanctions intelligence, separate from manual blacklist.
+CREATE TABLE IF NOT EXISTS verified_address_intelligence (
+    source TEXT NOT NULL,
+    address VARCHAR(42) NOT NULL,
+    entity_id TEXT NOT NULL,
+    entity_name TEXT NOT NULL,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (source, address)
+);
+CREATE INDEX IF NOT EXISTS idx_verified_intelligence_address ON verified_address_intelligence(address);

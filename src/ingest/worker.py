@@ -13,6 +13,7 @@ from src.database.connection import get_db, close_db
 from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
+from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
 
 from src.metrics import (
     ingest_blocks_total,
@@ -62,6 +63,7 @@ async def process_one_block(
 
         # 6. Bulk fetch blacklist (1 query)
         blacklist_set = await addresses.get_blacklisted_set(addresses_list)
+        verified_matches = await addresses.get_verified_matches(addresses_list)
 
         # 7. Score in-memory
         scores = []
@@ -77,6 +79,22 @@ async def process_one_block(
                     address_history=[],
                     is_blacklisted=is_black,
                 )
+                # Add independently verifiable source evidence, not an AI claim.
+                matched = [verified_matches[a.lower()] for a in
+                           (tx['from_address'], tx['to_address']) if a.lower() in verified_matches]
+                if matched:
+                    result['factors'] = [f for f in result['factors'] if f['factor'] != 'blacklisted_address']
+                    for evidence in matched:
+                        result['factors'].append({
+                            'factor': 'verified_sanctions_match',
+                            'points': 100,
+                            'reason': 'Exact Ethereum address match in OFAC SDN sanctions data',
+                            'source': evidence['source'],
+                            'address': evidence['address'],
+                            'entity_id': evidence['entity_id'],
+                            'entity_name': evidence['entity_name'],
+                            'checked_at': evidence['checked_at'].isoformat(),
+                        })
                 scores.append({
                     'hash': tx['hash'],
                     'score': result['score'],
@@ -143,6 +161,8 @@ async def run_once() -> Dict:
     await client.connect()
 
     db = await get_db()
+    await ensure_intelligence_schema(db)
+    await refresh_ofac(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()

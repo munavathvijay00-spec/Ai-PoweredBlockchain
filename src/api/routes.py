@@ -13,6 +13,7 @@ from src.api.models import (
     StatsResponse,
 )
 from src.api.dependencies import get_transaction_repo, get_address_repo
+from src.risk.evidence_v2 import assess_evidence
 from src.database.repositories import TransactionRepository, AddressRepository
 
 
@@ -41,6 +42,7 @@ def _format_tx(row: dict) -> TransactionResponse:
         risk_score=row.get('risk_score', 0),
         ai_explanation=row.get('ai_explanation'),
         risk_factors=[factor for factor in factors if isinstance(factor, dict)],
+        evidence_assessment=assess_evidence(factors, row['hash']),
     )
 
 

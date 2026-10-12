@@ -5,6 +5,7 @@ Manages concurrent database access efficiently.
 import asyncpg
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from loguru import logger
 
 from src.utils.config import get_settings
@@ -23,6 +24,7 @@ class Database:
     
     def __init__(self):
         self.pool: Optional[asyncpg.Pool] = None
+        self._transaction_connection = ContextVar('db_transaction_connection', default=None)
         settings = get_settings()
         self.dsn = settings.database_url
     
@@ -47,12 +49,31 @@ class Database:
             return False
     
     @asynccontextmanager
+    async def transaction(self):
+        """Route all repository calls in this task through one atomic DB transaction."""
+        if not self.pool:
+            raise RuntimeError('Database not connected')
+        if self._transaction_connection.get() is not None:
+            raise RuntimeError('Nested ingestion transactions are not supported')
+        async with self.pool.acquire() as conn:
+            token = self._transaction_connection.set(conn)
+            try:
+                async with conn.transaction():
+                    yield
+            finally:
+                self._transaction_connection.reset(token)
+
+    @asynccontextmanager
     async def acquire(self):
         """Context manager for acquiring a connection."""
         if not self.pool:
             raise RuntimeError("Database not connected. Call connect() first.")
-        async with self.pool.acquire() as conn:
-            yield conn
+        active = self._transaction_connection.get()
+        if active is not None:
+            yield active
+        else:
+            async with self.pool.acquire() as conn:
+                yield conn
     
     async def execute(self, query: str, *args) -> str:
         """Execute a query (INSERT/UPDATE/DELETE)."""

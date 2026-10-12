@@ -44,6 +44,8 @@ async def wallet_profile(
         "timeline": [dict(r) for r in rows],
         "counterparties": sorted(counterparties.values(), key=lambda x: -x["observed_transactions"]),
         "truncated": truncated,
-        "scope": "Only transactions stored by this platform; not full Ethereum wallet history.",
+        "scope": "Only transactions stored by this platform; not full Ethereum wallet history. Current ingestion deletes transactions older than 30 minutes.",
+        "historical_completeness": False,
+        "coverage_url": "/api/coverage",
         "token_activity": {"status": "not_indexed", "note": "Token logs are decoded on demand, not persisted."},
     }

@@ -17,7 +17,8 @@ class TransactionResponse(BaseModel):
     block_number: int = Field(..., description="Block number containing this tx")
     timestamp: datetime = Field(..., description="Block timestamp")
     risk_score: int = Field(..., ge=0, le=100, description="Risk score 0-100")
-    ai_explanation: Optional[str] = Field(None, description="AI-generated explanation")
+    ai_explanation: Optional[str] = Field(None, description="AI or deterministic evidence-based explanation")
+    risk_factors: List[Dict] = Field(default_factory=list, description="Recorded scoring evidence")
 
     class Config:
         json_schema_extra = {

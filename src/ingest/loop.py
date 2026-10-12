@@ -20,7 +20,7 @@ from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
-from src.ingest.cursor import ensure_cursor_schema, load_cursor_checkpoint, save_cursor_checkpoint
+from src.ingest.cursor import ensure_cursor_schema, load_cursor_checkpoint, save_cursor_checkpoint, backfill_cursor_hash
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
@@ -102,6 +102,16 @@ async def ingest_loop(interval_seconds: int = 15):
                     log_ingestion_health(latest_block, last_processed_block)
                     logger.warning('Chain head below saved checkpoint; waiting for recovery')
                     continue
+
+                if last_processed_block is not None and last_block_hash is None:
+                    # Legacy checkpoints predate block-hash tracking. Anchor their
+                    # current height before processing successors, without claiming
+                    # that older retained records were historically verified.
+                    legacy_block = await client.get_block(last_processed_block)
+                    last_block_hash = await backfill_cursor_hash(
+                        db, last_processed_block, _block_hash(legacy_block['hash'])
+                    )
+                    logger.warning('Legacy checkpoint anchored at block %s; earlier data is not reorg-verified', last_processed_block)
 
                 # A stored hash is an immutable chain continuity assertion.
                 # Stop rather than silently mix orphaned transfers into evidence.

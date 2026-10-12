@@ -254,7 +254,7 @@ class TransactionRepository:
         """
         return await self.db.fetchrow(query, tx_hash)
 
-    async def list_recent(self, limit: int = 10) -> List[Dict]:
+    async def list_recent(self, limit: int = 10, offset: int = 0) -> List[Dict]:
         """List recent transactions."""
         query = """
             SELECT 
@@ -281,10 +281,10 @@ class TransactionRepository:
             FROM transactions t
             JOIN addresses a_from ON t.from_address_id = a_from.id
             JOIN addresses a_to ON t.to_address_id = a_to.id
-            ORDER BY t.block_number DESC
-            LIMIT $1
+            ORDER BY t.block_number DESC, t.id DESC
+            LIMIT $1 OFFSET $2
         """
-        return await self.db.fetch(query, limit)
+        return await self.db.fetch(query, limit, offset)
 
     async def list_flagged(self, min_score: int = 20, limit: int = 100) -> List[Dict]:
         """Fetch flagged transactions."""

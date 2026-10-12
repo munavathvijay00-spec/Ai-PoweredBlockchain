@@ -36,6 +36,15 @@ def _handle_shutdown(signum, frame):
     logger.info("🛑 Shutdown requested. Finishing current iteration...")
 
 
+def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list[int]:
+    """Return contiguous, bounded block numbers; no duplicates at a stable tip."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    if last_processed is None or latest < last_processed:
+        last_processed = latest - 1
+    return list(range(last_processed + 1, min(latest, last_processed + limit) + 1))
+
+
 async def ingest_loop(interval_seconds: int = 15):
     """Infinite loop: fetch latest block → process → sleep → repeat."""
     logger.info(f"🚀 Starting ingest loop (interval: {interval_seconds}s)")
@@ -77,12 +86,8 @@ async def ingest_loop(interval_seconds: int = 15):
                 logger.info(f"[{now}] 🔄 Iteration {iteration} — fetching latest block...")
 
                 latest_block = await client.get_latest_block_number()
-                if last_processed_block is None:
-                    # Start near the tip; do not backfill unbounded history at startup.
-                    last_processed_block = latest_block - 1
-
-                if latest_block < last_processed_block:
-                    logger.warning("Chain head moved backwards; resetting in-process cursor")
+                if last_processed_block is None or latest_block < last_processed_block:
+                    # Start at tip on restart; reset if the chain head moves backwards.
                     last_processed_block = latest_block - 1
 
                 pending = latest_block - last_processed_block
@@ -91,9 +96,8 @@ async def ingest_loop(interval_seconds: int = 15):
                         f"Block catch-up: {pending} pending; "
                         f"processing up to {max_blocks_per_iteration} sequentially"
                     )
-                for block_number in range(
-                    last_processed_block + 1,
-                    min(latest_block, last_processed_block + max_blocks_per_iteration) + 1,
+                for block_number in next_blocks(
+                    last_processed_block, latest_block, max_blocks_per_iteration
                 ):
                     summary = await process_one_block(
                         client, normalizer, transactions, addresses, scorer, explainer,

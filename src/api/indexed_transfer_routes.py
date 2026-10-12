@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/wallets", tags=["wallet intelligence"])
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
-async def _transfer_page(session, rpc_url, address, direction, count):
+async def _transfer_page(session, rpc_url, address, direction, count, page_key=None):
     query = {
         "fromBlock": "0x0",
         "toBlock": "latest",
@@ -24,6 +24,8 @@ async def _transfer_page(session, rpc_url, address, direction, count):
         "maxCount": hex(count),
         "order": "desc",
     }
+    if page_key:
+        query["pageKey"] = page_key
     payload = {
         "jsonrpc": "2.0",
         "id": 1 if direction == "fromAddress" else 2,
@@ -46,6 +48,8 @@ async def _transfer_page(session, rpc_url, address, direction, count):
 async def wallet_indexed_transfers(
     address: str,
     per_direction: int = Query(25, ge=1, le=50),
+    outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
 ):
     if not ADDRESS.fullmatch(address):
         raise HTTPException(status_code=422, detail="Invalid Ethereum address")
@@ -58,8 +62,8 @@ async def wallet_indexed_transfers(
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             outgoing, incoming = await asyncio.gather(
-                _transfer_page(session, rpc_url, address, "fromAddress", per_direction),
-                _transfer_page(session, rpc_url, address, "toAddress", per_direction),
+                _transfer_page(session, rpc_url, address, "fromAddress", per_direction, outgoing_page_key),
+                _transfer_page(session, rpc_url, address, "toAddress", per_direction, incoming_page_key),
             )
     except (aiohttp.ClientError, asyncio.TimeoutError):
         raise HTTPException(status_code=502, detail="Transfer provider timed out or failed")
@@ -88,9 +92,11 @@ async def wallet_indexed_transfers(
         "transfers": list(unique.values()),
         "returned": len(unique),
         "per_direction_limit": per_direction,
+        "outgoing_next_page_key": outgoing.get("pageKey"),
+        "incoming_next_page_key": incoming.get("pageKey"),
         "outgoing_has_more": bool(outgoing.get("pageKey")),
         "incoming_has_more": bool(incoming.get("pageKey")),
         "historical_completeness": False,
-        "coverage": "One newest-first page per direction; external ETH and ERC-20 transfers only. Internal transfers, NFTs, and complete historical pagination are excluded.",
+        "coverage": "Cursor-paginated newest-first external ETH and ERC-20 transfers. Request subsequent pages using returned per-direction page keys. Internal transfers, NFTs, and completeness beyond indexed categories are excluded.",
         "warning": "No matching transfers in this bounded query is not evidence of wallet inactivity.",
     }

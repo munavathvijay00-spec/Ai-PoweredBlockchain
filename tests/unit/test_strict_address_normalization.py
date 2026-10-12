@@ -13,9 +13,6 @@ def test_valid_address_normalizes_case():
     "0x" + "b" * 41 + "0", "not_an_address",
 ])
 def test_malformed_address_rejected(invalid):
-    if invalid == "0x" + "b" * 41 + "0":
-        # Valid 40-byte-looking prefix with one extra nibble must be rejected.
-        pass
     with pytest.raises(ValueError, match="Invalid Ethereum address"):
         TransactionNormalizer._to_address_string(invalid)
 

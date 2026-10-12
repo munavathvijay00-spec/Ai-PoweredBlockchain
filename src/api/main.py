@@ -12,6 +12,7 @@ from src.api.routes import router
 from src.api.agent_routes import router as agent_router
 from src.api.event_routes import router as event_router
 from src.api.wallet_routes import router as wallet_router
+from src.api.coverage_routes import router as coverage_router
 from src.api.models import HealthResponse
 from src.database.connection import get_db, close_db
 from src.utils.config import get_settings
@@ -49,6 +50,7 @@ app.include_router(router)
 app.include_router(agent_router)
 app.include_router(event_router)
 app.include_router(wallet_router)
+app.include_router(coverage_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])

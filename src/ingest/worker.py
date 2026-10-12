@@ -12,6 +12,7 @@ from src.blockchain.normalizer import TransactionNormalizer
 from src.database.connection import get_db, close_db
 from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
+from src.risk.evidence_v2 import assess_evidence
 from src.risk.behavior import analyze_block_behavior, apply_behavior_risk
 from src.agents.explainer import get_explainer, evidence_explanation
 
@@ -119,7 +120,12 @@ async def process_one_block(
                     ),
                 })
 
-        ai_candidates = flagged_scores[:3]
+        # Do not ask an LLM to dramatize amount-only heuristic findings.
+        # AI wording is limited to transactions with observed behavioral evidence.
+        ai_candidates = [
+            item for item in flagged_scores
+            if assess_evidence(item['factors'], item['hash'])['assessment'] == 'review'
+        ][:3]
         tasks = []
         task_scores = []
         for item in ai_candidates:

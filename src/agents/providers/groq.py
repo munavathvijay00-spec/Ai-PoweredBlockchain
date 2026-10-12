@@ -45,6 +45,6 @@ _provider: Optional[GroqProvider] = None
 
 def get_groq_provider(api_key: str, model: str = DEFAULT_MODEL) -> GroqProvider:
     global _provider
-    if _provider is None:
+    if _provider is None or _provider.model != model:
         _provider = GroqProvider(api_key=api_key, model=model)
     return _provider

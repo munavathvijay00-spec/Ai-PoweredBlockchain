@@ -82,7 +82,7 @@ async def ingest_loop(interval_seconds: int = 15):
                     f"Flagged: {total_flagged}"
                 )
 
-                # Retention cleanup — every 100 iterations (~25 min)
+                # Retention cleanup — every 10 iterations (~2.5 min at 15s interval)
                 if iteration % 10 == 0:
                     try:
                         deleted = await db.execute("""
@@ -90,6 +90,29 @@ async def ingest_loop(interval_seconds: int = 15):
                             WHERE timestamp < NOW() - INTERVAL '30 minutes'
                         """)
                         logger.info(f"🗑️ Retention cleanup: {deleted}")
+                        # Transaction cleanup leaves unreferenced addresses behind.
+                        # Preserve addresses used by transactions/alerts and curated records.
+                        orphaned = await db.execute("""
+                            WITH candidates AS (
+                                SELECT a.id FROM addresses a
+                                WHERE NOT EXISTS (
+                                    SELECT 1 FROM transactions t
+                                    WHERE t.from_address_id = a.id
+                                       OR t.to_address_id = a.id
+                                )
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM alerts al WHERE al.address_id = a.id
+                                )
+                                AND a.label IS NULL
+                                AND a.is_blacklisted IS NOT TRUE
+                                AND COALESCE(a.risk_score, 0) = 0
+                                AND COALESCE(a.metadata, '{}'::jsonb) = '{}'::jsonb
+                                ORDER BY a.id LIMIT 1000
+                            )
+                            DELETE FROM addresses a USING candidates c
+                            WHERE a.id = c.id
+                        """)
+                        logger.info(f"🧹 Orphaned address cleanup: {orphaned}")
                     except Exception as cleanup_err:
                         logger.warning(f"Cleanup error (non-fatal): {cleanup_err}")
 

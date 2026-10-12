@@ -2,6 +2,7 @@
 AI-powered transaction explainer.
 Supports multiple LLM providers: Ollama (local) and Groq (cloud).
 """
+import asyncio
 import httpx
 from typing import Dict, List, Optional
 from loguru import logger
@@ -19,6 +20,7 @@ class TransactionExplainer:
         self.model = self.settings.llm_model
         self.ollama_url = self.settings.ollama_url
         self.enabled = True
+        self._semaphore = asyncio.Semaphore(3)
         logger.info(
             f"🧠 Explainer initialized "
             f"(provider={self.provider}, model={self.model})"
@@ -26,11 +28,10 @@ class TransactionExplainer:
 
     def _build_prompt(self, tx: Dict, factors: List[Dict]) -> str:
         """Build a structured prompt from transaction data + risk factors."""
-        value_eth = tx['value'] / 10**18
-        usd_approx = value_eth * 2500
+        value_eth = int(tx.get('value') or 0) / 10**18
 
         factor_lines = []
-        for f in factors:
+        for f in (factors or []):
             factor_lines.append(
                 f"- {f.get('factor', 'unknown')}: "
                 f"{f.get('reason', 'no reason')} "
@@ -41,9 +42,9 @@ class TransactionExplainer:
         return f"""You are a blockchain security analyst. Explain to a non-technical user why this Ethereum transaction was flagged as risky. Use exactly 2-3 sentences.
 
 Transaction data:
-- Amount: {value_eth:.4f} ETH (approximately ${usd_approx:,.0f} USD)
-- From address: {tx.get('from_address', 'unknown')[:10]}...
-- To address: {tx.get('to_address', 'unknown')[:10]}...
+- Amount: {value_eth:.4f} ETH
+- From address: {str(tx.get('from_address') or 'unknown')[:10]}...
+- To address: {str(tx.get('to_address') or 'unknown')[:10]}...
 - Block number: {tx.get('block_number', 0)}
 - Risk score: {tx.get('risk_score', 0)}/100
 
@@ -78,25 +79,24 @@ Write a clear, specific explanation. Avoid technical jargon."""
 
     async def explain(self, tx: Dict, factors: List[Dict]) -> Optional[str]:
         """Generate a plain-English explanation. Returns None if provider unavailable."""
-        if not self.enabled:
-            return None
-
         try:
             prompt = self._build_prompt(tx, factors)
 
-            if self.provider == "ollama":
-                explanation = await self._call_ollama(prompt)
-            elif self.provider == "groq":
-                explanation = await self._call_groq(prompt)
-            else:
-                logger.warning(f"Provider '{self.provider}' not implemented")
-                return None
-
+            async with self._semaphore:
+                if self.provider == "ollama":
+                    explanation = await self._call_ollama(prompt)
+                elif self.provider == "groq":
+                    if not self.settings.groq_api_key or self.settings.groq_api_key == 'not-set':
+                        logger.warning('GROQ_API_KEY is missing; cannot generate AI explanations')
+                        return None
+                    explanation = await self._call_groq(prompt)
+                else:
+                    logger.warning(f"Provider '{self.provider}' not implemented")
+                    return None
             return explanation or None
 
         except Exception as e:
-            logger.warning(f"Explainer unavailable ({type(e).__name__}): {e}. Disabling.")
-            self.enabled = False
+            logger.warning(f"Explainer request failed ({type(e).__name__}): {e}; future requests will retry.")
             return None
 
 

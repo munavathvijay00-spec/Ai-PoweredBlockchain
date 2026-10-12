@@ -59,6 +59,7 @@ async def process_one_block(
     explainer,
     block_number: int | None = None,
     prefetched_block: Dict | None = None,
+    allow_external_ai: bool = True,
 ) -> Dict:
     """Fetch the latest block, store transactions using bulk ops, score + explain."""
     start_time = time.time()
@@ -166,7 +167,7 @@ async def process_one_block(
                 ))
                 task_scores.append(item)
 
-        if tasks:
+        if tasks and allow_external_ai:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             overrides = {}
             for item, result in zip(task_scores, results):

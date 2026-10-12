@@ -142,7 +142,7 @@ function App() {
         </div>
 
         <TransactionList transactions={filtered} onSelect={inspectTransaction} />
-        </>
+        </>}
       </main>
 
       <footer className="text-center text-slate-600 text-xs py-8">

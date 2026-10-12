@@ -14,7 +14,7 @@ from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
-from src.risk.wallet_exposure import (find_direct_exposures, save_direct_exposures,
+from src.risk.wallet_exposure import (ensure_exposure_schema, find_direct_exposures, save_direct_exposures,
                                       get_direct_exposures, apply_exposure_risk)
 
 from src.metrics import (
@@ -171,6 +171,7 @@ async def run_once() -> Dict:
 
     db = await get_db()
     await ensure_intelligence_schema(db)
+    await ensure_exposure_schema(db)
     await refresh_ofac(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)

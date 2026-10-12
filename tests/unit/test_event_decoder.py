@@ -1,6 +1,6 @@
 """Deterministic receipt decoding regression tests."""
 from src.blockchain.event_decoder import (
-    APPROVAL, SWAP_V2, TRANSFER, decode_log, decode_receipt,
+    APPROVAL, SWAP_V2, TRANSFER, TRANSFER_SINGLE, decode_log, decode_receipt,
 )
 
 A = "0x" + "1" * 40
@@ -68,3 +68,11 @@ def test_bounded_decoding_reports_truncation():
 
 def test_unknown_signature_is_not_assumed_token():
     assert decode_log(log("0x" + "0" * 64, [topic(A)])) is None
+
+
+def test_erc1155_single():
+    data = "0x" + format(44, "064x") + format(200, "064x")
+    event = decode_log(log(TRANSFER_SINGLE, [topic(A), topic(A), topic(B)], data))
+    assert event["standard"] == "ERC1155-compatible"
+    assert event["token_id"] == "44"
+    assert event["raw_amount"] == "200"

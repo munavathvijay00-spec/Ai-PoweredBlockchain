@@ -55,3 +55,22 @@ async def save_cursor_checkpoint(db, block_number: int, block_hash: str):
             updated_at = NOW()
         WHERE ingest_cursor.last_block < EXCLUDED.last_block
     """, CURSOR_KEY, block_number, block_hash)
+
+
+async def backfill_cursor_hash(db, block_number: int, block_hash: str) -> str:
+    """Fill a legacy NULL hash only at the unchanged cursor height.
+
+    Never overwrite an existing hash or alter the saved height. A concurrent
+    cursor advance must cause this operation to fail closed.
+    """
+    if not isinstance(block_hash, str) or not block_hash.startswith("0x") or len(block_hash) != 66:
+        raise ValueError("Expected a 32-byte block hash")
+    row = await db.fetchrow("""
+        UPDATE ingest_cursor
+        SET block_hash = $3, updated_at = NOW()
+        WHERE stream = $1 AND last_block = $2 AND block_hash IS NULL
+        RETURNING block_hash
+    """, CURSOR_KEY, block_number, block_hash)
+    if not row:
+        raise RuntimeError("CHECKPOINT_CONFLICT: legacy cursor changed during hash backfill")
+    return row["block_hash"]

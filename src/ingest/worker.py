@@ -13,6 +13,7 @@ from src.database.connection import get_db, close_db
 from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
+from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
 
 from src.metrics import (
     ingest_blocks_total,
@@ -143,6 +144,8 @@ async def run_once() -> Dict:
     await client.connect()
 
     db = await get_db()
+    await ensure_intelligence_schema(db)
+    await refresh_ofac(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()

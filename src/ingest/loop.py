@@ -20,6 +20,8 @@ from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
+from src.ingest.address_retention import prune_addresses
+import os
 
 
 _shutdown_requested = False
@@ -90,24 +92,11 @@ async def ingest_loop(interval_seconds: int = 15):
                             WHERE timestamp < NOW() - INTERVAL '30 minutes'
                         """)
                         logger.info(f"🗑️ Retention cleanup: {deleted}")
-                        # Observe orphan growth first. No automatic address deletion.
-                        orphan_count = await db.fetchval("""
-                            SELECT COUNT(*) FROM addresses a
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM transactions t
-                                WHERE t.from_address_id = a.id OR t.to_address_id = a.id
-                            )
-                            AND NOT EXISTS (
-                                SELECT 1 FROM alerts al WHERE al.address_id = a.id
-                            )
-                            AND a.label IS NULL
-                            AND a.is_blacklisted IS NOT TRUE
-                            AND COALESCE(a.risk_score, 0) = 0
-                            AND COALESCE(a.metadata, '{}'::jsonb) = '{}'::jsonb
-                        """)
-                        logger.warning(
-                            f"📦 Eligible orphaned addresses: {orphan_count}; "
-                            "automatic address deletion is disabled pending backup and review"
+                        await prune_addresses(
+                            db,
+                            enabled=os.getenv("ADDRESS_CLEANUP_ENABLED", "false").lower() == "true",
+                            batch_size=250,
+                            minutes=30,
                         )
                     except Exception as cleanup_err:
                         logger.warning(f"Cleanup error (non-fatal): {cleanup_err}")

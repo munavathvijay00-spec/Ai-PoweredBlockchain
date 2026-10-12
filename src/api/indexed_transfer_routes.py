@@ -100,3 +100,51 @@ async def wallet_indexed_transfers(
         "coverage": "Cursor-paginated newest-first external ETH and ERC-20 transfers. Request subsequent pages using returned per-direction page keys. Internal transfers, NFTs, and completeness beyond indexed categories are excluded.",
         "warning": "No matching transfers in this bounded query is not evidence of wallet inactivity.",
     }
+
+
+@router.get("/{address}/indexed-graph")
+async def wallet_indexed_graph(
+    address: str,
+    per_direction: int = Query(25, ge=1, le=50),
+    outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
+):
+    """One-hop, evidence-backed graph from the same Alchemy transfer source."""
+    result = await wallet_indexed_transfers(
+        address, per_direction, outgoing_page_key, incoming_page_key
+    )
+    root = address.lower()
+    nodes = {root}
+    edges = []
+    for transfer in result["transfers"]:
+        source = (transfer.get("from_address") or "").lower()
+        target = (transfer.get("to_address") or "").lower()
+        tx_hash = transfer.get("hash")
+        if not ADDRESS.fullmatch(source) or not ADDRESS.fullmatch(target) or not tx_hash:
+            continue
+        nodes.update((source, target))
+        edges.append({
+            "source": source,
+            "target": target,
+            "tx_hash": tx_hash,
+            "asset": transfer.get("asset"),
+            "category": transfer.get("category"),
+            "value": transfer.get("value"),
+            "block_number_hex": transfer.get("block_number_hex"),
+            "evidence_url": transfer.get("evidence_url"),
+            "relationship": "indexed_transfer",
+        })
+    return {
+        "root": root,
+        "chain_id": 1,
+        "depth": 1,
+        "nodes": [{"id": item, "type": "address"} for item in sorted(nodes)],
+        "edges": edges,
+        "next_page_keys": {
+            "outgoing": result["outgoing_next_page_key"],
+            "incoming": result["incoming_next_page_key"],
+        },
+        "historical_completeness": False,
+        "scope": result["coverage"],
+        "provenance_warning": "Transfer edges establish recorded movements, not common ownership, laundering, beneficial ownership, or final destination.",
+    }

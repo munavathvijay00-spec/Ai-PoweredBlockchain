@@ -31,7 +31,7 @@ def test_mismatched_transaction_height_rejected():
 
 
 def test_transaction_block_hash_without_header_hash_rejected():
-    with pytest.raises(ValueError, match="block hash differs"):
+    with pytest.raises(ValueError, match="Canonical block hash missing"):
         validate_block_snapshot({
             "number": 123,
             "transactions": [{"blockNumber": 123, "blockHash": BLOCK_HASH}],

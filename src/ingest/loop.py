@@ -90,29 +90,25 @@ async def ingest_loop(interval_seconds: int = 15):
                             WHERE timestamp < NOW() - INTERVAL '30 minutes'
                         """)
                         logger.info(f"🗑️ Retention cleanup: {deleted}")
-                        # Transaction cleanup leaves unreferenced addresses behind.
-                        # Preserve addresses used by transactions/alerts and curated records.
-                        orphaned = await db.execute("""
-                            WITH candidates AS (
-                                SELECT a.id FROM addresses a
-                                WHERE NOT EXISTS (
-                                    SELECT 1 FROM transactions t
-                                    WHERE t.from_address_id = a.id
-                                       OR t.to_address_id = a.id
-                                )
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM alerts al WHERE al.address_id = a.id
-                                )
-                                AND a.label IS NULL
-                                AND a.is_blacklisted IS NOT TRUE
-                                AND COALESCE(a.risk_score, 0) = 0
-                                AND COALESCE(a.metadata, '{}'::jsonb) = '{}'::jsonb
-                                ORDER BY a.id LIMIT 1000
+                        # Observe orphan growth first. No automatic address deletion.
+                        orphan_count = await db.fetchval("""
+                            SELECT COUNT(*) FROM addresses a
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM transactions t
+                                WHERE t.from_address_id = a.id OR t.to_address_id = a.id
                             )
-                            DELETE FROM addresses a USING candidates c
-                            WHERE a.id = c.id
+                            AND NOT EXISTS (
+                                SELECT 1 FROM alerts al WHERE al.address_id = a.id
+                            )
+                            AND a.label IS NULL
+                            AND a.is_blacklisted IS NOT TRUE
+                            AND COALESCE(a.risk_score, 0) = 0
+                            AND COALESCE(a.metadata, '{}'::jsonb) = '{}'::jsonb
                         """)
-                        logger.info(f"🧹 Orphaned address cleanup: {orphaned}")
+                        logger.warning(
+                            f"📦 Eligible orphaned addresses: {orphan_count}; "
+                            "automatic address deletion is disabled pending backup and review"
+                        )
                     except Exception as cleanup_err:
                         logger.warning(f"Cleanup error (non-fatal): {cleanup_err}")
 

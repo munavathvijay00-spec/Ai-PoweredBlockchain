@@ -1,3 +1,16 @@
+function formatEth(tx) {
+  if (tx.value_wei != null && /^\d+$/.test(String(tx.value_wei))) {
+    const amount = BigInt(String(tx.value_wei));
+    if (amount === 0n) return '0 ETH';
+    const whole = amount / 1000000000000000000n;
+    const fraction = (amount % 1000000000000000000n).toString().padStart(18, '0').replace(/0+$/, '');
+    return String(whole) + (fraction ? '.' + fraction : '') + ' ETH';
+  }
+  const value = Number(tx.value_eth);
+  if (!Number.isFinite(value)) return 'Amount unavailable';
+  return value === 0 ? '0 ETH' : value.toPrecision(6) + ' ETH';
+}
+
 /**
  * List of recent transactions with risk color coding.
  */
@@ -56,10 +69,10 @@ export default function TransactionList({ transactions, onSelect }) {
               </div>
               <div className="text-right ml-4">
                 <div className="text-lg font-semibold text-white">
-                  {tx.value_eth.toFixed(4)} ETH
+                  {formatEth(tx)}
                 </div>
                 <div className="text-xs text-slate-500">
-                  Block {tx.block_number.toLocaleString()}
+                  {String(tx.value_wei) === '0' ? 'No native ETH · ' : ''}Block {tx.block_number.toLocaleString()}
                 </div>
               </div>
             </div>

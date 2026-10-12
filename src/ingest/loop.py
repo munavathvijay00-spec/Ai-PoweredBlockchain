@@ -95,7 +95,7 @@ async def ingest_loop(interval_seconds: int = 15):
                     # First deployment: begin at tip; subsequent restarts resume.
                     last_processed_block = latest_block - 1
                     tip_parent = await client.get_block(last_processed_block)
-                    last_block_hash = client._to_hex_string(tip_parent['hash']) if hasattr(client, '_to_hex_string') else _block_hash(tip_parent['hash'])
+                    last_block_hash = _block_hash(tip_parent['hash'])
                     await save_cursor_checkpoint(db, last_processed_block, last_block_hash)
                 elif latest_block < last_processed_block:
                     # Never silently roll a durable checkpoint backwards.
@@ -121,13 +121,14 @@ async def ingest_loop(interval_seconds: int = 15):
                 for block_number in next_blocks(
                     last_processed_block, latest_block, max_blocks_per_iteration
                 ):
-                    candidate = await client.get_block(block_number)
+                    candidate = await client.get_block(block_number, full_transactions=True)
                     if last_block_hash is not None and _block_hash(candidate['parentHash']) != last_block_hash:
                         raise RuntimeError('REORG_DETECTED: next block parent does not match checkpoint; manual rollback/replay required')
                     candidate_hash = _block_hash(candidate['hash'])
                     summary = await process_one_block(
                         client, normalizer, transactions, addresses, scorer, explainer,
                         block_number=block_number,
+                        prefetched_block=candidate,
                     )
                     # Save checkpoint before advancing memory; retry after DB failure.
                     await save_cursor_checkpoint(db, block_number, candidate_hash)

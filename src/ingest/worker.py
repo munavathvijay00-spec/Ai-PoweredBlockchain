@@ -27,6 +27,16 @@ from src.metrics import (
 from src.metrics.registry import timer
 
 
+def validate_block_snapshot(block: Dict, expected_number: int) -> None:
+    """Reject mismatched or header-only snapshots before any database writes."""
+    if int(block['number']) != expected_number:
+        raise ValueError('Fetched block height differs from requested height')
+    if not isinstance(block.get('transactions'), (list, tuple)):
+        raise ValueError('Full transaction block snapshot required')
+    if any(not isinstance(tx, dict) and not hasattr(tx, 'items') for tx in block['transactions']):
+        raise ValueError('Transaction hashes alone are not a full block snapshot')
+
+
 async def process_one_block(
     client: BlockchainClient,
     normalizer: TransactionNormalizer,
@@ -35,6 +45,7 @@ async def process_one_block(
     scorer,
     explainer,
     block_number: int | None = None,
+    prefetched_block: Dict | None = None,
 ) -> Dict:
     """Fetch the latest block, store transactions using bulk ops, score + explain."""
     start_time = time.time()
@@ -43,7 +54,10 @@ async def process_one_block(
         # 1. Fetch block
         if block_number is None:
             block_number = await client.get_latest_block_number()
-        block = await client.get_block(block_number, full_transactions=True)
+        # Use the exact block whose hash and parent were checked by the loop.
+        # A second height-based RPC fetch could return a different fork.
+        block = prefetched_block if prefetched_block is not None else await client.get_block(block_number, full_transactions=True)
+        validate_block_snapshot(block, block_number)
         raw_txs = [dict(tx) for tx in block.get('transactions', [])]
 
         # 2. Normalize

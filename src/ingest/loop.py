@@ -20,6 +20,7 @@ from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
+from src.ingest.cursor import ensure_cursor_schema, load_cursor, save_cursor
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
@@ -64,6 +65,8 @@ async def ingest_loop(interval_seconds: int = 15):
         await refresh_ofac(db)
     except Exception as intelligence_err:
         logger.warning(f'Intelligence initialization failed (ingestion continues): {intelligence_err}')
+    # Checkpoint is essential for gap-free recovery; fail startup if unavailable.
+    await ensure_cursor_schema(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()
@@ -74,7 +77,9 @@ async def ingest_loop(interval_seconds: int = 15):
     iteration = 0
     total_inserted = 0
     total_flagged = 0
-    last_processed_block = None  # In-process cursor; reset to chain tip after restart.
+    # A missing or inaccessible checkpoint must not silently skip past failures.
+    last_processed_block = await load_cursor(db)
+    logger.info(f'Ingestion checkpoint restored: {last_processed_block}')
     max_blocks_per_iteration = 3
 
     try:
@@ -86,9 +91,14 @@ async def ingest_loop(interval_seconds: int = 15):
                 logger.info(f"[{now}] 🔄 Iteration {iteration} — fetching latest block...")
 
                 latest_block = await client.get_latest_block_number()
-                if last_processed_block is None or latest_block < last_processed_block:
-                    # Start at tip on restart; reset if the chain head moves backwards.
+                if last_processed_block is None:
+                    # First deployment: begin at tip; subsequent restarts resume.
                     last_processed_block = latest_block - 1
+                    await save_cursor(db, last_processed_block)
+                elif latest_block < last_processed_block:
+                    # Never silently roll a durable checkpoint backwards.
+                    logger.warning('Chain head below saved checkpoint; waiting for recovery')
+                    continue
 
                 pending = latest_block - last_processed_block
                 if pending > max_blocks_per_iteration:
@@ -103,7 +113,8 @@ async def ingest_loop(interval_seconds: int = 15):
                         client, normalizer, transactions, addresses, scorer, explainer,
                         block_number=block_number,
                     )
-                    # Advance only after successful processing; retry on failure.
+                    # Save checkpoint before advancing memory; retry after DB failure.
+                    await save_cursor(db, block_number)
                     last_processed_block = block_number
                     total_inserted += summary['inserted']
                     total_flagged += summary['flagged']

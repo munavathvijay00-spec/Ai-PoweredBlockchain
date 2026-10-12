@@ -78,7 +78,7 @@ export default function TransactionModal({ tx, onClose }) {
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-blue-400 text-lg">🧠</span>
                 <span className="text-blue-400 font-semibold text-sm uppercase tracking-wide">
-                  AI Analysis
+                  {tx.ai_explanation.startsWith('Rule-based risk assessment:') ? 'Evidence-based assessment' : 'AI-assisted assessment'}
                 </span>
               </div>
               <p className="text-slate-200 leading-relaxed">{tx.ai_explanation}</p>
@@ -92,8 +92,25 @@ export default function TransactionModal({ tx, onClose }) {
                 </span>
               </div>
               <p className="text-slate-400 text-sm italic">
-                No AI explanation available — this transaction is low-risk and wasn't analyzed.
+                No explanation is stored for this transaction.
               </p>
+            </div>
+          )}
+
+          {/* Verifiable scoring evidence */}
+          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && (
+            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-cyan-300 mb-3">Risk evidence trail</h3>
+              <div className="space-y-2">
+                {tx.risk_factors.map((factor, i) => (
+                  <div key={i} className="rounded-lg bg-slate-900/70 border border-slate-700 p-3">
+                    <div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>
+                    {factor.tx_hash && <div className="font-mono text-xs text-slate-400 break-all mt-1">Evidence tx: {factor.tx_hash}</div>}
+                    {factor.source && <div className="text-xs text-cyan-400 mt-1">Source: {factor.source}</div>}
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-slate-500 mt-3">Signals are indicators for investigation, not a determination of wrongdoing.</p>
             </div>
           )}
 

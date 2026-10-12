@@ -12,6 +12,7 @@ from src.blockchain.normalizer import TransactionNormalizer
 from src.database.connection import get_db, close_db
 from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
+from src.risk.behavior import analyze_block_behavior, apply_behavior_risk
 from src.agents.explainer import get_explainer
 from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
 from src.risk.wallet_exposure import (ensure_exposure_schema, find_direct_exposures, save_direct_exposures,
@@ -73,6 +74,9 @@ async def process_one_block(
             logger.warning(f'Direct exposure persistence unavailable: {exposure_err}')
         exposure_matches = await get_direct_exposures(addresses.db, addresses_list)
 
+        # Same-block evidence only: no expensive historical scans or new DB tables.
+        behavior_factors = analyze_block_behavior(normalized)
+
         # 7. Score in-memory
         scores = []
         flagged = 0
@@ -104,6 +108,7 @@ async def process_one_block(
                             'checked_at': evidence['checked_at'].isoformat(),
                         })
                 result = apply_exposure_risk(result, tx, exposure_matches, verified_matches)
+                result = apply_behavior_risk(result, tx, behavior_factors)
                 scores.append({
                     'hash': tx['hash'],
                     'score': result['score'],

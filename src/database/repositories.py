@@ -153,7 +153,9 @@ class TransactionRepository:
             from_id = addr_map.get(tx['from_address'].lower())
             to_id = addr_map.get(tx['to_address'].lower())
             if not from_id or not to_id:
-                continue
+                raise ValueError(
+                    f"Missing address mapping for transaction {tx['hash']}; refusing partial batch"
+                )
 
             hashes.append(tx['hash'])
             from_ids.append(from_id)

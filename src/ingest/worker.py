@@ -14,6 +14,8 @@ from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
+from src.risk.wallet_exposure import (ensure_exposure_schema, find_direct_exposures, save_direct_exposures,
+                                      get_direct_exposures, apply_exposure_risk)
 
 from src.metrics import (
     ingest_blocks_total,
@@ -64,6 +66,12 @@ async def process_one_block(
         # 6. Bulk fetch blacklist (1 query)
         blacklist_set = await addresses.get_blacklisted_set(addresses_list)
         verified_matches = await addresses.get_verified_matches(addresses_list)
+        # Only evidence from observed transactions; persisted for at most seven days.
+        try:
+            await save_direct_exposures(addresses.db, find_direct_exposures(normalized, verified_matches))
+        except Exception as exposure_err:
+            logger.warning(f'Direct exposure persistence unavailable: {exposure_err}')
+        exposure_matches = await get_direct_exposures(addresses.db, addresses_list)
 
         # 7. Score in-memory
         scores = []
@@ -95,6 +103,7 @@ async def process_one_block(
                             'entity_name': evidence['entity_name'],
                             'checked_at': evidence['checked_at'].isoformat(),
                         })
+                result = apply_exposure_risk(result, tx, exposure_matches, verified_matches)
                 scores.append({
                     'hash': tx['hash'],
                     'score': result['score'],
@@ -162,6 +171,7 @@ async def run_once() -> Dict:
 
     db = await get_db()
     await ensure_intelligence_schema(db)
+    await ensure_exposure_schema(db)
     await refresh_ofac(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)

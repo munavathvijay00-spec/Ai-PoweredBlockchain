@@ -23,6 +23,7 @@ from src.ingest.worker import process_one_block
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
+from src.risk.wallet_exposure import ensure_exposure_schema
 
 
 _shutdown_requested = False
@@ -50,6 +51,7 @@ async def ingest_loop(interval_seconds: int = 15):
     db = await get_db()
     try:
         await ensure_intelligence_schema(db)
+        await ensure_exposure_schema(db)
         await refresh_ofac(db)
     except Exception as intelligence_err:
         logger.warning(f'Intelligence initialization failed (ingestion continues): {intelligence_err}')

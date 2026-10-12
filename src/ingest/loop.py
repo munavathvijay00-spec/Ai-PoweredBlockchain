@@ -10,7 +10,7 @@ Press Ctrl+C to stop gracefully.
 import asyncio
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from loguru import logger
 
 from src.blockchain.client import BlockchainClient
@@ -47,14 +47,18 @@ async def ingest_loop(interval_seconds: int = 15):
 
     # Set up database + dependencies
     db = await get_db()
-    await ensure_intelligence_schema(db)
-    await refresh_ofac(db)
+    try:
+        await ensure_intelligence_schema(db)
+        await refresh_ofac(db)
+    except Exception as intelligence_err:
+        logger.warning(f'Intelligence initialization failed (ingestion continues): {intelligence_err}')
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()
     scorer = get_scorer()
     explainer = get_explainer()
 
+    next_ofac_refresh = datetime.now() + timedelta(hours=24)
     iteration = 0
     total_inserted = 0
     total_flagged = 0

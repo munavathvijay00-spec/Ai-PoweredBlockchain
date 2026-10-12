@@ -7,6 +7,8 @@ import SearchBar from './components/SearchBar';
 import FilterTabs from './components/FilterTabs';
 import RiskChart from './components/RiskChart';
 import InvestigationGraph from './components/InvestigationGraph';
+import ActivityPanel from './components/ActivityPanel';
+import { downloadTransactions } from './utils/investigation';
 
 function App() {
   const [stats, setStats] = useState(null);
@@ -19,6 +21,11 @@ function App() {
   const [view, setView] = useState('investigate');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+  const [watchlist, setWatchlist] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('chainscope-watchlist') || '[]'); } catch { return []; }
+  });
+  const [watchOnly, setWatchOnly] = useState(false);
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -66,12 +73,16 @@ function App() {
     high: flagged.filter((tx) => tx.risk_score >= 40).length,
   }), [transactions, flagged]);
 
+  useEffect(() => setPage(0), [filter, search, watchOnly]);
+
   const filtered = useMemo(() => {
     let list = transactions;
 
     // For flagged/high views, use the dedicated flagged list
     if (filter === 'flagged') list = flagged;
     else if (filter === 'high') list = flagged.filter((tx) => tx.risk_score >= 40);
+
+    if (watchOnly) list = list.filter(tx => watchlist.includes(tx.from_address?.toLowerCase()) || watchlist.includes(tx.to_address?.toLowerCase()));
 
     if (search.trim()) {
       const s = search.toLowerCase();
@@ -83,7 +94,17 @@ function App() {
     }
 
     return list;
-  }, [transactions, flagged, filter, search]);
+  }, [transactions, flagged, filter, search, watchOnly, watchlist]);
+
+  function toggleWatch(address) {
+    if (!address) return;
+    const normalized = address.toLowerCase();
+    setWatchlist(previous => {
+      const next = previous.includes(normalized) ? previous.filter(a => a !== normalized) : [...previous, normalized];
+      localStorage.setItem('chainscope-watchlist', JSON.stringify(next));
+      return next;
+    });
+  }
 
   async function inspectTransaction(tx) {
     setSelectedTx(tx);
@@ -127,7 +148,8 @@ function App() {
         </div>
         {loading && <p role="status" className="text-sm text-slate-400 mb-4">Connecting to Ethereum intelligence feed…</p>}
         <StatsBar stats={stats} />
-        <div className="flex gap-2 my-7 border-b border-slate-700/60 pb-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mt-6"><ActivityPanel transactions={transactions}/><div className="rounded-2xl border border-slate-700/70 bg-[#111e31] p-6"><div className="text-[10px] uppercase tracking-[0.2em] text-cyan-400 font-bold">Investigation tools</div><h3 className="text-lg font-semibold mt-1">Your analyst workspace</h3><p className="text-sm text-slate-400 mt-2">Save wallet addresses locally, filter observed activity and export evidence for review. Watchlists stay in this browser.</p><div className="mt-5 flex flex-wrap gap-2"><button onClick={() => setWatchOnly(v => !v)} className={`rounded-xl border px-4 py-2 text-sm ${watchOnly ? "bg-cyan-400 text-slate-950 border-cyan-400" : "border-slate-600 text-slate-200 hover:border-cyan-400"}`}>☆ Watchlist only ({watchlist.length})</button><button onClick={() => downloadTransactions(filtered)} className="rounded-xl border border-slate-600 px-4 py-2 text-sm hover:border-cyan-400">↓ Export {filtered.length} CSV rows</button></div></div></div>
+        <div className="flex flex-wrap gap-2 my-7 border-b border-slate-700/60 pb-3">
           <button onClick={() => setView('investigate')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'investigate' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>◎ Investigation graph</button>
           <button onClick={() => setView('transactions')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'transactions' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>≡ Transaction explorer</button>
         </div>
@@ -145,13 +167,15 @@ function App() {
           </div>
         </div>
 
-        <TransactionList transactions={filtered} onSelect={inspectTransaction} />
+        <TransactionList transactions={filtered.slice(page * 20, (page + 1) * 20)} onSelect={inspectTransaction} />
+        <div className="flex justify-between items-center mt-4 text-sm text-slate-400"><span>Showing {filtered.length ? page * 20 + 1 : 0}–{Math.min((page + 1) * 20, filtered.length)} of {filtered.length} loaded results</span><div className="flex gap-2"><button disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="px-4 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Previous</button><button disabled={(page + 1) * 20 >= filtered.length} onClick={() => setPage(p => p + 1)} className="px-4 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Next</button></div></div>
       </main>
 
       <footer className="text-center text-slate-600 text-xs py-8">
         CHAINSCOPE · Ethereum intelligence · Risk indicators are not proof of wrongdoing
       </footer>
 
+      {selectedTx && <div className="fixed bottom-5 left-5 z-[60] flex gap-2 rounded-xl border border-cyan-500/30 bg-slate-900 p-3 shadow-2xl"><button onClick={() => toggleWatch(selectedTx.from_address)} className="text-xs text-cyan-300 px-2 py-1">{watchlist.includes(selectedTx.from_address?.toLowerCase()) ? '★ Unwatch sender' : '☆ Watch sender'}</button><button onClick={() => toggleWatch(selectedTx.to_address)} className="text-xs text-cyan-300 px-2 py-1">{watchlist.includes(selectedTx.to_address?.toLowerCase()) ? '★ Unwatch recipient' : '☆ Watch recipient'}</button></div>}
       {selectedTx && (
         <TransactionModal tx={selectedTx} onClose={() => setSelectedTx(null)} />
       )}

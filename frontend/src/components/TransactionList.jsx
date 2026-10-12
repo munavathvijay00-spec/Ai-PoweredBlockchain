@@ -11,6 +11,8 @@ function formatEth(tx) {
   return value === 0 ? '0 ETH' : value.toPrecision(6) + ' ETH';
 }
 
+import { classifyTransaction } from '../utils/investigation';
+
 /**
  * List of recent transactions with risk color coding.
  */
@@ -59,6 +61,7 @@ export default function TransactionList({ transactions, onSelect }) {
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${riskColor(tx.risk_score)}`}>
                     Risk: {tx.risk_score}
                   </span>
+                  <span className={`text-[10px] border px-2 py-0.5 rounded-full ${classifyTransaction(tx).tone}`} title={classifyTransaction(tx).hint}>{classifyTransaction(tx).label}</span>
                   {tx.ai_explanation && (
                     <span className="text-xs text-blue-400">🧠 AI analyzed</span>
                   )}

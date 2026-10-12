@@ -7,6 +7,7 @@ from web3 import AsyncWeb3
 from web3.providers.async_rpc import AsyncHTTPProvider
 
 from src.blockchain.event_decoder import decode_receipt
+from src.blockchain.token_metadata import resolve_metadata
 from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api", tags=["on-chain events"])
@@ -28,6 +29,15 @@ async def transaction_events(tx_hash: str):
             try:
                 receipt = await asyncio.wait_for(w3.eth.get_transaction_receipt(tx_hash), timeout=10)
             finally:
+                decoded = decode_receipt(dict(receipt))
+                contracts = list(dict.fromkeys(e['contract'] for e in decoded['events'] if e.get('standard') == 'ERC20-compatible'))[:8]
+                if contracts:
+                    metadata = await asyncio.gather(*(resolve_metadata(w3, addr, receipt['blockNumber']) for addr in contracts))
+                    by_contract = dict(zip(contracts, metadata))
+                    for event in decoded['events']:
+                        if event.get('standard') == 'ERC20-compatible' and event['contract'] in by_contract:
+                            event.update(by_contract[event['contract']])
+            finally:
                 await provider.disconnect()
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Ethereum RPC timed out")
@@ -37,4 +47,4 @@ async def transaction_events(tx_hash: str):
         if isinstance(exc, TransactionNotFound):
             raise HTTPException(status_code=404, detail="Transaction receipt not found")
         raise HTTPException(status_code=502, detail="Ethereum RPC receipt lookup failed")
-    return decode_receipt(dict(receipt))
+    return decoded

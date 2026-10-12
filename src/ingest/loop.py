@@ -21,7 +21,6 @@ from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
 from src.ingest.address_retention import prune_addresses
-import os
 
 
 _shutdown_requested = False
@@ -84,22 +83,25 @@ async def ingest_loop(interval_seconds: int = 15):
                     f"Flagged: {total_flagged}"
                 )
 
-                # Retention cleanup — every 10 iterations (~2.5 min at 15s interval)
+                # Retain recent transactions; run once every ten iterations.
                 if iteration % 10 == 0:
                     try:
                         deleted = await db.execute("""
-                            DELETE FROM transactions 
+                            DELETE FROM transactions
                             WHERE timestamp < NOW() - INTERVAL '30 minutes'
                         """)
                         logger.info(f"🗑️ Retention cleanup: {deleted}")
-                        await prune_addresses(
-                            db,
-                            enabled=os.getenv("ADDRESS_CLEANUP_ENABLED", "false").lower() == "true",
-                            batch_size=250,
-                            minutes=30,
-                        )
                     except Exception as cleanup_err:
-                        logger.warning(f"Cleanup error (non-fatal): {cleanup_err}")
+                        logger.warning(f"Transaction cleanup error (non-fatal): {cleanup_err}")
+
+                # Bounded automatic address retention. Fail-closed guards live in
+                # prune_addresses: FK inspection, linked records, intelligence fields,
+                # and minimum 30-minute age. 500 rows every two iterations.
+                if iteration % 2 == 0:
+                    try:
+                        await prune_addresses(db, enabled=True, batch_size=500, minutes=30)
+                    except Exception as cleanup_err:
+                        logger.warning(f"Address cleanup error (non-fatal): {cleanup_err}")
 
             except Exception as e:
                 logger.exception(f"❌ Error in iteration {iteration}: {e}")

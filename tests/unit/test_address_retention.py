@@ -54,6 +54,7 @@ async def test_bounded_cleanup_checks_references():
     assert "FOR UPDATE OF a SKIP LOCKED" in sql
     assert "address_transactions" in sql
     assert "blacklist" in sql
+    assert sql.count("NOT EXISTS") >= 8
     assert "alerts" in sql
 
 

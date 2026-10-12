@@ -4,6 +4,7 @@ Not a complete wallet history. No fabricated events, no provenance inference.
 """
 import asyncio
 import re
+from urllib.parse import urlsplit
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Query
@@ -36,6 +37,8 @@ async def _transfer_page(session, rpc_url, address, direction, count, page_key=N
         if response.status != 200:
             raise HTTPException(status_code=502, detail="Upstream transfer provider unavailable")
         data = await response.json(content_type=None)
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="Unexpected transfer provider response")
     if "error" in data:
         raise HTTPException(status_code=502, detail="Address-indexed transfer query rejected by provider")
     result = data.get("result")
@@ -55,7 +58,9 @@ async def wallet_indexed_transfers(
         raise HTTPException(status_code=422, detail="Invalid Ethereum address")
     settings = get_settings()
     rpc_url = settings.ethereum_rpc_url
-    if not rpc_url.startswith("https://") or "alchemy.com" not in rpc_url.split("/")[2].lower():
+    parsed_rpc = urlsplit(rpc_url)
+    hostname = (parsed_rpc.hostname or "").lower()
+    if parsed_rpc.scheme != "https" or not (hostname == "alchemy.com" or hostname.endswith(".alchemy.com")):
         raise HTTPException(status_code=503, detail="Alchemy mainnet RPC not configured")
     # Both directions are independently bounded; page keys reveal further results.
     timeout = aiohttp.ClientTimeout(total=20)

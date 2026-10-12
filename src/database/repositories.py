@@ -304,6 +304,12 @@ class TransactionRepository:
         """
         return await self.db.fetch(query, min_score, limit)
 
+    async def count_flagged(self, min_score: int = 20) -> int:
+        """Count all matching flagged transactions, not just one page."""
+        return await self.db.fetchval(
+            "SELECT COUNT(*) FROM transactions WHERE risk_score >= $1", min_score
+        )
+
     async def count(self) -> int:
         """Total transactions stored."""
         return await self.db.fetchval("SELECT COUNT(*) FROM transactions")

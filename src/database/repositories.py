@@ -180,12 +180,18 @@ class TransactionRepository:
             FROM transactions t
             WHERE t.hash = ANY($1::text[])
         """, hashes)
-        incoming = {
-            h: (int(b), int(src), int(dst), int(value))
-            for h, b, src, dst, value in zip(
-                hashes, block_numbers, from_ids, to_ids, values
-            )
-        }
+        incoming = {}
+        for h, b, src, dst, value in zip(
+            hashes, block_numbers, from_ids, to_ids, values
+        ):
+            facts = (int(b), int(src), int(dst), int(value))
+            if h in incoming:
+                if incoming[h] != facts:
+                    raise RuntimeError(
+                        f"TRANSACTION_PROVENANCE_CONFLICT: {h} has contradictory facts within batch"
+                    )
+                raise ValueError(f"Duplicate transaction hash in ingestion batch: {h}")
+            incoming[h] = facts
         for row in existing:
             expected = incoming[row['hash']]
             observed = (

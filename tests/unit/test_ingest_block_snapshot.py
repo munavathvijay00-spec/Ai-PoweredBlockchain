@@ -13,7 +13,7 @@ def test_valid_full_block_snapshot():
             "blockHash": "0x" + "a" * 64,
         }],
     }, 123)
-    validate_block_snapshot({"number": 123, "transactions": []}, 123)
+    validate_block_snapshot({"number": 123, "hash": "0x" + "a" * 64, "transactions": []}, 123)
 
 
 def test_wrong_height_rejected():

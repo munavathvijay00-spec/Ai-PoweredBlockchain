@@ -182,12 +182,20 @@ class TransactionRepository:
             )
             ON CONFLICT (hash) DO NOTHING
         """
-        await self.db.execute(
+        result = await self.db.execute(
             query,
             hashes, from_ids, to_ids, values, gas_prices, gas_useds,
             block_numbers, timestamps, statuses, risk_scores,
         )
-        return len(hashes)
+        # asyncpg returns e.g. "INSERT 0 5"; ON CONFLICT DO NOTHING
+        # can insert fewer rows than submitted.
+        try:
+            inserted = int(result.rsplit(' ', 1)[-1])
+        except (AttributeError, ValueError) as exc:
+            raise RuntimeError(f'Unexpected PostgreSQL INSERT result: {result!r}') from exc
+        if inserted < 0 or inserted > len(hashes):
+            raise RuntimeError(f'Invalid inserted row count: {inserted} of {len(hashes)}')
+        return inserted
 
     async def bulk_update_risk_scores(self, scores: list) -> int:
         """Update risk scores for multiple transactions."""

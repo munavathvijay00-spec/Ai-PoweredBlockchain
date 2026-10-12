@@ -131,6 +131,7 @@ async def ingest_loop(interval_seconds: int = 15):
                             client, normalizer, transactions, addresses, scorer, explainer,
                             block_number=block_number,
                             prefetched_block=candidate,
+                            allow_external_ai=False,
                         )
                         await save_cursor_checkpoint(db, block_number, candidate_hash)
                     last_processed_block = block_number

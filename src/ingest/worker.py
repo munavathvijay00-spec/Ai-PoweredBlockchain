@@ -199,7 +199,9 @@ async def process_one_block(
 async def run_once() -> Dict:
     """One-shot invocation."""
     client = BlockchainClient()
-    await client.connect()
+    if not await client.connect():
+        await client.close()
+        raise RuntimeError('Ethereum mainnet RPC connection failed or returned a non-mainnet chain')
 
     db = await get_db()
     addresses = AddressRepository(db)

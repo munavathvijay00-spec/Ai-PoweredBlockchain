@@ -125,13 +125,15 @@ async def ingest_loop(interval_seconds: int = 15):
                     if last_block_hash is not None and _block_hash(candidate['parentHash']) != last_block_hash:
                         raise RuntimeError('REORG_DETECTED: next block parent does not match checkpoint; manual rollback/replay required')
                     candidate_hash = _block_hash(candidate['hash'])
-                    summary = await process_one_block(
-                        client, normalizer, transactions, addresses, scorer, explainer,
-                        block_number=block_number,
-                        prefetched_block=candidate,
-                    )
-                    # Save checkpoint before advancing memory; retry after DB failure.
-                    await save_cursor_checkpoint(db, block_number, candidate_hash)
+                    # Data writes and cursor advance must commit or roll back together.
+                    async with db.transaction():
+                        summary = await process_one_block(
+                            client, normalizer, transactions, addresses, scorer, explainer,
+                            block_number=block_number,
+                            prefetched_block=candidate,
+                            allow_external_ai=False,
+                        )
+                        await save_cursor_checkpoint(db, block_number, candidate_hash)
                     last_processed_block = block_number
                     last_block_hash = candidate_hash
                     total_inserted += summary['inserted']

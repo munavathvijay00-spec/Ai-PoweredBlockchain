@@ -27,6 +27,19 @@ from src.metrics import (
 from src.metrics.registry import timer
 
 
+def require_complete_normalization(raw_txs: list, normalized: list) -> None:
+    """Never checkpoint a block after silently dropping malformed transactions."""
+    if len(normalized) != len(raw_txs):
+        raise ValueError(
+            f'Incomplete block normalization: {len(normalized)} of {len(raw_txs)} transactions; refusing checkpoint'
+        )
+    hashes = [tx.get('hash') for tx in normalized]
+    if any(not isinstance(h, str) or not h.startswith('0x') or len(h) != 66 for h in hashes):
+        raise ValueError('Normalized block contains invalid transaction hashes')
+    if len(set(hashes)) != len(hashes):
+        raise ValueError('Normalized block contains duplicate transaction hashes')
+
+
 def validate_block_snapshot(block: Dict, expected_number: int) -> None:
     """Reject mismatched or header-only snapshots before any database writes."""
     if int(block['number']) != expected_number:
@@ -62,6 +75,7 @@ async def process_one_block(
 
         # 2. Normalize
         normalized = normalizer.normalize_batch(raw_txs, block)
+        require_complete_normalization(raw_txs, normalized)
 
         # 3. Collect unique addresses
         all_addresses = set()
@@ -72,6 +86,8 @@ async def process_one_block(
 
         # 4. Bulk insert addresses (1 query)
         addr_map = await addresses.bulk_get_or_create_addresses(addresses_list)
+        if any(addr.lower() not in addr_map for addr in addresses_list):
+            raise RuntimeError('Incomplete address indexing; refusing to store partial block')
 
         # 5. Bulk insert transactions (1 query)
         inserted = await transactions.bulk_create_transactions(normalized, addr_map)

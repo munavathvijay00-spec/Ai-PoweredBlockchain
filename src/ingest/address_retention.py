@@ -23,7 +23,10 @@ async def prune_addresses(db, *, enabled=False, batch_size=250, minutes=30):
         return 0
 
     # Legacy deployments have address_transactions; fresh init.sql deployments don't.
-    has_links = "address_transactions" in referenced_tables
+    has_links = await db.fetchval("SELECT to_regclass('public.address_transactions') IS NOT NULL")
+    if has_links and "address_transactions" not in referenced_tables:
+        logger.warning("Address retention skipped: legacy address relationship unverified")
+        return 0
     links_guard = """
         AND NOT EXISTS (
             SELECT 1 FROM address_transactions atx WHERE atx.address_id = a.id

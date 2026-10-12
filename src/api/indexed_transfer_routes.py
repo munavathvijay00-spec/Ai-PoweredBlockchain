@@ -53,9 +53,13 @@ async def wallet_indexed_transfers(
     per_direction: int = Query(25, ge=1, le=50),
     outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
     incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    include_outgoing: bool = Query(True),
+    include_incoming: bool = Query(True),
 ):
     if not ADDRESS.fullmatch(address):
         raise HTTPException(status_code=422, detail="Invalid Ethereum address")
+    if not include_outgoing and not include_incoming:
+        raise HTTPException(status_code=422, detail="At least one transfer direction must be enabled")
     settings = get_settings()
     rpc_url = settings.ethereum_rpc_url
     parsed_rpc = urlsplit(rpc_url)
@@ -66,10 +70,15 @@ async def wallet_indexed_transfers(
     timeout = aiohttp.ClientTimeout(total=20)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            outgoing, incoming = await asyncio.gather(
-                _transfer_page(session, rpc_url, address, "fromAddress", per_direction, outgoing_page_key),
-                _transfer_page(session, rpc_url, address, "toAddress", per_direction, incoming_page_key),
-            )
+            pending = {}
+            if include_outgoing:
+                pending["outgoing"] = _transfer_page(session, rpc_url, address, "fromAddress", per_direction, outgoing_page_key)
+            if include_incoming:
+                pending["incoming"] = _transfer_page(session, rpc_url, address, "toAddress", per_direction, incoming_page_key)
+            pages = await asyncio.gather(*pending.values())
+            page_results = dict(zip(pending.keys(), pages))
+            outgoing = page_results.get("outgoing", {"transfers": [], "pageKey": None})
+            incoming = page_results.get("incoming", {"transfers": [], "pageKey": None})
     except (aiohttp.ClientError, asyncio.TimeoutError):
         raise HTTPException(status_code=502, detail="Transfer provider timed out or failed")
     unique = {}
@@ -97,6 +106,7 @@ async def wallet_indexed_transfers(
         "transfers": list(unique.values()),
         "returned": len(unique),
         "per_direction_limit": per_direction,
+        "queried_directions": [direction for direction, enabled in (("outgoing", include_outgoing), ("incoming", include_incoming)) if enabled],
         "outgoing_next_page_key": outgoing.get("pageKey"),
         "incoming_next_page_key": incoming.get("pageKey"),
         "outgoing_has_more": bool(outgoing.get("pageKey")),

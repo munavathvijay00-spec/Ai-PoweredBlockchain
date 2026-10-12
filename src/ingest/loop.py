@@ -20,13 +20,21 @@ from src.database.repositories import AddressRepository, TransactionRepository
 from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
-from src.ingest.cursor import ensure_cursor_schema, load_cursor, save_cursor
+from src.ingest.cursor import ensure_cursor_schema, load_cursor_checkpoint, save_cursor_checkpoint
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
 
 
 _shutdown_requested = False
+
+
+def _block_hash(value):
+    if hasattr(value, 'hex'):
+        result = value.hex()
+    else:
+        result = str(value)
+    return result if result.startswith('0x') else '0x' + result
 
 
 def _handle_shutdown(signum, frame):
@@ -70,7 +78,7 @@ async def ingest_loop(interval_seconds: int = 15):
     total_inserted = 0
     total_flagged = 0
     # A missing or inaccessible checkpoint must not silently skip past failures.
-    last_processed_block = await load_cursor(db)
+    last_processed_block, last_block_hash = await load_cursor_checkpoint(db)
     logger.info(f'Ingestion checkpoint restored: {last_processed_block}')
     max_blocks_per_iteration = 3
 
@@ -86,12 +94,21 @@ async def ingest_loop(interval_seconds: int = 15):
                 if last_processed_block is None:
                     # First deployment: begin at tip; subsequent restarts resume.
                     last_processed_block = latest_block - 1
-                    await save_cursor(db, last_processed_block)
+                    tip_parent = await client.get_block(last_processed_block)
+                    last_block_hash = client._to_hex_string(tip_parent['hash']) if hasattr(client, '_to_hex_string') else _block_hash(tip_parent['hash'])
+                    await save_cursor_checkpoint(db, last_processed_block, last_block_hash)
                 elif latest_block < last_processed_block:
                     # Never silently roll a durable checkpoint backwards.
                     log_ingestion_health(latest_block, last_processed_block)
                     logger.warning('Chain head below saved checkpoint; waiting for recovery')
                     continue
+
+                # A stored hash is an immutable chain continuity assertion.
+                # Stop rather than silently mix orphaned transfers into evidence.
+                if last_block_hash is not None:
+                    canonical = await client.get_block(last_processed_block)
+                    if _block_hash(canonical['hash']) != last_block_hash:
+                        raise RuntimeError('REORG_DETECTED: checkpoint block hash differs from canonical chain; manual rollback/replay required')
 
                 pending = latest_block - last_processed_block
                 if iteration == 1 or iteration % 4 == 0:
@@ -104,13 +121,18 @@ async def ingest_loop(interval_seconds: int = 15):
                 for block_number in next_blocks(
                     last_processed_block, latest_block, max_blocks_per_iteration
                 ):
+                    candidate = await client.get_block(block_number)
+                    if last_block_hash is not None and _block_hash(candidate['parentHash']) != last_block_hash:
+                        raise RuntimeError('REORG_DETECTED: next block parent does not match checkpoint; manual rollback/replay required')
+                    candidate_hash = _block_hash(candidate['hash'])
                     summary = await process_one_block(
                         client, normalizer, transactions, addresses, scorer, explainer,
                         block_number=block_number,
                     )
                     # Save checkpoint before advancing memory; retry after DB failure.
-                    await save_cursor(db, block_number)
+                    await save_cursor_checkpoint(db, block_number, candidate_hash)
                     last_processed_block = block_number
+                    last_block_hash = candidate_hash
                     total_inserted += summary['inserted']
                     total_flagged += summary['flagged']
                     logger.success(
@@ -156,6 +178,9 @@ async def ingest_loop(interval_seconds: int = 15):
 
             except Exception as e:
                 logger.exception(f"❌ Error in iteration {iteration}: {e}")
+                if 'REORG_DETECTED:' in str(e):
+                    logger.critical('Ingestion halted to prevent incorrect chain history; no automatic orphan rollback implemented')
+                    raise
 
             # Sleep before next iteration
             if not _shutdown_requested:

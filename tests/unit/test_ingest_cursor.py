@@ -31,4 +31,6 @@ async def test_save_cursor_is_monotonic():
 async def test_schema_is_bounded():
     db = AsyncMock()
     await ensure_cursor_schema(db)
-    assert "PRIMARY KEY" in db.execute.await_args.args[0]
+    statements = [call.args[0] for call in db.execute.await_args_list]
+    assert any("PRIMARY KEY" in sql for sql in statements)
+    assert any("ADD COLUMN IF NOT EXISTS block_hash" in sql for sql in statements)

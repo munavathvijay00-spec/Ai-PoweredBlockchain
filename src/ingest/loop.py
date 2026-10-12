@@ -10,7 +10,7 @@ Press Ctrl+C to stop gracefully.
 import asyncio
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from loguru import logger
 
 from src.blockchain.client import BlockchainClient
@@ -22,6 +22,7 @@ from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
+from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
 
 
 _shutdown_requested = False
@@ -47,12 +48,18 @@ async def ingest_loop(interval_seconds: int = 15):
 
     # Set up database + dependencies
     db = await get_db()
+    try:
+        await ensure_intelligence_schema(db)
+        await refresh_ofac(db)
+    except Exception as intelligence_err:
+        logger.warning(f'Intelligence initialization failed (ingestion continues): {intelligence_err}')
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()
     scorer = get_scorer()
     explainer = get_explainer()
 
+    next_ofac_refresh = datetime.now() + timedelta(hours=24)
     iteration = 0
     total_inserted = 0
     total_flagged = 0
@@ -84,7 +91,21 @@ async def ingest_loop(interval_seconds: int = 15):
                     f"Flagged: {total_flagged}"
                 )
 
-                # Periodic lightweight size diagnostics (~15 minutes at default cadence).\n                if iteration == 1 or iteration % 60 == 0:\n                    try:\n                        await log_storage_health(db)\n                    except Exception as storage_err:\n                        logger.warning(f\"Storage diagnostics unavailable: {storage_err}\")\n\n                # Retain recent transactions; run once every ten iterations.
+                if datetime.now() >= next_ofac_refresh:
+                    next_ofac_refresh = datetime.now() + timedelta(hours=24)
+                    try:
+                        await refresh_ofac(db)
+                    except Exception as intelligence_err:
+                        logger.warning(f'Intelligence refresh unavailable: {intelligence_err}')
+
+                # Periodic lightweight size diagnostics (~15 minutes at default cadence).
+                if iteration == 1 or iteration % 60 == 0:
+                    try:
+                        await log_storage_health(db)
+                    except Exception as storage_err:
+                        logger.warning(f"Storage diagnostics unavailable: {storage_err}")
+
+                # Retain recent transactions; run once every ten iterations.
                 if iteration % 10 == 0:
                     try:
                         deleted = await db.execute("""

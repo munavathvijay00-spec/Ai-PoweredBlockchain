@@ -21,6 +21,7 @@ from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
 from src.ingest.address_retention import prune_addresses
+from src.ingest.storage_health import log_storage_health
 
 
 _shutdown_requested = False
@@ -83,7 +84,7 @@ async def ingest_loop(interval_seconds: int = 15):
                     f"Flagged: {total_flagged}"
                 )
 
-                # Retain recent transactions; run once every ten iterations.
+                # Periodic lightweight size diagnostics (~15 minutes at default cadence).\n                if iteration == 1 or iteration % 60 == 0:\n                    try:\n                        await log_storage_health(db)\n                    except Exception as storage_err:\n                        logger.warning(f\"Storage diagnostics unavailable: {storage_err}\")\n\n                # Retain recent transactions; run once every ten iterations.
                 if iteration % 10 == 0:
                     try:
                         deleted = await db.execute("""

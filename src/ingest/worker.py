@@ -55,6 +55,25 @@ def validate_block_snapshot(block: Dict, expected_number: int) -> None:
     if any(not isinstance(tx, dict) and not hasattr(tx, 'items') for tx in block['transactions']):
         raise ValueError('Transaction hashes alone are not a full block snapshot')
 
+    # When the RPC supplies transaction membership fields, they must agree
+    # with the exact canonical block snapshot selected by the ingest loop.
+    # Missing optional fields are not treated as proof of membership.
+    from src.ingest.cursor import validate_block_hash
+    block_hash = block.get('hash')
+    if block_hash is not None:
+        block_hash = TransactionNormalizer._to_hex_string(block_hash).lower()
+        validate_block_hash(block_hash)
+    for tx in block['transactions']:
+        tx_number = tx.get('blockNumber')
+        if tx_number is not None and int(tx_number) != expected_number:
+            raise ValueError('Transaction block number differs from fetched block')
+        tx_block_hash = tx.get('blockHash')
+        if tx_block_hash is not None:
+            normalized_hash = TransactionNormalizer._to_hex_string(tx_block_hash).lower()
+            validate_block_hash(normalized_hash)
+            if block_hash is None or normalized_hash != block_hash:
+                raise ValueError('Transaction block hash differs from fetched block')
+
 
 async def process_one_block(
     client: BlockchainClient,

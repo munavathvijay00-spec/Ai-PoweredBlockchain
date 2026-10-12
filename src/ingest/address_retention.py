@@ -7,7 +7,7 @@ from loguru import logger
 
 
 async def prune_addresses(db, *, enabled=False, batch_size=250, minutes=30):
-    if not 1 <= batch_size <= 1000 or minutes < 30:
+    if type(batch_size) is not int or type(minutes) is not int or not 1 <= batch_size <= 1000 or minutes < 30:
         raise ValueError("Invalid retention limits")
     # A production database may have additional FK relationships not in init.sql.
     # Never delete if an unrecognized table references addresses.
@@ -27,6 +27,18 @@ async def prune_addresses(db, *, enabled=False, batch_size=250, minutes=30):
     if has_links and "address_transactions" not in referenced_tables:
         logger.warning("Address retention skipped: legacy address relationship unverified")
         return 0
+    if has_links:
+        column_ok = await db.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'address_transactions'
+                  AND column_name = 'address_id'
+            )
+        """)
+        if not column_ok:
+            logger.warning("Address retention skipped: legacy link column missing")
+            return 0
     links_guard = """
         AND NOT EXISTS (
             SELECT 1 FROM address_transactions atx WHERE atx.address_id = a.id

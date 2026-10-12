@@ -49,3 +49,36 @@ async def wallet_profile(
         "coverage_url": "/api/coverage",
         "token_activity": {"status": "not_indexed", "note": "Token logs are decoded on demand, not persisted."},
     }
+
+
+@router.get("/{address}/balance")
+async def wallet_live_balance(address: str):
+    """Live ETH balance at one observed block; not historical transaction coverage."""
+    from fastapi import HTTPException
+    from src.blockchain.client import BlockchainClient
+
+    if not ADDRESS.fullmatch(address):
+        raise HTTPException(status_code=422, detail="Invalid Ethereum address")
+    client = BlockchainClient()
+    try:
+        if not await client.connect():
+            raise HTTPException(status_code=503, detail="Ethereum mainnet RPC unavailable")
+        # Pin both the balance and evidence block to one canonical block number.
+        block_number = await client.get_latest_block_number()
+        balance_wei = await client.w3.eth.get_balance(address, block_identifier=block_number)
+        return {
+            "address": address.lower(),
+            "chain_id": 1,
+            "block_number": block_number,
+            "balance_wei": str(balance_wei),
+            "balance_eth": str(__import__("decimal").Decimal(balance_wei) / __import__("decimal").Decimal(10**18)),
+            "source": "configured_ethereum_mainnet_rpc",
+            "historical_completeness": False,
+            "note": "Point-in-time native ETH balance. Does not include ERC-20 balances or prove complete wallet transaction history.",
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not retrieve verified Ethereum balance")
+    finally:
+        await client.close()

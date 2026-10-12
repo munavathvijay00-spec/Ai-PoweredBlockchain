@@ -53,6 +53,15 @@ def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list
     return list(range(last_processed + 1, min(latest, last_processed + limit) + 1))
 
 
+def is_chain_integrity_failure(error: Exception) -> bool:
+    """Never retry past a known reorg or contradictory transaction provenance."""
+    message = str(error)
+    return (
+        'REORG_DETECTED:' in message
+        or 'TRANSACTION_PROVENANCE_CONFLICT:' in message
+    )
+
+
 async def ingest_loop(interval_seconds: int = 15):
     """Infinite loop: fetch latest block → process → sleep → repeat."""
     logger.info(f"🚀 Starting ingest loop (interval: {interval_seconds}s)")
@@ -191,8 +200,8 @@ async def ingest_loop(interval_seconds: int = 15):
 
             except Exception as e:
                 logger.exception(f"❌ Error in iteration {iteration}: {e}")
-                if 'REORG_DETECTED:' in str(e):
-                    logger.critical('Ingestion halted to prevent incorrect chain history; no automatic orphan rollback implemented')
+                if is_chain_integrity_failure(e):
+                    logger.critical('Ingestion halted on chain-integrity conflict; manual investigation and replay required')
                     raise
 
             # Sleep before next iteration

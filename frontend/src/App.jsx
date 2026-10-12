@@ -17,7 +17,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [selectedTx, setSelectedTx] = useState(null);
-  const [view, setView] = useState('wallet');
+  const [view, setView] = useState('transactions');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
@@ -97,19 +97,16 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#070d1b] text-slate-100">
-      <header className="border-b border-cyan-400/10 bg-[#0a1223]/95 mb-7">
+    <div className="min-h-screen bg-slate-900 text-slate-100">
+      <header className="border-b border-slate-700 bg-slate-800/95 mb-7">
         <div className="max-w-7xl mx-auto px-6 py-5 flex flex-wrap gap-4 items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center text-2xl">⬡</div>
-            <div>
-              <div className="text-[10px] tracking-[0.32em] text-cyan-400 font-bold uppercase">Ethereum threat intelligence</div>
-              <h1 className="text-2xl font-extrabold text-white tracking-tight">CHAIN<span className="text-cyan-400">SCOPE</span> <span className="text-xs font-medium text-slate-500 align-middle">/ COMMAND CENTER</span></h1>
-            </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-white">🔗 Blockchain Intelligence Platform</h1>
+            <p className="text-sm text-slate-400 mt-1">AI-powered Ethereum transaction analysis</p>
           </div>
-          <div className="flex items-center gap-3 rounded-xl bg-emerald-500/5 border border-emerald-400/20 px-4 py-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${error ? 'bg-rose-400' : 'bg-emerald-400 animate-pulse'}`} />
-            <div><div className="text-xs font-semibold text-emerald-300">{error ? 'FEED INTERRUPTED' : 'LIVE DATA FEED'}</div><div className="text-[11px] text-slate-500">Last sync {lastUpdate.toLocaleTimeString()}</div></div>
+          <div className="text-sm">
+            <div className={error ? 'text-rose-400' : 'text-emerald-400'}>● {error ? 'Feed unavailable' : 'Live'}</div>
+            <div className="text-xs text-slate-500 mt-1">Updated: {lastUpdate.toLocaleTimeString()}</div>
           </div>
         </div>
       </header>
@@ -121,20 +118,16 @@ function App() {
           </div>
         )}
 
-        <div className="mb-6">
-          <div className="text-xs uppercase tracking-[0.25em] text-cyan-400 mb-2">Intelligence overview / Ethereum mainnet</div>
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-white mb-2">Follow the money. <span className="text-cyan-400">Surface the signals.</span></h2>
-          <p className="text-slate-400 text-sm">Live transaction monitoring, evidence-backed risk detection, and interactive wallet investigations.</p>
-        </div>
         {loading && <p role="status" className="text-sm text-slate-400 mb-4">Connecting to Ethereum intelligence feed…</p>}
         <StatsBar stats={stats} />
-        <div className="flex flex-wrap gap-2 my-7 border-b border-slate-700/60 pb-3">
-          <button onClick={() => setView('wallet')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'wallet' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>⌕ Wallet intelligence</button>
-          <button onClick={() => setView('investigate')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'investigate' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>◎ Investigation graph</button>
-          <button onClick={() => setView('transactions')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${view === 'transactions' ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>≡ Transaction explorer</button>
-        </div>
+        <nav aria-label="Dashboard sections" className="flex flex-wrap gap-2 mt-5 mb-6">
+          <button onClick={() => setView('transactions')} className={`rounded-lg px-4 py-2 text-sm transition ${view === 'transactions' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>Transactions</button>
+          <button onClick={() => setView('wallet')} className={`rounded-lg px-4 py-2 text-sm transition ${view === 'wallet' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>Wallet lookup</button>
+          <button onClick={() => setView('investigate')} className={`rounded-lg px-4 py-2 text-sm transition ${view === 'investigate' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>Investigation graph</button>
+        </nav>
         {view === 'wallet' && <div className="mb-7"><WalletInvestigator /></div>}
         {view === 'investigate' && <div className="mb-7"><InvestigationGraph transactions={flagged} onSelect={inspectTransaction} /></div>}
+        {view === 'transactions' && <>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className="lg:col-span-2">
@@ -149,6 +142,7 @@ function App() {
         </div>
 
         <TransactionList transactions={filtered} onSelect={inspectTransaction} />
+        </>
       </main>
 
       <footer className="text-center text-slate-600 text-xs py-8">

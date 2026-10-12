@@ -54,7 +54,8 @@ async def prune_addresses(db, *, enabled=False, batch_size=250, minutes=30):
             WHERE t.from_address_id = a.id OR t.to_address_id = a.id
         )
         AND NOT EXISTS (SELECT 1 FROM alerts al WHERE al.address_id = a.id)
-        AND NOT EXISTS (SELECT 1 FROM blacklist bl WHERE bl.address = a.address)
+        AND NOT EXISTS (SELECT 1 FROM blacklist bl WHERE lower(bl.address) = a.address)
+        AND NOT EXISTS (SELECT 1 FROM verified_address_intelligence vi WHERE vi.address = a.address)
         AND a.label IS NULL
         AND a.is_blacklisted IS NOT TRUE
         AND COALESCE(a.risk_score, 0) = 0

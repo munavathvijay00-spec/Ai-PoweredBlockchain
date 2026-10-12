@@ -21,6 +21,7 @@ from src.risk.scorer import get_scorer
 from src.agents.explainer import get_explainer
 from src.ingest.worker import process_one_block
 from src.ingest.address_retention import prune_addresses
+from src.risk.ofac_intelligence import ensure_intelligence_schema, refresh_ofac
 
 
 _shutdown_requested = False
@@ -46,6 +47,8 @@ async def ingest_loop(interval_seconds: int = 15):
 
     # Set up database + dependencies
     db = await get_db()
+    await ensure_intelligence_schema(db)
+    await refresh_ofac(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()
@@ -83,7 +86,7 @@ async def ingest_loop(interval_seconds: int = 15):
                     f"Flagged: {total_flagged}"
                 )
 
-                # Retain recent transactions; run once every ten iterations.
+                # Refresh verified source about every 24 hours at 15s cadence.\n                if iteration % 5760 == 0:\n                    await refresh_ofac(db)\n\n                # Retain recent transactions; run once every ten iterations.
                 if iteration % 10 == 0:
                     try:
                         deleted = await db.execute("""

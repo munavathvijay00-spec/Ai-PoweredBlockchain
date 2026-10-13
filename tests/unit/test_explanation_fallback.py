@@ -9,7 +9,7 @@ def test_evidence_fallback_includes_score_and_reason():
         {"risk_score": 85},
         [{"factor": "verified_sanctions_match", "reason": "Exact Ethereum address match in OFAC SDN sanctions data"}],
     )
-    assert "Rule-based" in result
+    assert result.startswith("Evidence-based transaction review:")
     assert "85/100" in result
     assert "[E1]" in result
     assert "OFAC SDN" in result
@@ -18,6 +18,7 @@ def test_evidence_fallback_includes_score_and_reason():
 
 def test_empty_factors_do_not_invent_evidence():
     result = evidence_explanation({"risk_score": 25}, [])
+    assert result.startswith("Evidence-based transaction review:")
     assert "does not include a specific supporting factor" in result
 
 
@@ -30,7 +31,7 @@ async def test_explainer_falls_back_on_provider_failure():
     explainer._call_ollama = AsyncMock(side_effect=RuntimeError("offline"))
     explainer._build_prompt = lambda tx, factors: "prompt"
     result = await explainer.explain({"risk_score": 30}, [{"reason": "Unusual transfer size"}])
-    assert "Rule-based" in result
+    assert result.startswith("Evidence-based transaction review:")
     assert "Unusual transfer size" in result
 
 
@@ -58,6 +59,6 @@ async def test_ai_is_skipped_without_supporting_factors():
     explainer._call_ollama = AsyncMock(return_value="This transaction looks suspicious.")
     explainer._build_prompt = lambda tx, factors: "prompt"
     result = await explainer.explain({"risk_score": 30}, [])
-    assert result.startswith("Rule-based risk assessment:")
+    assert result.startswith("Evidence-based transaction review:")
     assert "does not include a specific supporting factor" in result
     explainer._call_ollama.assert_not_awaited()

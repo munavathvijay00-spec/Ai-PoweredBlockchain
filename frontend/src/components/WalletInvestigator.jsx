@@ -82,6 +82,54 @@ export default function WalletInvestigator() {
     } finally { if (version === requestVersion.current) setMoreLoading(false); }
   }
 
+  function exportEvidenceBundle() {
+    if (!wallet) return;
+    const sortedTransfers = [...transfers].sort((a, b) => transferKey(a).localeCompare(transferKey(b)));
+    const hashes = [...new Set(sortedTransfers.map(t => t.hash).filter(hash => /^0x[a-fA-F0-9]{64}$/.test(hash || '')))].sort();
+    const bundle = {
+      schema_version: 'chainscope-wallet-evidence-v1',
+      exported_at_utc: new Date().toISOString(),
+      chain: 'ethereum-mainnet',
+      investigated_address: wallet.toLowerCase(),
+      source: {
+        api_base: 'ChainScope configured API /api/wallets/{address}',
+        transfer_endpoint: 'transfers',
+        graph_endpoint: 'indexed-graph',
+        report_endpoint: 'investigation-report',
+        balance_endpoint: 'balance',
+        verification_note: 'Explorer links permit independent verification of transaction hashes; exported values are API observations, not independently verified attestations.',
+      },
+      coverage: {
+        transfer_records_loaded: sortedTransfers.length,
+        outgoing_more_pages_available: Boolean(cursors.outgoing),
+        incoming_more_pages_available: Boolean(cursors.incoming),
+        unavailable_endpoints: partial,
+        historical_completeness: 'not_established',
+        indexed_categories: report?.coverage_details?.categories || ['external', 'erc20'],
+        excluded_categories: ['internal_calls', 'nfts'],
+        indexed_ingestion_freshness: 'not_verified',
+      },
+      evidence_links: hashes.map(hash => ({ tx_hash: hash, explorer_url: 'https://etherscan.io/tx/' + hash })),
+      transfers: sortedTransfers,
+      graph: graph || null,
+      investigation_report: report || null,
+      balance: balance || null,
+      limitations: [
+        'Only loaded transfer pages are included; further pages may exist.',
+        'A transfer does not establish address ownership, identity, or fraud.',
+        'The indexed ingestion worker may be stale; verify block and transaction evidence independently.',
+        'This export is a point-in-time API snapshot, not a complete chain archive.',
+      ],
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2) + '\\n'], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chainscope-evidence-' + wallet.toLowerCase() + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   const normalizedWallet = wallet.toLowerCase();
   const filteredTransfers = transfers.filter(tx => {
     const from = (tx.from_address || '').toLowerCase();
@@ -186,7 +234,7 @@ export default function WalletInvestigator() {
         <p className="text-sm text-slate-400 mt-2">More outgoing pages: {report.coverage_details?.outgoing_has_more ? 'Yes' : 'No'} · More incoming pages: {report.coverage_details?.incoming_has_more ? 'Yes' : 'No'}.</p>
         <p className="text-xs text-amber-300 mt-2">Complete historical coverage is not established. NFT and internal transaction indexing are not included.</p>
       </div>}
-      {report && <div className={block}><div className="text-[11px] uppercase tracking-widest text-cyan-400">Investigation report / evidence based</div><h3 className="text-lg font-bold mt-2">Observed activity summary</h3><p className="text-sm text-slate-300 mt-3">{report.summary}</p><p className="text-sm text-slate-400 mt-3">Unique counterparties in sampled pages: {report.unique_counterparties ?? '—'}</p><p className="text-sm text-amber-300 mt-2">Risk assessment: {report.risk_assessment?.status || 'not assessed'}. This is not a forensic attribution.</p><div className="mt-4 text-xs text-slate-400 space-y-1">{(report.limitations || []).map((item,i) => <p key={i}>• {item}</p>)}</div><button onClick={() => { const blob = new Blob([JSON.stringify(report,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');a.href=url;a.download='wallet-investigation.json';a.click();URL.revokeObjectURL(url); }} className="mt-4 border border-slate-600 rounded-lg px-4 py-2 text-sm hover:bg-slate-800">Export report JSON</button></div>}
+      {report && <div className={block}><div className="text-[11px] uppercase tracking-widest text-cyan-400">Investigation report / evidence based</div><h3 className="text-lg font-bold mt-2">Observed activity summary</h3><p className="text-sm text-slate-300 mt-3">{report.summary}</p><p className="text-sm text-slate-400 mt-3">Unique counterparties in sampled pages: {report.unique_counterparties ?? '—'}</p><p className="text-sm text-amber-300 mt-2">Risk assessment: {report.risk_assessment?.status || 'not assessed'}. This is not a forensic attribution.</p><div className="mt-4 text-xs text-slate-400 space-y-1">{(report.limitations || []).map((item,i) => <p key={i}>• {item}</p>)}</div><button onClick={() => { const blob = new Blob([JSON.stringify(report,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');a.href=url;a.download='wallet-investigation.json';a.click();URL.revokeObjectURL(url); }} className="mt-4 border border-slate-600 rounded-lg px-4 py-2 text-sm hover:bg-slate-800">Export report JSON</button><button type="button" onClick={exportEvidenceBundle} className="mt-4 ml-2 border border-cyan-500/50 text-cyan-300 rounded-lg px-4 py-2 text-sm hover:bg-slate-800">Export evidence bundle (JSON)</button></div>}
     </>}
   </section>;
 }

@@ -83,6 +83,9 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
     return ids;
   }, [query, network]);
   const related = selectedNode ? network.edges.filter(edge => edge.from === selectedNode || edge.to === selectedNode) : [];
+  const incoming = selectedNode ? related.filter(edge => edge.to === selectedNode) : [];
+  const outgoing = selectedNode ? related.filter(edge => edge.from === selectedNode) : [];
+  const counterparties = selectedNode ? new Set(related.map(edge => edge.from === selectedNode ? edge.to : edge.from)) : new Set();
   const focus = selectedNode || (selectedEdge && selectedEdge.from);
   const visibleEdges = network.edges.filter(edge => !matches || (matches.has(edge.from) && matches.has(edge.to)));
   const exportEvidence = () => {
@@ -175,7 +178,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
               })}
               {network.nodes.filter(node => !matches || matches.has(node.id)).map(node => {
                 const active = selectedNode === node.id;
-                const dim = focus && !active && !related.some(edge => edge.from === node.id || edge.to === node.id);
+                const dim = selectedNode && !active && !related.some(edge => edge.from === node.id || edge.to === node.id);
                 return <g key={node.id} data-network-node="true" className="cursor-pointer" onClick={() => setSelected({ kind: 'node', id: node.id })}>
                   <circle cx={node.x} cy={node.y} r={active ? 23 : 11 + Math.min(node.degree, 7) * 2} fill="#0a1426" stroke={palette[node.cluster % palette.length]} strokeWidth={active ? 4 : 2.5} opacity={dim ? .35 : 1}/>
                   <circle cx={node.x} cy={node.y} r="4" fill={palette[node.cluster % palette.length]} opacity={dim ? .35 : 1}/>
@@ -193,6 +196,12 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
           {selectedNode ? <>
             <p className="text-xs text-slate-400">Selected wallet</p><p className="text-xs font-mono break-all text-sky-300">{selectedNode}</p>
             <p className="text-sm text-slate-300">{related.length} observed transfers involving this wallet</p>
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="rounded bg-slate-900 p-2"><p className="text-lg font-semibold text-sky-300">{incoming.length}</p><p className="text-slate-400">Incoming</p></div>
+              <div className="rounded bg-slate-900 p-2"><p className="text-lg font-semibold text-sky-300">{outgoing.length}</p><p className="text-slate-400">Outgoing</p></div>
+              <div className="rounded bg-slate-900 p-2"><p className="text-lg font-semibold text-sky-300">{counterparties.size}</p><p className="text-slate-400">Peers</p></div>
+            </div>
+            <p className="text-xs text-slate-500">Counts reflect only loaded edges; self-transfers appear in both directions.</p>
             <div className="space-y-2 max-h-64 overflow-auto">{related.slice(0, 20).map(edge => <button key={edge.id} onClick={() => setSelected({ kind: 'edge', id: edge.id })} className="block text-left text-xs text-sky-300 hover:underline">{short(edge.tx.hash)} · {edge.tx.value ?? '—'} {edge.tx.asset || (edge.tx.category === 'external' ? 'ETH' : '')}</button>)}</div>
             <a href={`https://etherscan.io/address/${selectedNode}`} target="_blank" rel="noopener noreferrer" className="block text-sm text-sky-400 hover:underline">View wallet on Etherscan ↗</a>
           </> : selectedEdge ? <>

@@ -40,6 +40,10 @@ function SystemCoverage({ coverage }) {
   const readiness = coverage.product_readiness || {};
   const native = coverage.native_transactions || {};
   const checkpoint = coverage.reorg_verification || {};
+  const entityIntel = coverage.verified_entity_intelligence || {};
+  const entityRecords = Number(entityIntel.records || 0);
+  const entityAddresses = Number(entityIntel.unique_addresses || 0);
+  const entitySources = Number(entityIntel.sources || 0);
 
   return (
     <div className="space-y-5">
@@ -105,8 +109,32 @@ function SystemCoverage({ coverage }) {
           <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4"><p className="text-slate-500">Native transfers</p><p className="mt-2 text-slate-200">Recent retained index</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4"><p className="text-slate-500">ERC-20</p><p className="mt-2 text-slate-200">On-demand provider</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4"><p className="text-slate-500">Internal traces</p><p className="mt-2 text-rose-300">Not indexed</p></div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4"><p className="text-slate-500">Entity attribution</p><p className="mt-2 text-rose-300">Not established</p></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4">
+            <p className="text-slate-500">Verified entity context</p>
+            <p className={`mt-2 ${entityRecords ? 'text-emerald-300' : 'text-amber-300'}`}>
+              {entityRecords ? `${entityAddresses.toLocaleString()} addresses · ${entitySources} ${entitySources === 1 ? 'source' : 'sources'}` : 'No local verified records loaded'}
+            </p>
+          </div>
         </div>
+      </section>
+
+      <section className="panel p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p className="eyebrow">Entity intelligence registry</p>
+            <h3 className="mt-2 text-lg font-semibold text-white">Source-attributed matches only</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Wallet reports and graph nodes can now surface entity context only when ChainScope has a stored, source-attributed verified record for that address. A missing local match is never treated as proof that an address is unknown, safe, or unsanctioned elsewhere.</p>
+          </div>
+          <span className={`status-pill ${entityRecords ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-300' : 'border-amber-400/20 bg-amber-400/[0.07] text-amber-300'}`}>
+            {entityRecords ? 'Registry available' : 'Registry empty'}
+          </span>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4"><p className="text-xs text-slate-500">Verified records</p><p className="mt-2 text-xl font-semibold text-white">{entityRecords.toLocaleString()}</p></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4"><p className="text-xs text-slate-500">Unique addresses</p><p className="mt-2 text-xl font-semibold text-white">{entityAddresses.toLocaleString()}</p></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4"><p className="text-xs text-slate-500">Intelligence sources</p><p className="mt-2 text-xl font-semibold text-white">{entitySources.toLocaleString()}</p></div>
+        </div>
+        <p className="mt-4 text-xs text-slate-500">Newest source check: {entityIntel.newest_checked_at ? new Date(entityIntel.newest_checked_at).toLocaleString() : 'No verified check recorded'}</p>
       </section>
     </div>
   );
@@ -253,7 +281,7 @@ function App() {
                 <span className={freshness === 'live' ? 'text-emerald-300' : 'text-amber-300'}>{freshness === 'live' ? '●' : '○'}</span>
               </div>
               <p className="mt-3 text-sm font-medium text-slate-200">Recent-chain monitor</p>
-              <p className="mt-2 text-xs leading-5 text-slate-500">30-minute native retention. ERC-20 wallet transfers are queried on demand. Coverage limits stay visible.</p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">30-minute native retention. ERC-20 wallet transfers are queried on demand. Verified entity context appears only when source-attributed local records exist.</p>
               <button onClick={() => setView('system')} className="mt-4 text-xs font-medium text-cyan-300 hover:text-cyan-200">Review system coverage →</button>
             </div>
           </div>
@@ -274,7 +302,7 @@ function App() {
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{activeNav.label}</h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
                   {view === 'transactions' && 'Monitor recent Ethereum activity, inspect evidence, and move from risk cues to verifiable transaction details.'}
-                  {view === 'wallet' && 'Investigate an Ethereum address with bounded transfer coverage, counterparties, behavioral review signals, and exportable evidence.'}
+                  {view === 'wallet' && 'Investigate an Ethereum address with bounded transfer coverage, counterparties, behavioral review signals, and source-attributed entity context when available.'}
                   {view === 'investigate' && 'Explore observed transaction relationships without turning graph proximity into an ownership or wrongdoing claim.'}
                   {view === 'system' && 'See exactly what is live, what is partial, and what ChainScope is not yet designed to prove.'}
                 </p>

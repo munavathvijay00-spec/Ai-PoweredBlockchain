@@ -78,6 +78,24 @@ export default function WalletInvestigator() {
   });
   const observedPeers = new Set(transfers.flatMap(tx => [tx.from_address, tx.to_address]).filter(Boolean).map(value => value.toLowerCase()).filter(value => value !== normalizedWallet));
 
+  const counterpartyRows = (() => {
+    const peers = new Map();
+    for (const tx of transfers) {
+      const from = (tx.from_address || '').toLowerCase();
+      const to = (tx.to_address || '').toLowerCase();
+      const peer = from === normalizedWallet ? to : to === normalizedWallet ? from : '';
+      if (!peer || peer === normalizedWallet) continue;
+      const row = peers.get(peer) || { address: peer, incoming: 0, outgoing: 0, assets: new Set(), evidence: null };
+      if (to === normalizedWallet) row.incoming++;
+      if (from === normalizedWallet) row.outgoing++;
+      if (tx.asset) row.assets.add(tx.asset);
+      if (!row.evidence && tx.hash) row.evidence = tx.evidence_url || 'https://etherscan.io/tx/' + tx.hash;
+      peers.set(peer, row);
+    }
+    return [...peers.values()].sort((a, b) => b.incoming + b.outgoing - a.incoming - a.outgoing || a.address.localeCompare(b.address));
+  })();
+
+
   return <section className="space-y-5">
     <div className={block}>
       <div className="text-[11px] font-bold tracking-[0.2em] text-slate-400 uppercase">Wallet lookup · Ethereum mainnet</div>
@@ -107,6 +125,20 @@ export default function WalletInvestigator() {
         <div className="overflow-x-auto mt-4"><table className="w-full text-left text-xs"><thead><tr className="text-slate-400 border-b border-slate-700"><th className="py-3 pr-3">Transaction</th><th className="pr-3">From</th><th className="pr-3">To</th><th className="pr-3">Asset</th><th>Value</th></tr></thead><tbody>{filteredTransfers.map((t,i) => <tr key={[t.hash,t.from_address,t.to_address,t.asset,i].join('-')} className="border-b border-slate-800"><td className="py-3 pr-3 font-mono">{t.evidence_url ? <a className="text-cyan-300 hover:underline" href={t.evidence_url} target="_blank" rel="noopener noreferrer">{short(t.hash)} ↗</a> : short(t.hash)}</td><td className="pr-3 font-mono">{short(t.from_address)}</td><td className="pr-3 font-mono">{short(t.to_address)}</td><td className="pr-3">{t.asset || t.category || '—'}</td><td>{t.value ?? '—'}</td></tr>)}</tbody></table>{filteredTransfers.length === 0 && <p className="text-sm text-slate-500 py-5">{transfers.length ? 'No transfers match the selected filters.' : 'No transfer records returned in the requested pages. This does not prove inactivity.'}</p>}</div>
         {(cursors.outgoing || cursors.incoming) && <button disabled={moreLoading} onClick={loadMore} className="mt-4 border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded-lg disabled:opacity-50">{moreLoading ? 'Loading…' : 'Load older transfers'}</button>}
       </div>
+      {transfers.length > 0 && <div className={block}>
+        <h3 className="font-bold text-lg">Observed counterparties</h3>
+        <p className="text-xs text-slate-400 mt-2">Ranked by transfer-record frequency in loaded pages only. Counts are directional relative to the investigated wallet; they are not ownership or risk assessments.</p>
+        <div className="overflow-x-auto mt-4"><table className="w-full text-left text-xs">
+          <thead><tr className="text-slate-400 border-b border-slate-700"><th className="py-3 pr-3">Address</th><th className="pr-3">Received from peer</th><th className="pr-3">Sent to peer</th><th className="pr-3">Assets</th><th>Evidence</th></tr></thead>
+          <tbody>{counterpartyRows.slice(0, 15).map(peer => <tr key={peer.address} className="border-b border-slate-700/60">
+            <td className="py-3 pr-3 font-mono"><a href={'https://etherscan.io/address/' + peer.address} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline" title={peer.address}>{short(peer.address)} ↗</a></td>
+            <td className="pr-3">{peer.incoming}</td><td className="pr-3">{peer.outgoing}</td>
+            <td className="pr-3">{[...peer.assets].slice(0, 4).join(', ') || '—'}</td>
+            <td>{peer.evidence && <a href={peer.evidence} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline">Transfer ↗</a>}</td>
+          </tr>)}</tbody>
+        </table></div>
+        <p className="text-xs text-slate-500 mt-3">Showing {Math.min(15, counterpartyRows.length)} of {counterpartyRows.length} observed counterparties. Self-transfers are excluded.</p>
+      </div>}
       {graph && <div className={block}><h3 className="text-lg font-bold">Observed relationship graph</h3><p className="text-sm text-slate-400 mt-2">{graph.nodes?.length || 0} addresses · {graph.edges?.length || 0} evidence-backed edges · one hop</p><div className="mt-4 space-y-2 max-h-72 overflow-y-auto">{(graph.edges || []).slice(0, 50).map((edge,i) => <div key={i} className="text-xs font-mono rounded-lg bg-slate-900 p-3 flex flex-wrap gap-2 items-center"><span>{short(edge.source)}</span><span className="text-cyan-400">→</span><span>{short(edge.target)}</span><span className="text-slate-400">{edge.asset} {edge.value ?? ''}</span>{edge.evidence_url && <a href={edge.evidence_url} target="_blank" rel="noopener noreferrer" className="text-cyan-300 ml-auto">Evidence ↗</a>}</div>)}</div><p className="text-xs text-slate-500 mt-3">A recorded transfer is not proof of shared ownership or illicit activity.</p></div>}
       {report && <div className={block}>
         <h3 className="font-semibold text-lg">Behavioral review signals</h3>

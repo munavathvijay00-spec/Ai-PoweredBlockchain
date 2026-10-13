@@ -11,6 +11,9 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
   const [error, setError] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadedPages, setLoadedPages] = useState(1);
+  const [expansions, setExpansions] = useState({});
+  const [expanding, setExpanding] = useState('');
+  const [expansionAddress, setExpansionAddress] = useState('');
 
   async function investigate(event) {
     event.preventDefault();
@@ -23,6 +26,8 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     setError('');
     setResult(null);
     setLoadedPages(1);
+    setExpansions({});
+    setExpansionAddress('');
     try {
       const response = await api.getWalletGraph(wallet);
       setResult(response);
@@ -68,6 +73,39 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     }
   }
 
+  async function expandCounterparty() {
+    const wallet = expansionAddress.trim().toLowerCase();
+    if (!result || !VALID.test(wallet)) { setError('Enter a valid counterparty address.'); return; }
+    const known = new Set((result.edges || []).flatMap(edge => [edge.source?.toLowerCase(), edge.target?.toLowerCase()]));
+    if (!known.has(wallet)) { setError('Choose an address already observed in this network.'); return; }
+    if (wallet === result.root?.toLowerCase()) { setError('The root wallet is already loaded.'); return; }
+    if (expansions[wallet]) { setError('This counterparty has already been expanded.'); return; }
+    if (Object.keys(expansions).length >= 5) { setError('Expansion limit reached: five counterparties per investigation.'); return; }
+    setExpanding(wallet);
+    setError('');
+    try {
+      const page = await api.getWalletGraph(wallet);
+      setResult(previous => {
+        const seen = new Set(previous.edges.map(edge => [edge.tx_hash, edge.source?.toLowerCase(), edge.target?.toLowerCase(), edge.asset, edge.category, edge.value].join('|')));
+        const fresh = (page.edges || []).filter(edge => {
+          const key = [edge.tx_hash, edge.source?.toLowerCase(), edge.target?.toLowerCase(), edge.asset, edge.category, edge.value].join('|');
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return { ...previous, edges: [...previous.edges, ...fresh] };
+      });
+      setExpansions(previous => ({ ...previous, [wallet]: {
+        edges: (page.edges || []).length,
+        moreOutgoing: Boolean(page.next_page_keys?.outgoing),
+        moreIncoming: Boolean(page.next_page_keys?.incoming),
+      } }));
+      setExpansionAddress('');
+    } catch (failure) {
+      setError(failure.message || 'Counterparty expansion failed.');
+    } finally { setExpanding(''); }
+  }
+
   const records = result ? (result.edges || []).filter(edge => edge.source && edge.target && edge.tx_hash).map(edge => ({
     hash: edge.tx_hash,
     from_address: edge.source,
@@ -106,6 +144,24 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
       <p className="text-amber-300 text-xs mt-2">{result.scope || 'Bounded indexed transfer sample; historical completeness is not established.'}</p>
       <p className="text-slate-400 text-xs mt-2">Loaded page rounds: {loadedPages}. More pages: outgoing {result.next_page_keys?.outgoing ? 'yes' : 'no'}, incoming {result.next_page_keys?.incoming ? 'yes' : 'no'}.</p>
       {(result.next_page_keys?.outgoing || result.next_page_keys?.incoming) && <button onClick={loadMore} disabled={loadingMore} className="mt-3 rounded-lg border border-sky-500/50 text-sky-300 px-4 py-2 text-sm disabled:opacity-50">{loadingMore ? 'Loading older transfers…' : 'Load older transfers into graph'}</button>}
+      <div className="border-t border-slate-700 mt-4 pt-4">
+        <h3 className="font-semibold text-slate-100">Expand to a second hop</h3>
+        <p className="text-xs text-slate-400 mt-1">Select a counterparty already observed in the graph. Up to five explicit expansions; each fetches a bounded first page, not full history.</p>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <select aria-label="Counterparty to expand" value={expansionAddress} onChange={event => setExpansionAddress(event.target.value)}
+            className="flex-1 min-w-[210px] bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs font-mono">
+            <option value="">Choose observed counterparty…</option>
+            {[...new Set((result.edges || []).flatMap(edge => [edge.source?.toLowerCase(), edge.target?.toLowerCase()]))]
+              .filter(wallet => wallet && wallet !== result.root?.toLowerCase() && !expansions[wallet])
+              .sort().map(wallet => <option key={wallet} value={wallet}>{wallet}</option>)}
+          </select>
+          <button type="button" onClick={expandCounterparty} disabled={Boolean(expanding) || !expansionAddress || Object.keys(expansions).length >= 5}
+            className="rounded-lg bg-sky-700 px-4 py-2 text-sm disabled:opacity-50">{expanding ? 'Expanding…' : 'Expand wallet'}</button>
+        </div>
+        {Object.keys(expansions).length > 0 && <div className="mt-3 space-y-1 text-xs text-slate-400">
+          {Object.entries(expansions).map(([wallet, info]) => <p key={wallet} className="break-all">{wallet}: {info.edges} indexed records queried; more pages {info.moreOutgoing || info.moreIncoming ? 'available but not fetched' : 'not indicated'}</p>)}
+        </div>}
+      </div>
     </div>}
     <InvestigationGraph transactions={records} onSelect={selectTransaction} />
   </div>;

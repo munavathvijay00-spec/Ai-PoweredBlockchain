@@ -95,8 +95,19 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
     link.remove();
     URL.revokeObjectURL(url);
   };
-  const zoom = delta => setScale(current => Math.max(0.45, Math.min(3, +(current + delta).toFixed(2))));
-  const reset = () => { setScale(1); setOffset({ x: 0, y: 0 }); setSelected(null); setQuery(''); };
+  const zoom = delta => setScale(current => Math.max(0.15, Math.min(3, +(current + delta).toFixed(2))));
+  const reset = () => {
+    if (network.nodes.length) {
+      const xs = network.nodes.map(node => node.x);
+      const ys = network.nodes.map(node => node.y);
+      const minX = Math.min(...xs) - 60, maxX = Math.max(...xs) + 60;
+      const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 60;
+      const fitted = Math.max(0.15, Math.min(3, 940 / (maxX - minX), 660 / (maxY - minY)));
+      setScale(fitted);
+      setOffset({ x: (500 - (minX + maxX) / 2) * fitted, y: (360 - (minY + maxY) / 2) * fitted });
+    } else { setScale(1); setOffset({ x: 0, y: 0 }); }
+    setSelected(null); setQuery('');
+  };
   const pointerDown = event => {
     if (event.button !== 0 || event.target.closest('[data-network-node]')) return;
     drag.current = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
@@ -128,7 +139,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
           <div className="absolute top-3 left-3 z-10 flex gap-2">
             <button aria-label="Zoom in" onClick={() => zoom(.2)} className="bg-slate-800 border border-slate-600 rounded px-3 py-1 text-white">+</button>
             <button aria-label="Zoom out" onClick={() => zoom(-.2)} className="bg-slate-800 border border-slate-600 rounded px-3 py-1 text-white">−</button>
-            <button onClick={reset} className="bg-slate-800 border border-slate-600 rounded px-3 py-1 text-sm text-white">Reset</button>
+            <button onClick={reset} className="bg-slate-800 border border-slate-600 rounded px-3 py-1 text-sm text-white">Fit graph</button>
           </div>
           <svg viewBox="0 0 1000 720" className="w-full h-[490px] lg:h-[590px] touch-none cursor-grab" role="img"
             aria-label="Interactive observed Ethereum transfer network. Select a node or edge to inspect evidence."

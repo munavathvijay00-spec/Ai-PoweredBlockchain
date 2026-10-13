@@ -74,6 +74,7 @@ export default function WalletInvestigator() {
   const filteredTransfers = transfers.filter(tx => {
     const from = (tx.from_address || '').toLowerCase();
     const to = (tx.to_address || '').toLowerCase();
+    if (from !== normalizedWallet && to !== normalizedWallet) return false;
     if (transferFilter === 'incoming' && to !== normalizedWallet) return false;
     if (transferFilter === 'outgoing' && from !== normalizedWallet) return false;
     const q = transferQuery.trim().toLowerCase();

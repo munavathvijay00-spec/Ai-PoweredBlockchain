@@ -15,7 +15,8 @@ function App() {
   const [flagged, setFlagged] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [latestIndexedBlock, setLatestIndexedBlock] = useState(null);
   const [selectedTx, setSelectedTx] = useState(null);
   const [view, setView] = useState('transactions');
   const [search, setSearch] = useState('');
@@ -37,10 +38,14 @@ function App() {
         if (!active) return;
         const [statsResult, txsResult, flaggedResult] = results;
         if (statsResult.status === 'fulfilled') setStats(statsResult.value);
-        if (txsResult.status === 'fulfilled') setTransactions(txsResult.value.transactions ?? []);
+        if (txsResult.status === 'fulfilled') {
+          const rows = txsResult.value.transactions ?? [];
+          setTransactions(rows);
+          setLatestIndexedBlock(rows.length ? Math.max(...rows.map(tx => Number(tx.block_number) || 0)) : null);
+        }
         if (flaggedResult.status === 'fulfilled') setFlagged(flaggedResult.value.transactions ?? []);
         const failures = results.filter(result => result.status === 'rejected');
-        setError(failures.length ? 'Some live data is temporarily unavailable. Showing the latest successful results.' : null);
+        setError(failures.length ? 'Some API requests failed. Showing the latest successful results.' : null);
         if (failures.length !== results.length) setLastUpdate(new Date());
       } catch {
         if (active) setError('Unable to refresh live data. Retrying automatically.');
@@ -105,8 +110,10 @@ function App() {
             <p className="text-sm text-slate-400 mt-1">AI-powered Ethereum transaction analysis</p>
           </div>
           <div className="text-sm">
-            <div className={error ? 'text-rose-400' : 'text-emerald-400'}>● {error ? 'Feed unavailable' : 'Live'}</div>
-            <div className="text-xs text-slate-500 mt-1">Updated: {lastUpdate.toLocaleTimeString()}</div>
+            <div className={error ? 'text-amber-300' : 'text-emerald-400'}>● {error ? 'API partially available' : lastUpdate ? 'API responding' : 'Checking API'}</div>
+            <div className="text-xs text-amber-300 mt-1">Blockchain indexing freshness: unverified</div>
+            <div className="text-xs text-slate-500 mt-1">Latest returned block: {latestIndexedBlock ? latestIndexedBlock.toLocaleString() : 'Unknown'}</div>
+            <div className="text-xs text-slate-500 mt-1">API checked: {lastUpdate ? lastUpdate.toLocaleTimeString() : 'Not yet'}</div>
           </div>
         </div>
       </header>

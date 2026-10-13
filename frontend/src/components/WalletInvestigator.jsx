@@ -159,7 +159,7 @@ export default function WalletInvestigator() {
             <div className="mt-3 flex flex-wrap gap-3">{(signal.evidence || []).filter(item => /^0x[a-fA-F0-9]{64}$/.test(item.tx_hash || '')).map(item => <a key={item.tx_hash} href={'https://etherscan.io/tx/' + item.tx_hash} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline font-mono">{short(item.tx_hash)} ↗</a>)}</div>
             {!(signal.evidence || []).length && <p className="text-xs text-amber-300 mt-3">No transaction evidence links supplied for this signal.</p>}
             <p className="text-xs text-slate-500 mt-3">Review indicator only; no independently validated fraud classification.</p>
-          </details>)}</div>
+          </details>)}</div>}
         <p className="text-xs text-amber-300 mt-4">Detection evaluation: {report.detection_quality?.status === 'not_evaluated' ? 'Not evaluated against labeled cases' : (report.detection_quality?.status || 'Unknown')}.</p>
       </div>}
       {report && <div className={block}>

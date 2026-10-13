@@ -15,9 +15,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.utils.config import get_settings
 
 _OVERCLAIM_PHRASES = (
-    "definitely", "certainly", "proves", "proof of wrongdoing", "confirmed fraud",
-    "confirmed illicit", "is fraudulent", "is a scam", "criminal activity",
-    "money laundering", "stolen funds", "malicious actor",
+    "definitely", "certainly", "confirmed fraud", "confirmed illicit",
+    "is fraudulent", "is a scam", "criminal activity", "money laundering",
+    "stolen funds", "malicious actor",
 )
 
 _SENSITIVE_CLAIM_TERMS = (
@@ -45,6 +45,8 @@ def explanation_is_grounded(candidate: str, baseline: str) -> bool:
     baseline_lower = (baseline or "").lower()
     if any(phrase in lowered for phrase in _OVERCLAIM_PHRASES):
         return False
+    if "proves" in lowered and "does not prove" not in lowered and "not proof" not in lowered:
+        return False
     for term in _SENSITIVE_CLAIM_TERMS:
         if term in lowered and term not in baseline_lower:
             return False
@@ -65,14 +67,14 @@ def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
             break
     if reasons:
         return (
-            f"Evidence-based assessment: this transaction scored {score}/100. "
-            f"Observed scoring signals: {'; '.join(reasons)}. "
-            "These signals describe only the indexed evidence used by the scorer and do not establish intent or wrongdoing."
+            f"Rule-based risk assessment: this transaction scored {score}/100. "
+            f"Detected evidence: {'; '.join(reasons)}. "
+            "These indicators warrant review but do not independently prove wrongdoing."
         )
     return (
-        f"Evidence-based assessment: this transaction scored {score}/100. "
-        "No specific supporting factor is stored for this score, so an AI conclusion would not be reliable. "
-        "Review the raw transaction evidence before drawing conclusions."
+        f"Rule-based risk assessment: this transaction scored {score}/100. "
+        "The available scoring data does not include a specific supporting factor; "
+        "an AI conclusion would not be reliable, so review the raw transaction evidence before drawing conclusions."
     )
 
 
@@ -87,7 +89,8 @@ class TransactionExplainer:
         self._semaphore = asyncio.Semaphore(3)
         logger.info(f"🧠 Grounded explainer initialized (provider={self.provider}, model={self.model})")
 
-    def _build_prompt(self, baseline: str) -> str:
+    def _build_prompt(self, tx: Dict, factors: List[Dict]) -> str:
+        baseline = evidence_explanation(tx, factors)
         return f"""You are editing an evidence-grounded Ethereum transaction explanation.
 
 SOURCE OF TRUTH:
@@ -126,14 +129,21 @@ Return only the explanation text."""
     async def explain(self, tx: Dict, factors: List[Dict]) -> str:
         """Return validated AI wording or the deterministic evidence fallback."""
         baseline = evidence_explanation(tx, factors)
+        if not factors:
+            return baseline
         try:
-            prompt = self._build_prompt(baseline)
+            prompt = self._build_prompt(tx, factors)
             async with self._semaphore:
                 if self.provider == "ollama":
                     candidate = await self._call_ollama(prompt)
                 elif self.provider == "groq":
-                    if not self.settings.groq_api_key or self.settings.groq_api_key == "not-set":
+                    settings = getattr(self, "settings", None)
+                    api_key = getattr(settings, "groq_api_key", "not-set")
+                    model = getattr(settings, "llm_model", None)
+                    if not api_key or api_key == "not-set":
                         return baseline
+                    if model:
+                        self.model = model
                     candidate = await self._call_groq(prompt)
                 else:
                     return baseline

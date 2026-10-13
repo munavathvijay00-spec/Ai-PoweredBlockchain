@@ -3,9 +3,7 @@ API route handlers.
 Each function handles one HTTP endpoint.
 """
 import json
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from loguru import logger
 
 from src.api.models import (
     TransactionResponse,
@@ -19,6 +17,21 @@ from src.database.repositories import TransactionRepository, AddressRepository
 
 router = APIRouter(prefix="/api", tags=["blockchain"])
 
+FLAGGED_THRESHOLD = 20
+HIGH_RISK_THRESHOLD = 40
+CRITICAL_THRESHOLD = 80
+
+
+def _explanation_status(explanation) -> str:
+    if not isinstance(explanation, str) or not explanation.strip():
+        return "none"
+    text = explanation.strip()
+    if text.startswith("Grounded AI explanation:"):
+        return "grounded_ai"
+    if text.startswith("Rule-based risk assessment:") or text.startswith("Evidence-based assessment:"):
+        return "deterministic"
+    return "legacy_unverified"
+
 
 def _format_tx(row: dict) -> TransactionResponse:
     """Convert a raw DB row into a TransactionResponse."""
@@ -31,6 +44,7 @@ def _format_tx(row: dict) -> TransactionResponse:
             factors = []
     if not isinstance(factors, list):
         factors = []
+    explanation = row.get('ai_explanation')
     return TransactionResponse(
         hash=row['hash'],
         from_address=row['from_address'],
@@ -40,7 +54,8 @@ def _format_tx(row: dict) -> TransactionResponse:
         block_number=row['block_number'],
         timestamp=row['timestamp'],
         risk_score=row.get('risk_score', 0),
-        ai_explanation=row.get('ai_explanation'),
+        ai_explanation=explanation,
+        explanation_status=_explanation_status(explanation),
         risk_factors=[factor for factor in factors if isinstance(factor, dict)],
         evidence_assessment=assess_evidence(factors, row['hash']),
     )
@@ -78,11 +93,11 @@ async def get_transaction(
 
 @router.get("/flagged", response_model=TransactionListResponse)
 async def list_flagged(
-    min_score: int = Query(20, ge=0, le=100, description="Minimum risk score"),
+    min_score: int = Query(FLAGGED_THRESHOLD, ge=0, le=100, description="Minimum risk score"),
     limit: int = Query(50, ge=1, le=200),
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    """List flagged (high-risk) transactions."""
+    """List transactions at or above the requested review threshold."""
     rows = await repo.list_flagged(min_score=min_score, limit=limit)
     return TransactionListResponse(
         transactions=[_format_tx(r) for r in rows],
@@ -97,23 +112,37 @@ async def get_stats(
     tx_repo: TransactionRepository = Depends(get_transaction_repo),
     addr_repo: AddressRepository = Depends(get_address_repo),
 ):
-    """Get system-wide statistics."""
+    """Get retained-window statistics from one internally consistent threshold policy."""
     total_txs = await tx_repo.count()
     total_addrs = await addr_repo.count()
 
     stats = await tx_repo.db.fetchrow("""
-        SELECT 
+        SELECT
             COALESCE(AVG(risk_score), 0) AS avg_score,
             COALESCE(MAX(risk_score), 0) AS max_score,
-            COUNT(CASE WHEN ai_explanation IS NOT NULL THEN 1 END) AS explained
+            COUNT(*) FILTER (WHERE risk_score >= $1) AS flagged,
+            COUNT(*) FILTER (WHERE risk_score >= $2) AS high_risk,
+            COUNT(*) FILTER (WHERE risk_score >= $3) AS critical,
+            COUNT(*) FILTER (WHERE ai_explanation IS NOT NULL) AS explained,
+            COUNT(*) FILTER (
+                WHERE ai_explanation LIKE 'Grounded AI explanation:%'
+                   OR ai_explanation LIKE 'Rule-based risk assessment:%'
+                   OR ai_explanation LIKE 'Evidence-based assessment:%'
+            ) AS grounded_explanations
         FROM transactions
-    """)
+    """, FLAGGED_THRESHOLD, HIGH_RISK_THRESHOLD, CRITICAL_THRESHOLD)
 
     return StatsResponse(
         total_transactions=total_txs,
         total_addresses=total_addrs,
-        flagged_transactions=await tx_repo.count_flagged(min_score=20),
+        flagged_transactions=int(stats['flagged']),
+        flagged_threshold=FLAGGED_THRESHOLD,
+        high_risk_transactions=int(stats['high_risk']),
+        high_risk_threshold=HIGH_RISK_THRESHOLD,
+        critical_transactions=int(stats['critical']),
+        critical_threshold=CRITICAL_THRESHOLD,
         avg_risk_score=round(float(stats['avg_score']), 2),
         max_risk_score=int(stats['max_score']),
         explained_transactions=int(stats['explained']),
+        grounded_explanations=int(stats['grounded_explanations']),
     )

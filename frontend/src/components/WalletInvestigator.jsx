@@ -17,6 +17,8 @@ export default function WalletInvestigator() {
   const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState('');
   const [partial, setPartial] = useState([]);
+  const [transferFilter, setTransferFilter] = useState('all');
+  const [transferQuery, setTransferQuery] = useState('');
 
   async function investigate(event) {
     event.preventDefault();
@@ -65,6 +67,17 @@ export default function WalletInvestigator() {
     } finally { setMoreLoading(false); }
   }
 
+  const normalizedWallet = wallet.toLowerCase();
+  const filteredTransfers = transfers.filter(tx => {
+    const from = (tx.from_address || '').toLowerCase();
+    const to = (tx.to_address || '').toLowerCase();
+    if (transferFilter === 'incoming' && to !== normalizedWallet) return false;
+    if (transferFilter === 'outgoing' && from !== normalizedWallet) return false;
+    const q = transferQuery.trim().toLowerCase();
+    return !q || [tx.hash, tx.from_address, tx.to_address, tx.asset, tx.category].some(value => String(value || '').toLowerCase().includes(q));
+  });
+  const observedPeers = new Set(transfers.flatMap(tx => [tx.from_address, tx.to_address]).filter(Boolean).map(value => value.toLowerCase()).filter(value => value !== normalizedWallet));
+
   return <section className="space-y-5">
     <div className={block}>
       <div className="text-[11px] font-bold tracking-[0.2em] text-slate-400 uppercase">Wallet lookup · Ethereum mainnet</div>
@@ -86,7 +99,12 @@ export default function WalletInvestigator() {
       <div className={block}>
         <h3 className="font-bold text-lg">Evidence-linked transfers</h3>
         <p className="text-xs text-amber-300 mt-2">Partial coverage: indexed external ETH and ERC-20 records only. Older history requires pagination; internal calls and NFTs are excluded.</p>
-        <div className="overflow-x-auto mt-4"><table className="w-full text-left text-xs"><thead><tr className="text-slate-400 border-b border-slate-700"><th className="py-3 pr-3">Transaction</th><th className="pr-3">From</th><th className="pr-3">To</th><th className="pr-3">Asset</th><th>Value</th></tr></thead><tbody>{transfers.map((t,i) => <tr key={[t.hash,t.from_address,t.to_address,t.asset,i].join('-')} className="border-b border-slate-800"><td className="py-3 pr-3 font-mono">{t.evidence_url ? <a className="text-cyan-300 hover:underline" href={t.evidence_url} target="_blank" rel="noopener noreferrer">{short(t.hash)} ↗</a> : short(t.hash)}</td><td className="pr-3 font-mono">{short(t.from_address)}</td><td className="pr-3 font-mono">{short(t.to_address)}</td><td className="pr-3">{t.asset || t.category || '—'}</td><td>{t.value ?? '—'}</td></tr>)}</tbody></table>{transfers.length === 0 && <p className="text-sm text-slate-500 py-5">No transfer records returned in the requested pages. This does not prove inactivity.</p>}</div>
+        <div className="flex flex-wrap gap-3 items-center mt-4">
+          <select aria-label="Transfer direction" value={transferFilter} onChange={event => setTransferFilter(event.target.value)} className="rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm"><option value="all">All directions</option><option value="incoming">Incoming</option><option value="outgoing">Outgoing</option></select>
+          <input aria-label="Filter transfer evidence" value={transferQuery} onChange={event => setTransferQuery(event.target.value)} placeholder="Search hash, wallet, asset…" className="flex-1 min-w-[180px] rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm" />
+          <span className="text-xs text-slate-400">{filteredTransfers.length} matching · {observedPeers.size} observed peers</span>
+        </div>
+        <div className="overflow-x-auto mt-4"><table className="w-full text-left text-xs"><thead><tr className="text-slate-400 border-b border-slate-700"><th className="py-3 pr-3">Transaction</th><th className="pr-3">From</th><th className="pr-3">To</th><th className="pr-3">Asset</th><th>Value</th></tr></thead><tbody>{filteredTransfers.map((t,i) => <tr key={[t.hash,t.from_address,t.to_address,t.asset,i].join('-')} className="border-b border-slate-800"><td className="py-3 pr-3 font-mono">{t.evidence_url ? <a className="text-cyan-300 hover:underline" href={t.evidence_url} target="_blank" rel="noopener noreferrer">{short(t.hash)} ↗</a> : short(t.hash)}</td><td className="pr-3 font-mono">{short(t.from_address)}</td><td className="pr-3 font-mono">{short(t.to_address)}</td><td className="pr-3">{t.asset || t.category || '—'}</td><td>{t.value ?? '—'}</td></tr>)}</tbody></table>{filteredTransfers.length === 0 && <p className="text-sm text-slate-500 py-5">{transfers.length ? 'No transfers match the selected filters.' : 'No transfer records returned in the requested pages. This does not prove inactivity.'}</p>}</div>
         {(cursors.outgoing || cursors.incoming) && <button disabled={moreLoading} onClick={loadMore} className="mt-4 border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded-lg disabled:opacity-50">{moreLoading ? 'Loading…' : 'Load older transfers'}</button>}
       </div>
       {graph && <div className={block}><h3 className="text-lg font-bold">Observed relationship graph</h3><p className="text-sm text-slate-400 mt-2">{graph.nodes?.length || 0} addresses · {graph.edges?.length || 0} evidence-backed edges · one hop</p><div className="mt-4 space-y-2 max-h-72 overflow-y-auto">{(graph.edges || []).slice(0, 50).map((edge,i) => <div key={i} className="text-xs font-mono rounded-lg bg-slate-900 p-3 flex flex-wrap gap-2 items-center"><span>{short(edge.source)}</span><span className="text-cyan-400">→</span><span>{short(edge.target)}</span><span className="text-slate-400">{edge.asset} {edge.value ?? ''}</span>{edge.evidence_url && <a href={edge.evidence_url} target="_blank" rel="noopener noreferrer" className="text-cyan-300 ml-auto">Evidence ↗</a>}</div>)}</div><p className="text-xs text-slate-500 mt-3">A recorded transfer is not proof of shared ownership or illicit activity.</p></div>}

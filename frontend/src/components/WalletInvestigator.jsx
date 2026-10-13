@@ -149,12 +149,18 @@ export default function WalletInvestigator() {
         <p className="text-xs text-slate-400 mt-2">Transparent rules applied to the fetched transaction sample. Not fraud verdicts.</p>
         {(report.behavioral_signals || []).length === 0
           ? <p className="text-sm text-slate-400 mt-3">No supported review signals observed in this sample. This does not establish that the wallet is safe.</p>
-          : <div className="mt-3 space-y-3">{report.behavioral_signals.map((signal, i) => <div key={signal.code + i} className="border border-slate-700 rounded-lg p-3">
-            <p className="font-medium text-slate-100">{signal.title} <span className="text-xs text-slate-400">({signal.observed_count} records)</span></p>
-            <p className="text-sm text-slate-400 mt-1">{signal.explanation}</p>
-            <div className="mt-2 flex flex-wrap gap-3">{(signal.evidence || []).map(item => <a key={item.tx_hash} href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline">{short(item.tx_hash)} ↗</a>)}</div>
-          </div>)}</div>}
-        <p className="text-xs text-amber-300 mt-4">Detection accuracy: {report.detection_quality?.status === 'not_evaluated' ? 'Not evaluated against labeled cases' : (report.detection_quality?.status || 'Unknown')}.</p>
+          : <div className="mt-3 space-y-3">{report.behavioral_signals.map((signal, i) => <details key={(signal.code || 'signal') + i} className="border border-slate-700 rounded-lg p-3 group">
+            <summary className="cursor-pointer list-none flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium text-slate-100">{signal.title || signal.code || 'Review signal'}</span>
+              <span className="text-xs text-slate-400">{signal.observed_count ?? '—'} records · View evidence ▾</span>
+            </summary>
+            <p className="text-sm text-slate-400 mt-3">{signal.explanation || 'No additional rule explanation provided by the API.'}</p>
+            <p className="text-xs text-slate-500 mt-2">Rule identifier: <code className="font-mono">{signal.code || 'Not supplied'}</code></p>
+            <div className="mt-3 flex flex-wrap gap-3">{(signal.evidence || []).filter(item => /^0x[a-fA-F0-9]{64}$/.test(item.tx_hash || '')).map(item => <a key={item.tx_hash} href={'https://etherscan.io/tx/' + item.tx_hash} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline font-mono">{short(item.tx_hash)} ↗</a>)}</div>
+            {!(signal.evidence || []).length && <p className="text-xs text-amber-300 mt-3">No transaction evidence links supplied for this signal.</p>}
+            <p className="text-xs text-slate-500 mt-3">Review indicator only; no independently validated fraud classification.</p>
+          </details>)}</div>
+        <p className="text-xs text-amber-300 mt-4">Detection evaluation: {report.detection_quality?.status === 'not_evaluated' ? 'Not evaluated against labeled cases' : (report.detection_quality?.status || 'Unknown')}.</p>
       </div>}
       {report && <div className={block}>
         <h3 className="font-semibold text-lg">Data coverage</h3>

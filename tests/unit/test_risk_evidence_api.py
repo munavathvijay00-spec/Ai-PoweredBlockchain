@@ -20,6 +20,7 @@ def test_decodes_jsonb_risk_evidence():
     assert response.risk_factors[0]["reason"] == "Repeated transfer pattern"
     assert response.value_eth == 1
     assert response.explanation_status == "deterministic"
+    assert response.ai_explanation.startswith("Evidence-based transaction review:")
 
 
 def test_marks_grounded_ai_explanation_as_trusted_status():
@@ -27,12 +28,17 @@ def test_marks_grounded_ai_explanation_as_trusted_status():
     assert response.explanation_status == "grounded_ai"
 
 
-def test_marks_unknown_legacy_explanation_unverified():
+def test_replaces_unknown_legacy_explanation_with_deterministic_evidence():
     response = _format_tx(base_row(ai_explanation="Old model says this is suspicious."))
-    assert response.explanation_status == "legacy_unverified"
+    assert response.explanation_status == "deterministic"
+    assert response.ai_explanation.startswith("Evidence-based transaction review:")
+    assert "Old model says this is suspicious" not in response.ai_explanation
+    assert "Repeated transfer pattern" in response.ai_explanation
 
 
 def test_invalid_risk_evidence_does_not_break_response():
     response = _format_tx(base_row(value=0, risk_score=0, risk_factors="not-json", ai_explanation=None))
     assert response.risk_factors == []
-    assert response.explanation_status == "none"
+    assert response.explanation_status == "deterministic"
+    assert response.ai_explanation.startswith("Evidence-based transaction review:")
+    assert "does not include a specific supporting factor" in response.ai_explanation

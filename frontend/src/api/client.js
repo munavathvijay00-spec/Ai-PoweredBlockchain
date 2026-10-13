@@ -27,7 +27,7 @@ export const api = {
   getStats: () => request('/stats'),
   getCoverage: () => request('/coverage'),
   getTransactions: (limit = 50) => request(`/transactions?limit=${limit}`),
-  getFlagged: (minScore = 20) => request(`/flagged?min_score=${minScore}`),
+  getFlagged: (limit = 50, minScore = 20) => request(`/flagged?min_score=${minScore}&limit=${limit}`),
   getTransaction: (hash) => request(`/transactions/${hash}`),
   getTransactionEvents: (hash) => request(`/transactions/${encodeURIComponent(hash)}/events`),
   getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`),

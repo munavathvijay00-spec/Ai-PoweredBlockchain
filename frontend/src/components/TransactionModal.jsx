@@ -1,4 +1,8 @@
+import { useEffect } from 'react';
 import ReceiptEvents from './ReceiptEvents';
+
+const AMOUNT_ONLY = new Set(['whale_transaction', 'large_transaction', 'notable_transaction', 'medium_transaction']);
+
 function formatEth(tx) {
   if (tx.value_wei != null && /^\d+$/.test(String(tx.value_wei))) {
     const amount = BigInt(String(tx.value_wei));
@@ -8,191 +12,68 @@ function formatEth(tx) {
     return String(whole) + (fraction ? '.' + fraction : '') + ' ETH';
   }
   const value = Number(tx.value_eth);
-  if (!Number.isFinite(value)) return 'Amount unavailable';
-  return value === 0 ? '0 ETH' : value.toPrecision(6) + ' ETH';
+  return Number.isFinite(value) ? (value === 0 ? '0 ETH' : value.toPrecision(6) + ' ETH') : 'Amount unavailable';
 }
 
-/**
- * Modal popup showing full transaction details + AI explanation.
- */
-import { useEffect } from 'react';
-
-const AMOUNT_ONLY = new Set(['whale_transaction', 'large_transaction', 'notable_transaction', 'medium_transaction']);
-
 function amountOnlyEvidence(tx) {
-  return Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 &&
-    tx.risk_factors.every(f => AMOUNT_ONLY.has(f.factor));
+  return Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && tx.risk_factors.every(f => AMOUNT_ONLY.has(f.factor));
 }
 
 function riskLabel(score) {
-  if (score >= 80) return { text: 'Critical', color: 'text-red-500' };
-  if (score >= 40) return { text: 'High', color: 'text-orange-500' };
-  if (score >= 20) return { text: 'Medium', color: 'text-yellow-500' };
-  return { text: 'Low', color: 'text-green-500' };
-}
-
-function riskBarColor(score) {
-  if (score >= 80) return 'bg-red-500';
-  if (score >= 40) return 'bg-orange-500';
-  if (score >= 20) return 'bg-yellow-500';
-  return 'bg-green-500';
+  if (score >= 80) return { text: 'Critical review', color: 'text-red-400', bar: 'bg-red-500' };
+  if (score >= 40) return { text: 'High review', color: 'text-orange-400', bar: 'bg-orange-500' };
+  if (score >= 20) return { text: 'Review', color: 'text-yellow-300', bar: 'bg-yellow-500' };
+  return { text: 'Minimal', color: 'text-emerald-400', bar: 'bg-emerald-500' };
 }
 
 export default function TransactionModal({ tx, onClose }) {
   useEffect(() => {
-    function handleEscape(e) {
-      if (e.key === 'Escape') onClose();
-    }
+    const handleEscape = event => { if (event.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
 
   if (!tx) return null;
-
+  const score = Number(tx.risk_score) || 0;
   const amountOnly = amountOnlyEvidence(tx);
   const evidence = tx.evidence_assessment;
   const insufficient = evidence?.assessment === 'insufficient_evidence';
-  const risk = insufficient ? { text: 'Insufficient evidence', color: 'text-amber-300' } : amountOnly ? { text: 'Amount review only', color: 'text-amber-300' } : riskLabel(tx.risk_score);
+  const risk = insufficient ? { text: 'Insufficient evidence', color: 'text-amber-300', bar: 'bg-amber-400' } : amountOnly ? { text: 'Amount review only', color: 'text-amber-300', bar: 'bg-amber-400' } : riskLabel(score);
+  const explanation = typeof tx.ai_explanation === 'string' ? tx.ai_explanation : '';
+  const groundedAi = explanation.startsWith('Grounded AI explanation:');
+  const deterministic = explanation.startsWith('Evidence-based assessment:') || explanation.startsWith('Rule-based risk assessment:');
+  const explanationTitle = groundedAi ? 'Grounded AI explanation' : deterministic ? 'Evidence-based assessment' : 'Stored explanation';
 
   return (
-    <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-slate-800 rounded-2xl border border-slate-700 max-w-3xl w-full max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between sticky top-0 bg-slate-800 z-10">
-          <div>
-            <h2 className="text-xl font-bold text-white">Transaction Details</h2>
-            <p className="text-slate-400 text-xs mt-1">Block {tx.block_number.toLocaleString()}</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white text-2xl leading-none p-2"
-            aria-label="Close"
-          >
-            ×
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-[#46556d] bg-[#202c40] shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#39475d] bg-[#202c40] px-6 py-4">
+          <div><h2 className="text-xl font-semibold text-white">Transaction Details</h2><p className="mt-1 text-xs text-slate-400">Block {Number(tx.block_number || 0).toLocaleString()}</p></div>
+          <button onClick={onClose} className="p-2 text-2xl leading-none text-slate-400 hover:text-white" aria-label="Close">×</button>
         </div>
 
-        {/* Body */}
-        <div className="p-6 space-y-6">
-          {/* Risk Score */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-sm uppercase tracking-wide">Risk Score</span>
-              <span className={`text-2xl font-bold ${risk.color}`}>
-                {tx.risk_score}/100 — {risk.text}
-              </span>
-            </div>
-            {evidence?.engine_version && <p className="text-slate-300 text-sm mb-3" role="note">Evidence engine {evidence.engine_version}: {evidence.rationale} Confidence: {evidence.confidence}. Not a calibrated probability.</p>}
-            {amountOnly && <p className="text-amber-200 text-sm mb-3" role="note">This score is based only on transfer size, not verified suspicious behavior. It is not a calibrated probability or evidence of wrongdoing. Historical scores will be revised when the new risk engine is deployed.</p>}
-            <div className="w-full bg-slate-700 rounded-full h-3 overflow-hidden">
-              <div
-                className={`h-full ${amountOnly ? 'bg-amber-400' : riskBarColor(tx.risk_score)} transition-all`}
-                style={{ width: `${tx.risk_score}%` }}
-              />
-            </div>
-          </div>
+        <div className="space-y-6 p-6">
+          <section>
+            <div className="mb-2 flex items-center justify-between gap-4"><span className="text-sm uppercase tracking-wide text-slate-400">Risk score</span><span className={`text-xl font-semibold ${risk.color}`}>{score}/100 — {risk.text}</span></div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-[#111b2d]"><div className={`h-full ${risk.bar}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} /></div>
+            {evidence?.engine_version && <p className="mt-3 text-sm text-slate-400">Evidence engine {evidence.engine_version}: {evidence.rationale} Confidence: {evidence.confidence}. This is not a calibrated probability.</p>}
+            {amountOnly && <p className="mt-3 text-sm text-amber-200">The score is based only on transfer size, not verified suspicious behavior.</p>}
+          </section>
 
-          {/* AI Explanation */}
-          {tx.ai_explanation ? (
-            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-blue-400 text-lg">🧠</span>
-                <span className="text-blue-400 font-semibold text-sm uppercase tracking-wide">
-                  {tx.ai_explanation.startsWith('Rule-based risk assessment:') ? 'Evidence-based assessment' : 'AI-assisted assessment'}
-                </span>
-              </div>
-              <p className="text-slate-200 leading-relaxed">{tx.ai_explanation}</p>
-            </div>
-          ) : (
-            <div className="bg-slate-700/30 border border-slate-700 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-slate-400 text-lg">🧠</span>
-                <span className="text-slate-400 font-semibold text-sm uppercase tracking-wide">
-                  AI Analysis
-                </span>
-              </div>
-              <p className="text-slate-400 text-sm italic">
-                No explanation is stored for this transaction.
-              </p>
-            </div>
-          )}
+          <section className={`rounded-lg border p-4 ${groundedAi ? 'border-sky-400/25 bg-sky-400/[0.07]' : 'border-[#46556d] bg-[#172236]'}`}>
+            <div className="mb-2 flex items-center justify-between gap-3"><h3 className={`text-sm font-semibold uppercase tracking-wide ${groundedAi ? 'text-sky-300' : 'text-slate-300'}`}>{explanationTitle}</h3>{groundedAi && <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] font-medium text-emerald-300">fact-bound</span>}</div>
+            {explanation ? <p className="leading-7 text-slate-200">{explanation}</p> : <p className="text-sm italic text-slate-400">No explanation is stored for this transaction.</p>}
+            {groundedAi && <p className="mt-3 text-xs leading-5 text-slate-500">AI wording is stored only when it passes validation against the transaction's saved score and evidence. Unsupported claims fall back to deterministic evidence text.</p>}
+          </section>
 
-          {/* Verifiable scoring evidence */}
-          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && (
-            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-cyan-300 mb-3">Risk evidence trail</h3>
-              <div className="space-y-2">
-                {tx.risk_factors.map((factor, i) => (
-                  <div key={i} className="rounded-lg bg-slate-900/70 border border-slate-700 p-3">
-                    <div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>
-                    {factor.tx_hash && <div className="font-mono text-xs text-slate-400 break-all mt-1">Evidence tx: {factor.tx_hash}</div>}
-                    {factor.source && <div className="text-xs text-cyan-400 mt-1">Source: {factor.source}</div>}
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-slate-500 mt-3">Signals are indicators for investigation, not a determination of wrongdoing.</p>
-            </div>
-          )}
+          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && <section className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan-300">Risk evidence trail</h3><div className="space-y-2">{tx.risk_factors.map((factor, index) => <div key={index} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>{factor.source && <div className="mt-1 text-xs text-cyan-400">Source: {factor.source}</div>}</div>)}</div><p className="mt-3 text-xs text-slate-500">Signals are investigation cues, not a determination of wrongdoing.</p></section>}
 
-          {/* Transaction Hash */}
-          <div>
-            <div className="text-slate-400 text-sm uppercase tracking-wide mb-2">Transaction Hash</div>
-            <div className="bg-slate-900 rounded-lg p-3 font-mono text-xs text-slate-300 break-all">
-              {tx.hash}
-            </div>
-          </div>
-
-          {/* From / To */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <div className="text-slate-400 text-sm uppercase tracking-wide mb-2">From</div>
-              <div className="bg-slate-900 rounded-lg p-3 font-mono text-xs text-slate-300 break-all">
-                {tx.from_address}
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-400 text-sm uppercase tracking-wide mb-2">To</div>
-              <div className="bg-slate-900 rounded-lg p-3 font-mono text-xs text-slate-300 break-all">
-                {tx.to_address}
-              </div>
-            </div>
-          </div>
-
-          {/* Value */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-slate-400 text-sm uppercase tracking-wide mb-2">Value (ETH)</div>
-              <div className="text-2xl font-bold text-white">
-                {formatEth(tx)}
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-400 text-sm uppercase tracking-wide mb-2">Value (wei)</div>
-              <div className="text-sm font-mono text-slate-300 break-all">
-                {tx.value_wei}
-              </div>
-            </div>
-          </div>
+          <section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Transaction hash</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.hash}</div></section>
+          <div className="grid gap-4 md:grid-cols-2"><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">From</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.from_address}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">To</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.to_address}</div></section></div>
+          <div className="grid gap-4 sm:grid-cols-2"><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Value</div><div className="text-2xl font-semibold text-white">{formatEth(tx)}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Value (wei)</div><div className="break-all font-mono text-sm text-slate-300">{tx.value_wei}</div></section></div>
 
           <ReceiptEvents key={tx.hash} hash={tx.hash} />
-
-          {/* External link */}
-          <div className="pt-4 border-t border-slate-700">
-            <a
-              href={`https://etherscan.io/tx/${tx.hash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300 text-sm"
-            >
-              View on Etherscan ↗
-            </a>
-          </div>
+          <div className="border-t border-[#39475d] pt-4"><a href={`https://etherscan.io/tx/${tx.hash}`} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:text-sky-300">View on Etherscan ↗</a></div>
         </div>
       </div>
     </div>

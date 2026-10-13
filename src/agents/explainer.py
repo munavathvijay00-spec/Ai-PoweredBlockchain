@@ -1,20 +1,64 @@
-"""
-AI-powered transaction explainer.
-Supports multiple LLM providers: Ollama (local) and Groq (cloud).
+"""Grounded transaction explanations with optional LLM wording.
+
+The model is never allowed to become a source of facts. Stored risk factors remain the
+source of truth; any model-generated wording that introduces unsupported claims or
+numbers is rejected and replaced by the deterministic evidence explanation.
 """
 import asyncio
-import httpx
+import re
 from typing import Dict, List, Optional
+
+import httpx
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.utils.config import get_settings
 
+_OVERCLAIM_PHRASES = (
+    "definitely", "certainly", "confirmed fraud", "confirmed illicit",
+    "is fraudulent", "is a scam", "criminal activity", "money laundering",
+    "stolen funds", "malicious actor",
+)
+
+_SENSITIVE_CLAIM_TERMS = (
+    "mixer", "tornado", "sanction", "ofac", "hack", "hacker", "scam", "phishing",
+    "stolen", "launder", "criminal", "fraud", "malicious", "exchange", "bridge",
+    "darknet", "ransomware",
+)
+
+
+def _normalized_numbers(text: str) -> set[str]:
+    """Extract claimed numbers while ignoring hexadecimal hashes/addresses."""
+    without_hex = re.sub(r"0x[a-fA-F0-9]+", "", text or "")
+    values = re.findall(r"(?<![A-Za-z])\d[\d,]*(?:\.\d+)?", without_hex)
+    return {value.replace(",", "") for value in values}
+
+
+def explanation_is_grounded(candidate: str, baseline: str) -> bool:
+    """Reject LLM wording that adds facts not present in the deterministic baseline."""
+    if not isinstance(candidate, str):
+        return False
+    text = candidate.strip()
+    if len(text) < 20 or len(text) > 700:
+        return False
+    lowered = text.lower()
+    baseline_lower = (baseline or "").lower()
+    if any(phrase in lowered for phrase in _OVERCLAIM_PHRASES):
+        return False
+    if "proves" in lowered and "does not prove" not in lowered and "not proof" not in lowered:
+        return False
+    for term in _SENSITIVE_CLAIM_TERMS:
+        if term in lowered and term not in baseline_lower:
+            return False
+    if not _normalized_numbers(text).issubset(_normalized_numbers(baseline)):
+        return False
+    return True
+
 
 def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
-    """Evidence-based fallback; does not claim to be AI-generated."""
+    """Deterministic explanation assembled only from stored scoring evidence."""
     score = max(0, min(100, int(tx.get("risk_score") or 0)))
-    reasons = []
+    reasons: List[str] = []
     for factor in factors or []:
         reason = str(factor.get("reason") or "").strip().rstrip(".")
         if reason and reason not in reasons:
@@ -22,70 +66,55 @@ def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
         if len(reasons) == 3:
             break
     if reasons:
-        details = "; ".join(reasons)
         return (
             f"Rule-based risk assessment: this transaction scored {score}/100. "
-            f"Detected evidence: {details}. "
+            f"Detected evidence: {'; '.join(reasons)}. "
             "These indicators warrant review but do not independently prove wrongdoing."
         )
     return (
         f"Rule-based risk assessment: this transaction scored {score}/100. "
         "The available scoring data does not include a specific supporting factor; "
-        "review the transaction details before drawing conclusions."
+        "an AI conclusion would not be reliable, so review the raw transaction evidence before drawing conclusions."
     )
 
 
 class TransactionExplainer:
-    """Generates plain-English explanations for risky transactions."""
+    """Optionally rewrites a deterministic evidence explanation without adding facts."""
 
     def __init__(self):
         self.settings = get_settings()
         self.provider = self.settings.llm_provider
         self.model = self.settings.llm_model
         self.ollama_url = self.settings.ollama_url
-        self.enabled = True
         self._semaphore = asyncio.Semaphore(3)
-        logger.info(
-            f"🧠 Explainer initialized "
-            f"(provider={self.provider}, model={self.model})"
-        )
+        logger.info(f"🧠 Grounded explainer initialized (provider={self.provider}, model={self.model})")
 
     def _build_prompt(self, tx: Dict, factors: List[Dict]) -> str:
-        """Build a structured prompt from transaction data + risk factors."""
-        value_eth = int(tx.get('value') or 0) / 10**18
+        baseline = evidence_explanation(tx, factors)
+        return f"""You are editing an evidence-grounded Ethereum transaction explanation.
 
-        factor_lines = []
-        for f in (factors or []):
-            factor_lines.append(
-                f"- {f.get('factor', 'unknown')}: "
-                f"{f.get('reason', 'no reason')} "
-                f"(+{f.get('points', 0)} points)"
-            )
-        factors_text = "\n".join(factor_lines) if factor_lines else "- No specific factors"
+SOURCE OF TRUTH:
+{baseline}
 
-        return f"""You are a blockchain security analyst. Explain to a non-technical user why this Ethereum transaction was flagged as risky. Use exactly 2-3 sentences.
+Rules:
+- Rewrite the source into at most 2 short sentences for a non-technical user.
+- Use ONLY facts already present in SOURCE OF TRUTH.
+- Keep the exact risk score and any numeric evidence unchanged.
+- Do not infer identity, ownership, intent, fraud, sanctions, scams, hacks, theft, laundering, exchange usage, mixer usage, or historical behavior unless SOURCE OF TRUTH explicitly states it.
+- Do not convert values to USD or add market prices.
+- State that the signals are review indicators, not proof of wrongdoing.
+- If a faithful rewrite is not possible, return exactly: UNSAFE_TO_REWRITE
 
-Transaction data:
-- Amount: {value_eth:.4f} ETH
-- From address: {str(tx.get('from_address') or 'unknown')[:10]}...
-- To address: {str(tx.get('to_address') or 'unknown')[:10]}...
-- Block number: {tx.get('block_number', 0)}
-- Risk score: {tx.get('risk_score', 0)}/100
-
-Detected risk factors:
-{factors_text}
-
-Write a clear, specific explanation. Avoid technical jargon."""
+Return only the explanation text."""
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=1, max=3))
     async def _call_ollama(self, prompt: str) -> str:
-        """Call Ollama's local API."""
         url = f"{self.ollama_url}/api/generate"
         payload = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 200, "top_p": 0.9},
+            "options": {"temperature": 0.1, "num_predict": 180, "top_p": 0.8},
         }
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(url, json=payload)
@@ -93,32 +122,42 @@ Write a clear, specific explanation. Avoid technical jargon."""
             return response.json().get("response", "").strip()
 
     async def _call_groq(self, prompt: str) -> Optional[str]:
-        """Call Groq's cloud API."""
         from src.agents.providers.groq import get_groq_provider
-        provider = get_groq_provider(
-            api_key=self.settings.groq_api_key,
-            model=self.settings.llm_model,
-        )
+        provider = get_groq_provider(api_key=self.settings.groq_api_key, model=self.settings.llm_model)
         return await provider.generate(prompt)
 
     async def explain(self, tx: Dict, factors: List[Dict]) -> str:
-        """Prefer AI wording, but always return a clearly labeled evidence fallback."""
-        fallback = evidence_explanation(tx, factors)
+        """Return validated AI wording or the deterministic evidence fallback."""
+        baseline = evidence_explanation(tx, factors)
+        if not factors:
+            return baseline
         try:
             prompt = self._build_prompt(tx, factors)
             async with self._semaphore:
                 if self.provider == "ollama":
-                    explanation = await self._call_ollama(prompt)
+                    candidate = await self._call_ollama(prompt)
                 elif self.provider == "groq":
-                    if not self.settings.groq_api_key or self.settings.groq_api_key == "not-set":
-                        return fallback
-                    explanation = await self._call_groq(prompt)
+                    settings = getattr(self, "settings", None)
+                    api_key = getattr(settings, "groq_api_key", "not-set")
+                    model = getattr(settings, "llm_model", None)
+                    if not api_key or api_key == "not-set":
+                        return baseline
+                    if model:
+                        self.model = model
+                    candidate = await self._call_groq(prompt)
                 else:
-                    return fallback
-            return explanation.strip() if isinstance(explanation, str) and explanation.strip() else fallback
+                    return baseline
+
+            if not isinstance(candidate, str) or not candidate.strip() or candidate.strip() == "UNSAFE_TO_REWRITE":
+                return baseline
+            candidate = candidate.strip()
+            if not explanation_is_grounded(candidate, baseline):
+                logger.warning("Rejected ungrounded AI explanation; using deterministic evidence")
+                return baseline
+            return f"Grounded AI explanation: {candidate}"
         except Exception as exc:
-            logger.warning(f"AI explanation unavailable ({type(exc).__name__}); using rule-based evidence")
-            return fallback
+            logger.warning(f"AI explanation unavailable ({type(exc).__name__}); using deterministic evidence")
+            return baseline
 
 
 _explainer: Optional[TransactionExplainer] = None

@@ -19,13 +19,14 @@ export default function WalletInvestigator() {
   const [partial, setPartial] = useState([]);
   const [transferFilter, setTransferFilter] = useState('all');
   const [transferQuery, setTransferQuery] = useState('');
+  const [selectedPeer, setSelectedPeer] = useState('');
 
   async function investigate(event) {
     event.preventDefault();
     const target = address.trim();
     if (!VALID.test(target)) { setError('Enter a valid 0x-prefixed 40-byte Ethereum address.'); return; }
     setLoading(true); setError(''); setPartial([]);
-    setWallet(''); setTransfers([]); setReport(null); setGraph(null); setBalance(null);
+    setWallet(''); setTransfers([]); setReport(null); setGraph(null); setBalance(null); setSelectedPeer('');
     setCursors({ outgoing: null, incoming: null });
     const results = await Promise.allSettled([
       api.getWalletTransfers(target),
@@ -59,7 +60,8 @@ export default function WalletInvestigator() {
       const key = t => [t.hash, t.from_address, t.to_address, t.category, t.asset, t.block_number_hex, t.value].join('|');
       setTransfers(old => {
         const seen = new Set(old.map(key));
-        return [...old, ...(next.transfers || []).filter(t => !seen.has(key(t)))];
+        const fresh = (next.transfers || []).filter(t => { const id = key(t); if (seen.has(id)) return false; seen.add(id); return true; });
+        return [...old, ...fresh];
       });
       setCursors({ outgoing: next.outgoing_next_page_key, incoming: next.incoming_next_page_key });
     } catch (e) {
@@ -77,6 +79,7 @@ export default function WalletInvestigator() {
     return !q || [tx.hash, tx.from_address, tx.to_address, tx.asset, tx.category].some(value => String(value || '').toLowerCase().includes(q));
   });
   const observedPeers = new Set(transfers.flatMap(tx => [tx.from_address, tx.to_address]).filter(Boolean).map(value => value.toLowerCase()).filter(value => value !== normalizedWallet));
+  const peerFilteredTransfers = filteredTransfers.filter(tx => !selectedPeer || (tx.from_address || '').toLowerCase() === selectedPeer || (tx.to_address || '').toLowerCase() === selectedPeer);
 
   const counterpartyRows = (() => {
     const peers = new Map();
@@ -120,9 +123,10 @@ export default function WalletInvestigator() {
         <div className="flex flex-wrap gap-3 items-center mt-4">
           <select aria-label="Transfer direction" value={transferFilter} onChange={event => setTransferFilter(event.target.value)} className="rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm"><option value="all">All directions</option><option value="incoming">Incoming</option><option value="outgoing">Outgoing</option></select>
           <input aria-label="Filter transfer evidence" value={transferQuery} onChange={event => setTransferQuery(event.target.value)} placeholder="Search hash, wallet, asset…" className="flex-1 min-w-[180px] rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm" />
-          <span className="text-xs text-slate-400">{filteredTransfers.length} matching · {observedPeers.size} observed peers</span>
+          <span className="text-xs text-slate-400">{peerFilteredTransfers.length} matching · {observedPeers.size} observed peers</span>
+          {selectedPeer && <button type="button" onClick={() => setSelectedPeer('')} className="text-xs text-cyan-300 hover:underline">Clear peer filter: {short(selectedPeer)} ×</button>}
         </div>
-        <div className="overflow-x-auto mt-4"><table className="w-full text-left text-xs"><thead><tr className="text-slate-400 border-b border-slate-700"><th className="py-3 pr-3">Transaction</th><th className="pr-3">From</th><th className="pr-3">To</th><th className="pr-3">Asset</th><th>Value</th></tr></thead><tbody>{filteredTransfers.map((t,i) => <tr key={[t.hash,t.from_address,t.to_address,t.asset,i].join('-')} className="border-b border-slate-800"><td className="py-3 pr-3 font-mono">{t.evidence_url ? <a className="text-cyan-300 hover:underline" href={t.evidence_url} target="_blank" rel="noopener noreferrer">{short(t.hash)} ↗</a> : short(t.hash)}</td><td className="pr-3 font-mono">{short(t.from_address)}</td><td className="pr-3 font-mono">{short(t.to_address)}</td><td className="pr-3">{t.asset || t.category || '—'}</td><td>{t.value ?? '—'}</td></tr>)}</tbody></table>{filteredTransfers.length === 0 && <p className="text-sm text-slate-500 py-5">{transfers.length ? 'No transfers match the selected filters.' : 'No transfer records returned in the requested pages. This does not prove inactivity.'}</p>}</div>
+        <div className="overflow-x-auto mt-4"><table className="w-full text-left text-xs"><thead><tr className="text-slate-400 border-b border-slate-700"><th className="py-3 pr-3">Transaction</th><th className="pr-3">From</th><th className="pr-3">To</th><th className="pr-3">Asset</th><th>Value</th></tr></thead><tbody>{peerFilteredTransfers.map((t,i) => <tr key={[t.hash,t.from_address,t.to_address,t.asset,i].join('-')} className="border-b border-slate-800"><td className="py-3 pr-3 font-mono">{t.evidence_url ? <a className="text-cyan-300 hover:underline" href={t.evidence_url} target="_blank" rel="noopener noreferrer">{short(t.hash)} ↗</a> : short(t.hash)}</td><td className="pr-3 font-mono">{short(t.from_address)}</td><td className="pr-3 font-mono">{short(t.to_address)}</td><td className="pr-3">{t.asset || t.category || '—'}</td><td>{t.value ?? '—'}</td></tr>)}</tbody></table>{peerFilteredTransfers.length === 0 && <p className="text-sm text-slate-500 py-5">{transfers.length ? 'No transfers match the selected filters.' : 'No transfer records returned in the requested pages. This does not prove inactivity.'}</p>}</div>
         {(cursors.outgoing || cursors.incoming) && <button disabled={moreLoading} onClick={loadMore} className="mt-4 border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded-lg disabled:opacity-50">{moreLoading ? 'Loading…' : 'Load older transfers'}</button>}
       </div>
       {transfers.length > 0 && <div className={block}>
@@ -131,7 +135,7 @@ export default function WalletInvestigator() {
         <div className="overflow-x-auto mt-4"><table className="w-full text-left text-xs">
           <thead><tr className="text-slate-400 border-b border-slate-700"><th className="py-3 pr-3">Address</th><th className="pr-3">Received from peer</th><th className="pr-3">Sent to peer</th><th className="pr-3">Assets</th><th>Evidence</th></tr></thead>
           <tbody>{counterpartyRows.slice(0, 15).map(peer => <tr key={peer.address} className="border-b border-slate-700/60">
-            <td className="py-3 pr-3 font-mono"><a href={'https://etherscan.io/address/' + peer.address} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline" title={peer.address}>{short(peer.address)} ↗</a></td>
+            <td className="py-3 pr-3 font-mono"><button type="button" onClick={() => { setSelectedPeer(peer.address); setTransferFilter('all'); setTransferQuery(''); }} className="text-sky-300 hover:underline mr-2" title="Filter transfer table to this counterparty">Filter</button><a href={'https://etherscan.io/address/' + peer.address} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline" title={peer.address}>{short(peer.address)} ↗</a></td>
             <td className="pr-3">{peer.incoming}</td><td className="pr-3">{peer.outgoing}</td>
             <td className="pr-3">{[...peer.assets].slice(0, 4).join(', ') || '—'}</td>
             <td>{peer.evidence && <a href={peer.evidence} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline">Transfer ↗</a>}</td>

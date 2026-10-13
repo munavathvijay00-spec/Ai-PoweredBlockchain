@@ -4,19 +4,26 @@
 **API Docs:** [ai-poweredblockchain-production.up.railway.app/docs](https://ai-poweredblockchain-production.up.railway.app/docs)  
 **Backend API:** [ai-poweredblockchain-production.up.railway.app](https://ai-poweredblockchain-production.up.railway.app)
 
-AI-powered Ethereum transaction analysis with real-time risk scoring and natural-language explanations.
+Ethereum wallet investigation dashboard with observed transfers, counterparty analysis, graph exploration, and evidence-linked review signals. Data coverage is bounded; fraud-detection accuracy is not yet measured.
 
 ---
 
 ## 📸 What It Does
 
-- **Ingests live Ethereum transactions** — Fetches real mainnet data via Web3.py + Alchemy
-- **Scores transactions 0-100** — 7 heuristics detect risky patterns (large transfers, bursty activity, blacklisted addresses, etc.)
-- **Generates AI explanations** — Uses a local LLM (Ollama + llama3.2) to explain risk in plain English
-- **Serves a real-time dashboard** — React dashboard with live stats, filters, search, and risk visualization
-- **Exposes a documented REST API** — 5 endpoints with auto-generated Swagger docs
+- **Queries Ethereum transfers** — Requests bounded mainnet transfer pages from the configured provider; indexed ingestion is currently interrupted by a checkpoint mismatch
+- **Shows review signals** — Displays rule-based signals and transaction evidence; scores are not calibrated fraud probabilities
+- **Generates investigation summaries** — Presents the API's evidence-linked wallet report, coverage and limitations
+- **Provides an investigation dashboard** — React wallet lookup, direction filters, counterparties, graph, and CSV/JSON exports
+- **Exposes a documented REST API** — See the deployed OpenAPI docs for current routes and schemas
 
 ---
+
+## ⚠️ Current limitations
+
+- Indexed external ETH and ERC-20 transfers only; internal calls, NFTs, and complete historical coverage are not established.
+- The production ingestion worker is blocked by a canonical-chain checkpoint mismatch. Indexed dashboard data may be stale.
+- Behavioral review signals are not fraud verdicts. Detection precision, recall, and false-positive rates have not been measured against labeled ground truth.
+- Transfer counterparties are observed addresses, not proof of common ownership.
 
 ## 🏗️ Architecture
 
@@ -28,7 +35,7 @@ AI-powered Ethereum transaction analysis with real-time risk scoring and natural
 |-------|-----------|
 | **Blockchain** | Web3.py + Alchemy |
 | **Backend** | Python 3.12 + FastAPI + asyncpg |
-| **Database** | PostgreSQL 16 |
+| **Database** | PostgreSQL |
 | **AI** | Ollama + llama3.2:1b (local LLM) |
 | **Frontend** | React + Vite + TailwindCSS + Recharts |
 | **Infra** | Docker + Railway + Vercel |
@@ -84,7 +91,9 @@ uvicorn src.api.main:app --reload --port 8000
 cd frontend
 npm install
 npm run dev
-📡 API Endpoints
+```
+
+## 📡 API Endpoints
 
 Method	Endpoint	Description
 GET	/	Health check
@@ -92,6 +101,9 @@ GET	/api/transactions?limit=N	List recent transactions
 GET	/api/transactions/{hash}	Get transaction by hash
 GET	/api/flagged?min_score=20	List flagged (high-risk) transactions
 GET	/api/stats	System statistics
+GET	/api/wallets/{address}/transfers	Paginated wallet transfers
+GET	/api/wallets/{address}/indexed-graph	Observed wallet network
+GET	/api/wallets/{address}/investigation-report	Evidence-linked investigation report
 .
 ├── src/
 │   ├── api/                 # FastAPI endpoints

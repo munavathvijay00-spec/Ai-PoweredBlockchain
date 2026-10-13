@@ -117,7 +117,7 @@ export default function WalletInvestigator() {
     const sortedTransfers = [...transfers].sort((a, b) => transferKey(a).localeCompare(transferKey(b)));
     const hashes = [...new Set(sortedTransfers.map(t => t.hash).filter(hash => /^0x[a-fA-F0-9]{64}$/.test(hash || '')))].sort();
     const bundle = {
-      schema_version: 'chainscope-wallet-evidence-v2',
+      schema_version: 'chainscope-wallet-evidence-v3',
       exported_at_utc: new Date().toISOString(),
       chain: 'ethereum-mainnet',
       investigated_address: wallet.toLowerCase(),
@@ -128,7 +128,7 @@ export default function WalletInvestigator() {
         report_endpoint: 'investigation-report',
         balance_endpoint: 'balance',
         coverage_endpoint: '/api/coverage',
-        verification_note: 'Explorer links permit independent verification of transaction hashes; exported values are API observations, not independently verified attestations.',
+        verification_note: 'Explorer links permit independent verification of transaction hashes; entity context is included only when returned as source-attributed local intelligence. Exported values remain point-in-time API observations.',
       },
       coverage: {
         transfer_records_loaded: sortedTransfers.length,
@@ -141,7 +141,9 @@ export default function WalletInvestigator() {
         indexed_ingestion_freshness: coverage?.ingestion_health?.status || 'unknown',
         checkpoint_block: coverage?.ingestion_health?.checkpoint_block || null,
         checkpoint_age_seconds: coverage?.ingestion_health?.checkpoint_age_seconds ?? null,
+        entity_context_scope: report?.coverage_details?.entity_context || 'not_available',
       },
+      verified_entity_intelligence: report?.verified_entity_intelligence || null,
       evidence_links: hashes.map(hash => ({ tx_hash: hash, explorer_url: 'https://etherscan.io/tx/' + hash })),
       transfers: sortedTransfers,
       graph: graph || null,
@@ -150,6 +152,7 @@ export default function WalletInvestigator() {
       limitations: [
         'Only loaded transfer pages are included; further pages may exist.',
         'A transfer does not establish address ownership, identity, or fraud.',
+        'Entity context is limited to source-attributed records loaded into ChainScope; no local match does not establish that no attribution exists elsewhere.',
         'This export is a point-in-time API snapshot, not a complete chain archive.',
       ],
     };
@@ -163,6 +166,21 @@ export default function WalletInvestigator() {
   }
 
   const normalizedWallet = wallet.toLowerCase();
+  const entityIntel = report?.verified_entity_intelligence || null;
+  const entityMatches = Array.isArray(entityIntel?.matches) ? entityIntel.matches : [];
+  const rootEntityMatches = Array.isArray(entityIntel?.investigated_address_matches) ? entityIntel.investigated_address_matches : [];
+  const entityByAddress = (() => {
+    const map = new Map();
+    for (const item of entityMatches) {
+      const key = String(item.address || '').toLowerCase();
+      if (!VALID.test(key)) continue;
+      const existing = map.get(key) || [];
+      existing.push(item);
+      map.set(key, existing);
+    }
+    return map;
+  })();
+
   const filteredTransfers = transfers.filter(tx => {
     const from = (tx.from_address || '').toLowerCase();
     const to = (tx.to_address || '').toLowerCase();
@@ -195,7 +213,8 @@ export default function WalletInvestigator() {
       if (!row.evidence && /^0x[a-fA-F0-9]{64}$/.test(tx.hash || '')) row.evidence = 'https://etherscan.io/tx/' + tx.hash;
       peers.set(peer, row);
     }
-    return [...peers.values()].sort((a, b) => b.incoming + b.outgoing - a.incoming - a.outgoing || a.address.localeCompare(b.address));
+    return [...peers.values()].map(row => ({ ...row, verifiedEntities: entityByAddress.get(row.address) || [] }))
+      .sort((a, b) => b.incoming + b.outgoing - a.incoming - a.outgoing || a.address.localeCompare(b.address));
   })();
 
   const analystBrief = (() => {
@@ -206,20 +225,24 @@ export default function WalletInvestigator() {
     const topPeerCount = topPeer ? topPeer.incoming + topPeer.outgoing : 0;
     const concentration = transfers.length ? Math.round((topPeerCount / transfers.length) * 100) : 0;
     const hasMore = Boolean(cursors.outgoing || cursors.incoming);
+    const entityMatchedAddresses = Number(entityIntel?.matched_addresses || 0);
     const findings = [
       `${transfers.length} transfer records are loaded across ${counterpartyRows.length} observed counterparties.`,
       `${report.incoming_count ?? '—'} incoming and ${report.outgoing_count ?? '—'} outgoing records appear in the report sample.`,
       assets.length ? `${assets.length} observed asset/category ${assets.length === 1 ? 'type' : 'types'}: ${assets.slice(0, 5).join(', ')}${assets.length > 5 ? '…' : ''}.` : 'No asset labels were returned in the loaded transfer sample.',
     ];
     if (topPeer && transfers.length >= 3) findings.push(`The most frequent observed counterparty represents about ${concentration}% of loaded transfer records; this is concentration, not attribution.`);
+    if (entityMatchedAddresses) findings.push(`${entityMatchedAddresses} loaded address ${entityMatchedAddresses === 1 ? 'has' : 'have'} source-attributed entity context in ChainScope's local verified intelligence registry.`);
+    else findings.push('No source-attributed local entity match was returned for this bounded sample; that does not establish that external attribution does not exist.');
     if (signals.length) findings.push(`${signals.length} transparent behavioral review ${signals.length === 1 ? 'signal is' : 'signals are'} present and linked to transaction evidence.`);
     else findings.push('No configured behavioral review signal fired in this sample; that does not establish safety.');
 
     const nextActions = [];
     if (hasMore) nextActions.push('Load older transfer pages before drawing conclusions about historical behavior.');
     if (signals.length) nextActions.push('Open the evidence hashes behind each review signal and verify them independently.');
-    if (topPeer) nextActions.push(`Inspect the highest-frequency counterparty ${short(topPeer.address)} and compare direction, assets, and transaction evidence.`);
-    nextActions.push('Treat entity ownership, sanctions exposure, and illicit-purpose claims as unresolved until independently sourced.');
+    if (topPeer) nextActions.push(`Inspect the highest-frequency counterparty ${short(topPeer.address)} and compare direction, assets, transaction evidence, and any source-attributed entity context.`);
+    if (entityMatchedAddresses) nextActions.push('Review each entity label together with its stated source and checked timestamp before using it in an investigation conclusion.');
+    else nextActions.push('Treat identity, ownership, sanctions exposure, and illicit-purpose questions as unresolved; absence from the local registry is not clearance.');
 
     return {
       headline: signals.length ? `${signals.length} review ${signals.length === 1 ? 'signal' : 'signals'} need analyst attention` : 'No configured review signal in the loaded sample',
@@ -238,7 +261,7 @@ export default function WalletInvestigator() {
             <div>
               <p className="eyebrow">Investigation command</p>
               <h2 className="mt-2 text-xl font-semibold text-white">Investigate an Ethereum address</h2>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Pull bounded ETH/ERC-20 transfer evidence, counterparties, review signals, graph context, and a live balance snapshot. ChainScope keeps coverage limitations visible throughout the workflow.</p>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Pull bounded ETH/ERC-20 transfer evidence, counterparties, review signals, graph context, a live balance snapshot, and source-attributed entity context when ChainScope has a verified local record.</p>
             </div>
             <div className="rounded-full border border-slate-700 bg-slate-950/60 px-3 py-1.5 text-[11px] text-slate-400">Read-only · Mainnet</div>
           </div>
@@ -288,7 +311,7 @@ export default function WalletInvestigator() {
                 </div>
               </div>
               <div className="p-5">
-                <p className="text-sm leading-6 text-slate-400">This brief organizes observed facts and transparent rules into analyst-ready findings. It does not infer identity, ownership, sanctions status, or criminal intent.</p>
+                <p className="text-sm leading-6 text-slate-400">This brief organizes observed facts, source-attributed local intelligence, and transparent rules into analyst-ready findings. It does not infer identity, ownership, sanctions status, or criminal intent.</p>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   {analystBrief.findings.map((finding, index) => (
                     <div key={finding} className={`${inner} p-4`}>
@@ -319,6 +342,26 @@ export default function WalletInvestigator() {
           </div>
         )}
 
+        {report && <section className={block}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="eyebrow">Verified entity context</p>
+              <h3 className="mt-2 text-lg font-semibold text-white">Source-attributed local intelligence</h3>
+              <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">Only records returned from ChainScope's verified intelligence registry are displayed. No local match is not a statement about external attribution, sanctions status, or risk.</p>
+            </div>
+            <span className={`status-pill ${entityMatches.length ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-300' : 'border-slate-700 bg-slate-950/50 text-slate-400'}`}>{entityMatches.length ? `${entityMatches.length} matched record${entityMatches.length === 1 ? '' : 's'}` : 'No local match'}</span>
+          </div>
+          {rootEntityMatches.length > 0 && <div className="mt-4 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.035] p-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-emerald-300">Investigated address match</p>
+            <div className="mt-3 flex flex-wrap gap-2">{rootEntityMatches.map((entity, index) => <span key={`${entity.source}-${entity.entity_id}-${index}`} className="rounded-full border border-emerald-400/15 bg-slate-950/55 px-3 py-1.5 text-xs text-emerald-100">{entity.entity_name || entity.entity_id} · {entity.source}{entity.checked_at ? ` · checked ${new Date(entity.checked_at).toLocaleDateString()}` : ''}</span>)}</div>
+          </div>}
+          {entityMatches.length > 0 && <div className="mt-4 grid gap-3 md:grid-cols-2">{entityMatches.filter(match => String(match.address || '').toLowerCase() !== normalizedWallet).slice(0, 10).map((match, index) => <div key={`${match.address}-${match.source}-${match.entity_id}-${index}`} className={`${inner} p-4`}>
+            <div className="flex flex-wrap items-start justify-between gap-2"><a href={'https://etherscan.io/address/' + match.address} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-cyan-300 hover:underline">{short(match.address)} ↗</a><span className="text-[10px] uppercase tracking-wider text-slate-600">counterparty</span></div>
+            <p className="mt-2 text-sm font-medium text-slate-200">{match.entity_name || match.entity_id}</p>
+            <p className="mt-1 text-xs text-slate-500">Source: {match.source}{match.checked_at ? ` · checked ${new Date(match.checked_at).toLocaleDateString()}` : ''}</p>
+          </div>)}</div>}
+        </section>}
+
         <div className={block}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -344,12 +387,12 @@ export default function WalletInvestigator() {
         </div>
 
         {transfers.length > 0 && <div className={block}>
-          <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="eyebrow">Counterparty analysis</p><h3 className="mt-2 text-lg font-semibold text-white">Observed counterparties</h3></div><p className="text-xs text-slate-500">Frequency in loaded pages · not entity attribution</p></div>
-          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-800"><table className="w-full min-w-[760px] text-left text-xs">
-            <thead className="bg-slate-950/70 text-slate-500"><tr><th className="px-4 py-3">Address</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Sent</th><th className="px-4 py-3">Assets</th><th className="px-4 py-3">Evidence</th></tr></thead>
-            <tbody>{counterpartyRows.slice(0, 15).map(peer => <tr key={peer.address} className="border-t border-slate-800/80 hover:bg-white/[0.02]"><td className="px-4 py-3 font-mono"><button type="button" onClick={() => { setSelectedPeer(peer.address); setTransferFilter('all'); setTransferQuery(''); }} className="mr-2 text-cyan-300 hover:underline">Filter</button><a href={'https://etherscan.io/address/' + peer.address} target="_blank" rel="noopener noreferrer" className="text-slate-300 hover:text-cyan-200" title={peer.address}>{short(peer.address)} ↗</a></td><td className="px-4 py-3">{peer.incoming}</td><td className="px-4 py-3">{peer.outgoing}</td><td className="px-4 py-3">{[...peer.assets].slice(0, 4).join(', ') || '—'}</td><td className="px-4 py-3">{peer.evidence && <a href={peer.evidence} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline">Transfer ↗</a>}</td></tr>)}</tbody>
+          <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="eyebrow">Counterparty analysis</p><h3 className="mt-2 text-lg font-semibold text-white">Observed counterparties</h3></div><p className="text-xs text-slate-500">Frequency + source-attributed local context</p></div>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-800"><table className="w-full min-w-[900px] text-left text-xs">
+            <thead className="bg-slate-950/70 text-slate-500"><tr><th className="px-4 py-3">Address</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Sent</th><th className="px-4 py-3">Assets</th><th className="px-4 py-3">Entity context</th><th className="px-4 py-3">Evidence</th></tr></thead>
+            <tbody>{counterpartyRows.slice(0, 15).map(peer => <tr key={peer.address} className="border-t border-slate-800/80 hover:bg-white/[0.02]"><td className="px-4 py-3 font-mono"><button type="button" onClick={() => { setSelectedPeer(peer.address); setTransferFilter('all'); setTransferQuery(''); }} className="mr-2 text-cyan-300 hover:underline">Filter</button><a href={'https://etherscan.io/address/' + peer.address} target="_blank" rel="noopener noreferrer" className="text-slate-300 hover:text-cyan-200" title={peer.address}>{short(peer.address)} ↗</a></td><td className="px-4 py-3">{peer.incoming}</td><td className="px-4 py-3">{peer.outgoing}</td><td className="px-4 py-3">{[...peer.assets].slice(0, 4).join(', ') || '—'}</td><td className="px-4 py-3">{peer.verifiedEntities.length ? <div className="flex max-w-[250px] flex-wrap gap-1.5">{peer.verifiedEntities.slice(0, 3).map((entity, index) => <span key={`${entity.source}-${entity.entity_id}-${index}`} className="rounded-full border border-emerald-400/15 bg-emerald-400/[0.05] px-2 py-1 text-[10px] text-emerald-200" title={`${entity.entity_name || entity.entity_id} · ${entity.source}`}>{entity.entity_name || entity.entity_id} · {entity.source}</span>)}</div> : <span className="text-slate-600">No local match</span>}</td><td className="px-4 py-3">{peer.evidence && <a href={peer.evidence} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline">Transfer ↗</a>}</td></tr>)}</tbody>
           </table></div>
-          <p className="mt-3 text-xs text-slate-600">Showing {Math.min(15, counterpartyRows.length)} of {counterpartyRows.length} observed counterparties. Self-transfers are excluded.</p>
+          <p className="mt-3 text-xs text-slate-600">Showing {Math.min(15, counterpartyRows.length)} of {counterpartyRows.length} observed counterparties. Entity labels are source-attributed local records, not ownership or compliance verdicts.</p>
         </div>}
 
         <div className="grid gap-5 xl:grid-cols-2">
@@ -377,7 +420,8 @@ export default function WalletInvestigator() {
             <div className="mt-4 space-y-3 text-sm">
               <div className={`${inner} p-4`}><p className="text-slate-500">Categories</p><p className="mt-1 text-slate-200">{(report.coverage_details?.categories || ['external', 'erc20']).join(', ')}</p></div>
               <div className={`${inner} p-4`}><p className="text-slate-500">Pagination</p><p className="mt-1 text-slate-200">Outgoing more: {report.coverage_details?.outgoing_has_more ? 'yes' : 'no'} · Incoming more: {report.coverage_details?.incoming_has_more ? 'yes' : 'no'}</p></div>
-              <div className={`${inner} p-4`}><p className="text-slate-500">Excluded</p><p className="mt-1 text-amber-300">Internal calls, NFTs, complete historical coverage, entity attribution</p></div>
+              <div className={`${inner} p-4`}><p className="text-slate-500">Entity context</p><p className="mt-1 text-slate-200">{report.coverage_details?.entity_context === 'source_attributed_local_matches_only' ? 'Source-attributed local matches only' : 'Not available'}</p></div>
+              <div className={`${inner} p-4`}><p className="text-slate-500">Excluded / incomplete</p><p className="mt-1 text-amber-300">Internal calls, NFTs, complete historical coverage, comprehensive entity attribution</p></div>
             </div>
           </div>}
         </div>
@@ -394,7 +438,7 @@ export default function WalletInvestigator() {
               <p className="eyebrow text-cyan-400">Investigation report · evidence based</p>
               <h3 className="mt-2 text-lg font-semibold text-white">Observed activity summary</h3>
               <p className="mt-3 text-sm leading-6 text-slate-300">{report.summary}</p>
-              <p className="mt-2 text-sm text-slate-500">Unique counterparties in sampled pages: {report.unique_counterparties ?? '—'} · Risk assessment: {report.risk_assessment?.status || 'not assessed'}.</p>
+              <p className="mt-2 text-sm text-slate-500">Unique counterparties in sampled pages: {report.unique_counterparties ?? '—'} · Risk assessment: {report.risk_assessment?.status || 'not assessed'} · Verified local entity records: {entityMatches.length}.</p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               <button onClick={() => { const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'wallet-investigation.json'; a.click(); URL.revokeObjectURL(url); }} className="secondary-button">Export report</button>

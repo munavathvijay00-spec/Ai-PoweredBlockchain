@@ -165,6 +165,38 @@ async def wallet_indexed_graph(
     }
 
 
+def _observed_behavioral_signals(transfers, root):
+    """Transparent heuristics over observed records; no criminality or ML claims."""
+    signals = []
+    def emit(code, title, evidence, explanation):
+        hashes = sorted({t.get("hash") for t in evidence if t.get("hash")})
+        if hashes:
+            signals.append({
+                "code": code, "title": title, "status": "review",
+                "observed_count": len(evidence),
+                "evidence": [{"tx_hash": h, "url": "https://etherscan.io/tx/" + h} for h in hashes[:20]],
+                "explanation": explanation,
+                "not_a_fraud_verdict": True,
+            })
+    # Multiple distinct transfers between the same pair are reviewable, not proof of risk.
+    pairs = {}
+    for tx in transfers:
+        sender = (tx.get("from_address") or "").lower()
+        recipient = (tx.get("to_address") or "").lower()
+        if ADDRESS.fullmatch(sender) and ADDRESS.fullmatch(recipient) and tx.get("hash"):
+            pairs.setdefault((sender, recipient), []).append(tx)
+    for pair, group in sorted(pairs.items()):
+        if len({t["hash"] for t in group}) >= 3:
+            emit("repeated_pair", "Repeated observed transfer pair", group,
+                 "Three or more distinct transaction hashes link the same sender and recipient in the fetched sample.")
+    self_transfers = [t for t in transfers if (t.get("from_address") or "").lower() == root
+                      and (t.get("to_address") or "").lower() == root]
+    if self_transfers:
+        emit("self_transfer", "Self-transfer observed", self_transfers,
+             "The same address appears as sender and recipient. This can be ordinary wallet activity.")
+    return signals
+
+
 @router.get("/{address}/investigation-report")
 async def wallet_evidence_report(
     address: str,
@@ -189,6 +221,7 @@ async def wallet_evidence_report(
                 item = counterparties.setdefault(other, {"address": other, "evidence_hashes": []})
                 if tx.get("hash") and tx["hash"] not in item["evidence_hashes"]:
                     item["evidence_hashes"].append(tx["hash"])
+    signals = _observed_behavioral_signals(transfers, root)
     citations = []
     for tx in transfers:
         if tx.get("hash"):
@@ -213,6 +246,22 @@ async def wallet_evidence_report(
         "unique_counterparties": len(counterparties),
         "counterparties": sorted(counterparties.values(), key=lambda item: (-len(item["evidence_hashes"]), item["address"])),
         "evidence": citations,
+        "behavioral_signals": signals,
+        "detection_quality": {
+            "status": "not_evaluated",
+            "precision": None,
+            "recall": None,
+            "false_positive_rate": None,
+            "reason": "No independently labeled evaluation set is available. Rules are review cues, not validated threat detection."
+        },
+        "coverage_details": {
+            "categories": ["external", "erc20"],
+            "sort": "newest_first",
+            "page_size_per_direction": per_direction,
+            "outgoing_has_more": bool(result["outgoing_next_page_key"]),
+            "incoming_has_more": bool(result["incoming_next_page_key"]),
+            "complete_history": False,
+        },
         "pagination": {
             "outgoing_next_page_key": result["outgoing_next_page_key"],
             "incoming_next_page_key": result["incoming_next_page_key"],
@@ -226,6 +275,7 @@ async def wallet_evidence_report(
         "limitations": [
             "This report covers only fetched pages and supported provider transfer categories.",
             "Evidence URLs are references to source transactions, not independent sanctions verification.",
-            "No entity attribution, behavioral detection-quality claim, or multi-hop tracing is made.",
+            "Behavioral rules are transparent review cues, not evaluated detection models or fraud verdicts.",
+            "No entity attribution or multi-hop tracing is made.",
         ],
     }

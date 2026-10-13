@@ -16,6 +16,7 @@ from src.api.indexed_transfer_routes import router as indexed_transfer_router
 from src.api.observability_routes import router as observability_router
 from src.api.explanation_routes import router as explanation_router
 from src.api.historical_routes import router as historical_router
+from src.api.entity_routes import router as entity_router
 from src.api.models import HealthResponse
 from src.database.connection import get_db, close_db
 from src.metrics import api_requests_total, api_request_duration_seconds, db_health_up
@@ -75,6 +76,7 @@ app.include_router(indexed_transfer_router)
 app.include_router(observability_router)
 app.include_router(explanation_router)
 app.include_router(historical_router)
+app.include_router(entity_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])

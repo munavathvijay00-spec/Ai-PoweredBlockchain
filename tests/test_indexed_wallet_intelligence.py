@@ -19,6 +19,7 @@ async def test_report_citations_and_no_unsupported_risk_claim(monkeypatch):
 
     async def fake_lookup(*args):
         return {
+            "categories": ["external", "erc20", "internal", "erc721", "erc1155"],
             "transfers": [{
                 "hash": tx_hash,
                 "from_address": address,
@@ -40,6 +41,11 @@ async def test_report_citations_and_no_unsupported_risk_claim(monkeypatch):
     assert report["unique_counterparties"] == 1
     assert report["evidence"][0]["tx_hash"] == tx_hash
     assert report["risk_assessment"]["status"] == "not_assessed"
+    assert report["detection_quality"]["status"] == "not_evaluated"
+    assert report["detection_quality"]["abstention_supported"] is True
+    assert report["coverage_details"]["categories"] == [
+        "external", "erc20", "internal", "erc721", "erc1155"
+    ]
     assert report["historical_completeness"] is False
 
 
@@ -51,6 +57,7 @@ async def test_graph_edges_reference_real_transaction_hashes(monkeypatch):
 
     async def fake_lookup(*args):
         return {
+            "categories": ["external", "erc20"],
             "transfers": [{
                 "hash": tx_hash,
                 "from_address": address,
@@ -108,8 +115,8 @@ async def test_transfer_pagination_and_self_transfer_dedup(monkeypatch):
 
     calls = []
 
-    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None):
-        calls.append((direction, count, page_key))
+    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None, categories=None):
+        calls.append((direction, count, page_key, tuple(categories or [])))
         return {
             "transfers": [{
                 "uniqueId": "unique-transfer-1",
@@ -129,12 +136,51 @@ async def test_transfer_pagination_and_self_transfer_dedup(monkeypatch):
     result = await routes.wallet_indexed_transfers(
         address, 2, "outgoing-cursor", "incoming-cursor"
     )
+    expected_categories = ("external", "erc20", "internal", "erc721", "erc1155")
     assert result["returned"] == 1
+    assert result["categories"] == list(expected_categories)
     assert result["outgoing_next_page_key"] == "next-fromAddress"
     assert result["incoming_next_page_key"] == "next-toAddress"
-    assert ("fromAddress", 2, "outgoing-cursor") in calls
-    assert ("toAddress", 2, "incoming-cursor") in calls
+    assert ("fromAddress", 2, "outgoing-cursor", expected_categories) in calls
+    assert ("toAddress", 2, "incoming-cursor", expected_categories) in calls
     assert result["historical_completeness"] is False
+
+
+@pytest.mark.asyncio
+async def test_nft_metadata_is_preserved(monkeypatch):
+    address = "0x" + "a" * 40
+    other = "0x" + "b" * 40
+    tx_hash = "0x" + "4" * 64
+
+    class Settings:
+        ethereum_rpc_url = "https://eth-mainnet.g.alchemy.com/v2/test"
+
+    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None, categories=None):
+        if direction == "toAddress":
+            return {"transfers": [], "pageKey": None}
+        return {
+            "transfers": [{
+                "uniqueId": "nft-transfer-1",
+                "hash": tx_hash,
+                "from": address,
+                "to": other,
+                "category": "erc721",
+                "asset": "COLLECTIBLE",
+                "tokenId": "0x2a",
+                "value": None,
+                "rawContract": {"address": "0x" + "c" * 40},
+                "blockNum": "0x123",
+            }],
+            "pageKey": None,
+        }
+
+    monkeypatch.setattr(routes, "get_settings", lambda: Settings())
+    monkeypatch.setattr(routes, "_transfer_page", fake_page)
+    result = await routes.wallet_indexed_transfers(address)
+    transfer = result["transfers"][0]
+    assert transfer["category"] == "erc721"
+    assert transfer["token_id"] == "0x2a"
+    assert transfer["raw_contract"]["address"] == "0x" + "c" * 40
 
 
 @pytest.mark.asyncio
@@ -154,7 +200,7 @@ async def test_only_pending_direction_is_queried(monkeypatch):
     class Settings:
         ethereum_rpc_url = "https://eth-mainnet.g.alchemy.com/v2/test"
     calls = []
-    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None):
+    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None, categories=None):
         calls.append((direction, page_key))
         return {"transfers": [], "pageKey": None}
     monkeypatch.setattr(routes, "get_settings", lambda: Settings())
@@ -165,6 +211,24 @@ async def test_only_pending_direction_is_queried(monkeypatch):
     assert calls == [("toAddress", "next-incoming")]
     assert result["queried_directions"] == ["incoming"]
     assert result["outgoing_next_page_key"] is None
+
+
+@pytest.mark.asyncio
+async def test_scope_can_exclude_internal_and_nfts(monkeypatch):
+    address = "0x" + "a" * 40
+    class Settings:
+        ethereum_rpc_url = "https://eth-mainnet.g.alchemy.com/v2/test"
+    categories_seen = []
+    async def fake_page(session, rpc_url, wallet, direction, count, page_key=None, categories=None):
+        categories_seen.append(tuple(categories or []))
+        return {"transfers": [], "pageKey": None}
+    monkeypatch.setattr(routes, "get_settings", lambda: Settings())
+    monkeypatch.setattr(routes, "_transfer_page", fake_page)
+    result = await routes.wallet_indexed_transfers(
+        address, 25, None, None, True, True, False, False
+    )
+    assert result["categories"] == ["external", "erc20"]
+    assert categories_seen == [("external", "erc20"), ("external", "erc20")]
 
 
 @pytest.mark.asyncio

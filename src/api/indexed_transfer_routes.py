@@ -15,14 +15,34 @@ from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet intelligence"])
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+BASE_TRANSFER_CATEGORIES = ("external", "erc20")
+NFT_TRANSFER_CATEGORIES = ("erc721", "erc1155")
 
 
-async def _transfer_page(session, rpc_url, address, direction, count, page_key=None):
+def _selected_categories(include_internal: bool, include_nfts: bool) -> list[str]:
+    categories = list(BASE_TRANSFER_CATEGORIES)
+    if include_internal:
+        categories.append("internal")
+    if include_nfts:
+        categories.extend(NFT_TRANSFER_CATEGORIES)
+    return categories
+
+
+async def _transfer_page(
+    session,
+    rpc_url,
+    address,
+    direction,
+    count,
+    page_key=None,
+    categories=None,
+):
+    selected = list(categories or BASE_TRANSFER_CATEGORIES)
     query = {
         "fromBlock": "0x0",
         "toBlock": "latest",
         direction: address,
-        "category": ["external", "erc20"],
+        "category": selected,
         "withMetadata": True,
         "excludeZeroValue": False,
         "maxCount": hex(count),
@@ -95,25 +115,46 @@ async def wallet_indexed_transfers(
     incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
     include_outgoing: bool = Query(True),
     include_incoming: bool = Query(True),
+    include_internal: bool = Query(True),
+    include_nfts: bool = Query(True),
 ):
     if not ADDRESS.fullmatch(address):
         raise HTTPException(status_code=422, detail="Invalid Ethereum address")
     if not include_outgoing and not include_incoming:
         raise HTTPException(status_code=422, detail="At least one transfer direction must be enabled")
+
+    categories = _selected_categories(include_internal, include_nfts)
     settings = get_settings()
     rpc_url = settings.ethereum_rpc_url
     parsed_rpc = urlsplit(rpc_url)
     hostname = (parsed_rpc.hostname or "").lower()
     if parsed_rpc.scheme != "https" or not (hostname == "alchemy.com" or hostname.endswith(".alchemy.com")):
         raise HTTPException(status_code=503, detail="Alchemy mainnet RPC not configured")
+
     timeout = aiohttp.ClientTimeout(total=20)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             pending = {}
             if include_outgoing:
-                pending["outgoing"] = _transfer_page(session, rpc_url, address, "fromAddress", per_direction, outgoing_page_key)
+                pending["outgoing"] = _transfer_page(
+                    session,
+                    rpc_url,
+                    address,
+                    "fromAddress",
+                    per_direction,
+                    outgoing_page_key,
+                    categories=categories,
+                )
             if include_incoming:
-                pending["incoming"] = _transfer_page(session, rpc_url, address, "toAddress", per_direction, incoming_page_key)
+                pending["incoming"] = _transfer_page(
+                    session,
+                    rpc_url,
+                    address,
+                    "toAddress",
+                    per_direction,
+                    incoming_page_key,
+                    categories=categories,
+                )
             pages = await asyncio.gather(*pending.values())
             page_results = dict(zip(pending.keys(), pages))
             outgoing = page_results.get("outgoing", {"transfers": [], "pageKey": None})
@@ -124,37 +165,72 @@ async def wallet_indexed_transfers(
     unique = {}
     for direction, result in (("outgoing", outgoing), ("incoming", incoming)):
         for transfer in result["transfers"]:
+            provider_id = transfer.get("uniqueId")
+            token_id = transfer.get("tokenId") or transfer.get("erc721TokenId")
+            erc1155_metadata = transfer.get("erc1155Metadata")
+            raw_contract = transfer.get("rawContract")
             key = (
-                transfer.get("uniqueId") or transfer.get("hash"),
-                transfer.get("category"), transfer.get("from"), transfer.get("to"),
+                ("provider", provider_id)
+                if provider_id
+                else (
+                    "fallback",
+                    transfer.get("hash"),
+                    transfer.get("category"),
+                    transfer.get("from"),
+                    transfer.get("to"),
+                    token_id,
+                    str(erc1155_metadata),
+                    str(raw_contract),
+                    transfer.get("value"),
+                )
             )
             if key not in unique:
+                tx_hash = transfer.get("hash")
                 unique[key] = {
-                    "hash": transfer.get("hash"),
+                    "unique_id": provider_id,
+                    "hash": tx_hash,
                     "from_address": transfer.get("from"),
                     "to_address": transfer.get("to"),
                     "asset": transfer.get("asset"),
                     "category": transfer.get("category"),
                     "value": transfer.get("value"),
+                    "token_id": token_id,
+                    "erc1155_metadata": erc1155_metadata,
+                    "raw_contract": raw_contract,
                     "block_number_hex": transfer.get("blockNum"),
                     "metadata": transfer.get("metadata"),
                     "direction": direction,
-                    "evidence_url": "https://etherscan.io/tx/" + transfer["hash"] if transfer.get("hash") else None,
+                    "evidence_url": "https://etherscan.io/tx/" + tx_hash if tx_hash else None,
                 }
+
+    category_text = ", ".join(categories)
     return {
         "address": address.lower(),
         "chain_id": 1,
         "provider": "alchemy_getAssetTransfers",
+        "categories": categories,
         "transfers": list(unique.values()),
         "returned": len(unique),
         "per_direction_limit": per_direction,
-        "queried_directions": [direction for direction, enabled in (("outgoing", include_outgoing), ("incoming", include_incoming)) if enabled],
+        "queried_directions": [
+            direction
+            for direction, enabled in (
+                ("outgoing", include_outgoing),
+                ("incoming", include_incoming),
+            )
+            if enabled
+        ],
         "outgoing_next_page_key": outgoing.get("pageKey"),
         "incoming_next_page_key": incoming.get("pageKey"),
         "outgoing_has_more": bool(outgoing.get("pageKey")),
         "incoming_has_more": bool(incoming.get("pageKey")),
         "historical_completeness": False,
-        "coverage": "Cursor-paginated newest-first external ETH and ERC-20 transfers. Request subsequent pages using returned per-direction page keys. Internal transfers, NFTs, and completeness beyond indexed categories are excluded.",
+        "coverage": (
+            "Cursor-paginated newest-first transfer records for selected Alchemy categories "
+            f"({category_text}). The per-direction page size is shared across selected categories. "
+            "Request subsequent pages using returned page keys. Provider-specific specialnft "
+            "records and complete EVM call traces are not included."
+        ),
         "warning": "No matching transfers in this bounded query is not evidence of wallet inactivity.",
     }
 
@@ -165,11 +241,20 @@ async def wallet_indexed_graph(
     per_direction: int = Query(25, ge=1, le=50),
     outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
     incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    include_internal: bool = Query(True),
+    include_nfts: bool = Query(True),
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
     """One-hop, evidence-backed graph enriched only with verified stored entity rows."""
     result = await wallet_indexed_transfers(
-        address, per_direction, outgoing_page_key, incoming_page_key, True, True
+        address,
+        per_direction,
+        outgoing_page_key,
+        incoming_page_key,
+        True,
+        True,
+        include_internal,
+        include_nfts,
     )
     root = address.lower()
     nodes = {root}
@@ -188,6 +273,8 @@ async def wallet_indexed_graph(
             "asset": transfer.get("asset"),
             "category": transfer.get("category"),
             "value": transfer.get("value"),
+            "token_id": transfer.get("token_id"),
+            "raw_contract": transfer.get("raw_contract"),
             "block_number_hex": transfer.get("block_number_hex"),
             "evidence_url": transfer.get("evidence_url"),
             "relationship": "indexed_transfer",
@@ -198,6 +285,7 @@ async def wallet_indexed_graph(
         "root": root,
         "chain_id": 1,
         "depth": 1,
+        "categories": result["categories"],
         "nodes": [
             {
                 "id": item,
@@ -232,7 +320,10 @@ def _observed_behavioral_signals(transfers, root):
                 "title": title,
                 "status": "review",
                 "observed_count": len(evidence),
-                "evidence": [{"tx_hash": h, "url": "https://etherscan.io/tx/" + h} for h in hashes[:20]],
+                "evidence": [
+                    {"tx_hash": h, "url": "https://etherscan.io/tx/" + h}
+                    for h in hashes[:20]
+                ],
                 "explanation": explanation,
                 "not_a_fraud_verdict": True,
             })
@@ -253,7 +344,8 @@ def _observed_behavioral_signals(transfers, root):
             )
 
     self_transfers = [
-        t for t in transfers
+        t
+        for t in transfers
         if (t.get("from_address") or "").lower() == root
         and (t.get("to_address") or "").lower() == root
     ]
@@ -273,11 +365,20 @@ async def wallet_evidence_report(
     per_direction: int = Query(25, ge=1, le=50),
     outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
     incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    include_internal: bool = Query(True),
+    include_nfts: bool = Query(True),
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
     """Deterministic, source-linked investigation summary without unverified AI claims."""
     result = await wallet_indexed_transfers(
-        address, per_direction, outgoing_page_key, incoming_page_key, True, True
+        address,
+        per_direction,
+        outgoing_page_key,
+        incoming_page_key,
+        True,
+        True,
+        include_internal,
+        include_nfts,
     )
     root = address.lower()
     transfers = result["transfers"]
@@ -308,6 +409,7 @@ async def wallet_evidence_report(
                 "url": tx.get("evidence_url"),
                 "category": tx.get("category"),
                 "asset": tx.get("asset"),
+                "token_id": tx.get("token_id"),
             })
 
     flattened_entity_matches = [
@@ -328,7 +430,10 @@ async def wallet_evidence_report(
         "incoming_count": len(incoming),
         "outgoing_count": len(outgoing),
         "unique_counterparties": len(counterparties),
-        "counterparties": sorted(counterparties.values(), key=lambda item: (-len(item["evidence_hashes"]), item["address"])),
+        "counterparties": sorted(
+            counterparties.values(),
+            key=lambda item: (-len(item["evidence_hashes"]), item["address"]),
+        ),
         "verified_entity_intelligence": {
             "status": "matches_found" if flattened_entity_matches else "no_local_match",
             "matched_addresses": len(entity_map),
@@ -344,16 +449,20 @@ async def wallet_evidence_report(
             "precision": None,
             "recall": None,
             "false_positive_rate": None,
-            "reason": "No independently labeled evaluation set is available. Rules are review cues, not validated threat detection.",
+            "abstention_supported": True,
+            "evaluation_protocol": "docs/DETECTION_EVALUATION.md",
+            "reason": "No independently labeled representative holdout set is available. Rules are review cues, not validated threat detection.",
         },
         "coverage_details": {
-            "categories": ["external", "erc20"],
+            "categories": result["categories"],
             "sort": "newest_first",
             "page_size_per_direction": per_direction,
+            "page_size_shared_across_categories": True,
             "outgoing_has_more": bool(result["outgoing_next_page_key"]),
             "incoming_has_more": bool(result["incoming_next_page_key"]),
             "complete_history": False,
             "entity_context": "source_attributed_local_matches_only",
+            "full_evm_call_traces": False,
         },
         "pagination": {
             "outgoing_next_page_key": result["outgoing_next_page_key"],
@@ -366,11 +475,13 @@ async def wallet_evidence_report(
             "reason": "Transfer counts, behavioral rules, and entity labels alone do not establish fraud, sanctions exposure, or illicit behavior.",
         },
         "limitations": [
-            "This report covers only fetched pages and supported provider transfer categories.",
+            "This report covers only fetched pages and selected provider transfer categories.",
+            "External, internal value-transfer, ERC-20, ERC-721 and ERC-1155 records are provider-indexed transfer views, not complete EVM execution traces.",
+            "The provider-specific specialnft category and complete call-trace trees are not included.",
             "Entity context is limited to source-attributed records already present in ChainScope's verified intelligence table.",
             "No local entity match does not establish that no attribution exists elsewhere.",
             "Evidence URLs are references to source transactions, not independent sanctions verification.",
             "Behavioral rules are transparent review cues, not evaluated detection models or fraud verdicts.",
-            "No multi-hop tracing or beneficial-ownership inference is made.",
+            "No beneficial-ownership inference is made.",
         ],
     }

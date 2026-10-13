@@ -7,6 +7,7 @@ from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
 
 router = APIRouter(prefix="/api", tags=["data coverage"])
+WALLET_PROVIDER_CATEGORIES = ["external", "erc20", "internal", "erc721", "erc1155"]
 
 
 def _age_seconds(value):
@@ -78,7 +79,7 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
 
     production_ready_for = [
         "recent native-transaction monitoring",
-        "bounded wallet transfer investigation",
+        "bounded paginated wallet transfer investigation across ETH, internal value transfers, ERC-20, ERC-721 and ERC-1155",
         "evidence-linked transaction review",
     ]
     if entity_records:
@@ -91,15 +92,21 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "recent_data_available": bool(stats["stored_transactions"]),
         "retention_window_minutes": 30,
         "historical_archive": False,
-        "wallet_transfer_provider": "on_demand",
+        "wallet_transfer_provider": "on_demand_paginated",
+        "wallet_transfer_categories": WALLET_PROVIDER_CATEGORIES,
+        "internal_value_transfers": True,
+        "nft_transfers": True,
         "entity_attribution": bool(entity_records),
         "entity_attribution_scope": "source_attributed_local_matches_only" if entity_records else "no_verified_records_loaded",
         "internal_trace_indexing": False,
+        "detection_quality": "not_evaluated",
         "production_ready_for": production_ready_for,
         "not_ready_for": [
             "complete historical wallet reconstruction",
+            "complete EVM call-trace reconstruction",
             "comprehensive entity attribution across Ethereum",
             "sanctions/compliance verdicts without independent source review",
+            "validated fraud-detection accuracy claims",
             "multi-hop forensic tracing guarantees",
         ],
     }
@@ -126,8 +133,28 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "historical_completeness": False,
             "note": "Worker starts at chain tip on first run and currently deletes transactions older than 30 minutes. Observed block bounds do not prove contiguous coverage.",
         },
-        "token_events": {"status": "on_demand_only", "historical_completeness": False},
-        "internal_traces": {"status": "not_indexed", "historical_completeness": False},
+        "wallet_transfer_provider": {
+            "status": "on_demand_paginated",
+            "provider": "alchemy_getAssetTransfers",
+            "categories": WALLET_PROVIDER_CATEGORIES,
+            "sort": "newest_first",
+            "historical_completeness": False,
+            "page_size_shared_across_categories": True,
+            "note": "Internal value transfers are provider-indexed transfer records, not complete EVM call traces. Provider-specific specialnft records are not included.",
+        },
+        "token_events": {
+            "status": "on_demand_provider",
+            "categories": ["erc20", "erc721", "erc1155"],
+            "historical_completeness": False,
+        },
+        "internal_transfers": {
+            "status": "on_demand_provider",
+            "historical_completeness": False,
+        },
+        "internal_traces": {
+            "status": "complete_call_traces_not_indexed",
+            "historical_completeness": False,
+        },
         "verified_entity_intelligence": {
             "status": "source_attributed_records_available" if entity_records else "no_records_loaded",
             "records": entity_records,
@@ -136,13 +163,30 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "newest_checked_at": entity_checked_at,
             "note": "This is a bounded local intelligence set. No local match is not evidence that no attribution exists elsewhere.",
         },
+        "detection_quality": {
+            "status": "not_evaluated",
+            "precision": None,
+            "recall": None,
+            "false_positive_rate": None,
+            "abstention_rate": None,
+            "evaluation_harness": "available",
+            "labeling_queue_tool": "scripts/build_labeling_queue.py",
+            "evaluation_tool": "scripts/evaluate_detection.py",
+            "protocol": "docs/DETECTION_EVALUATION.md",
+            "note": "ChainScope does not claim validated fraud-detection accuracy until an independently labeled representative holdout set is evaluated.",
+        },
         "reorg_verification": checkpoint,
-        "wallet_history": {"status": "sampled_from_retained_native_transactions", "historical_completeness": False},
+        "wallet_history": {
+            "status": "bounded_paginated_provider_plus_recent_native_index",
+            "historical_completeness": False,
+        },
         "product_readiness": readiness,
         "limitations": [
-            "No complete address-indexed Ethereum history is available from this database.",
-            "No guarantee that all blocks between observed minimum and maximum were indexed.",
+            "No complete address-indexed Ethereum history is available from the rolling database or bounded provider pages.",
+            "No guarantee that all blocks between observed minimum and maximum were indexed in the rolling native store.",
             "An empty wallet result does not imply an inactive wallet.",
+            "Provider-indexed internal value transfers are not a full EVM trace tree.",
             "Verified entity intelligence is only as broad and current as the source-attributed records loaded into the local table.",
+            "Behavioral review signals have not yet been validated on an independently labeled representative holdout set.",
         ],
     }

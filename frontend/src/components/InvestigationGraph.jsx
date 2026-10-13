@@ -92,7 +92,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
     <section className="rounded-lg border border-slate-700 bg-slate-800 overflow-hidden">
       <div className="px-5 py-5 border-b border-slate-700 flex flex-wrap items-center justify-between gap-3">
         <div><h2 className="text-lg font-semibold text-white">Investigation workspace</h2>
-          <p className="text-sm text-slate-400 mt-1">Explore observed wallet connections from the loaded flagged transaction sample.</p></div>
+          <p className="text-sm text-slate-400 mt-1">Explore observed transfers from the selected wallet query or flagged feed.</p></div>
         <div className="text-sm text-slate-400">{network.nodes.length} wallets · {network.edges.length} transfers · {network.clusters.length} connected groups</div>
       </div>
       <div className="px-5 py-3 flex flex-wrap gap-3 items-center border-b border-slate-700">
@@ -114,7 +114,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
             aria-label="Interactive observed Ethereum transfer network. Select a node or edge to inspect evidence."
             onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={stopDrag} onPointerCancel={stopDrag}
             onWheel={event => { if (event.ctrlKey) zoom(event.deltaY < 0 ? .1 : -.1); }}>
-            <defs><pattern id="network-grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#1e3a5f"/></pattern></defs>
+            <defs><marker id="network-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6" fill="none" stroke="#94a3b8" strokeWidth="1.2"/></marker><pattern id="network-grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#1e3a5f"/></pattern></defs>
             <rect width="1000" height="720" fill="url(#network-grid)"/>
             <g transform={`translate(${offset.x} ${offset.y}) translate(500 360) scale(${scale}) translate(-500 -360)`}>
               {visibleEdges.map(edge => {
@@ -122,7 +122,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
                 if (!a || !b) return null;
                 const active = selectedEdge?.id === edge.id || (focus && (edge.from === focus || edge.to === focus));
                 return <g key={edge.id}>
-                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={active ? '#fbbf24' : palette[a.cluster % palette.length]} strokeOpacity={active ? .95 : .38} strokeWidth={active ? 3 : 1.6}/>
+                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={active ? '#fbbf24' : palette[a.cluster % palette.length]} strokeOpacity={active ? .95 : .38} strokeWidth={active ? 3 : 1.6} markerEnd="url(#network-arrow)"/>
                   <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth="16" className="cursor-pointer" onClick={() => setSelected({ kind: 'edge', id: edge.id })}/>
                 </g>;
               })}
@@ -138,7 +138,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
               })}
             </g>
           </svg>
-          {network.nodes.length === 0 && <p className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">No observed connections in the current flagged sample.</p>}
+          {network.nodes.length === 0 && <p className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">No observed connections in the loaded transfer sample.</p>}
           <p className="absolute bottom-3 left-4 text-xs text-slate-400 pointer-events-none">Drag canvas to pan · use +/− to zoom · click a node or connection</p>
         </div>
         <aside className="border-t lg:border-t-0 lg:border-l border-slate-700 p-5 space-y-4">
@@ -146,13 +146,13 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
           {selectedNode ? <>
             <p className="text-xs text-slate-400">Selected wallet</p><p className="text-xs font-mono break-all text-sky-300">{selectedNode}</p>
             <p className="text-sm text-slate-300">{related.length} observed transfers involving this wallet</p>
-            <div className="space-y-2 max-h-64 overflow-auto">{related.slice(0, 20).map(edge => <button key={edge.id} onClick={() => setSelected({ kind: 'edge', id: edge.id })} className="block text-left text-xs text-sky-300 hover:underline">{short(edge.tx.hash)} · {edge.tx.value ?? '—'} ETH</button>)}</div>
+            <div className="space-y-2 max-h-64 overflow-auto">{related.slice(0, 20).map(edge => <button key={edge.id} onClick={() => setSelected({ kind: 'edge', id: edge.id })} className="block text-left text-xs text-sky-300 hover:underline">{short(edge.tx.hash)} · {edge.tx.value ?? '—'} {edge.tx.asset || (edge.tx.category === 'external' ? 'ETH' : '')}</button>)}</div>
             <a href={`https://etherscan.io/address/${selectedNode}`} target="_blank" rel="noopener noreferrer" className="block text-sm text-sky-400 hover:underline">View wallet on Etherscan ↗</a>
           </> : selectedEdge ? <>
             <p className="text-xs text-slate-400">Observed transfer</p>
             <p className="text-xs font-mono break-all text-slate-200">{selectedEdge.from}</p><p className="text-sky-400">↓</p>
             <p className="text-xs font-mono break-all text-slate-200">{selectedEdge.to}</p>
-            <p className="text-sm text-slate-300">Value: {selectedEdge.tx.value ?? '—'} ETH</p>
+            <p className="text-sm text-slate-300">Value: {selectedEdge.tx.value ?? '—'} {selectedEdge.tx.asset || (selectedEdge.tx.category === 'external' ? 'ETH' : '')}</p>
             <p className="text-sm text-slate-300">Risk indicator: {riskText(selectedEdge.tx.risk_score)}</p>
             <a href={`https://etherscan.io/tx/${selectedEdge.tx.hash}`} target="_blank" rel="noopener noreferrer" className="block text-sm text-sky-400 hover:underline">View transaction evidence ↗</a>
             <button onClick={() => onSelect?.(selectedEdge.tx)} className="rounded-lg bg-slate-700 px-3 py-2 text-sm hover:bg-slate-600">Transaction details</button>

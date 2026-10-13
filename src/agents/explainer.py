@@ -39,6 +39,61 @@ def _evidence_refs(text: str) -> set[str]:
     return set(re.findall(r"\[E\d+\]", text or ""))
 
 
+def _short_identifier(value: object, head: int = 10, tail: int = 8) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "unknown"
+    if len(text) <= head + tail + 1:
+        return text
+    return f"{text[:head]}…{text[-tail:]}"
+
+
+def _eth_value_text(tx: Dict) -> Optional[str]:
+    """Return a stable transaction-specific ETH amount without floating-point rounding drift."""
+    raw = tx.get("value_wei", tx.get("value"))
+    if raw is not None:
+        try:
+            wei = int(raw)
+            whole = wei // 10**18
+            fraction = str(wei % 10**18).rjust(18, "0").rstrip("0")
+            return f"{whole:,}{'.' + fraction if fraction else ''} ETH"
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    value_eth = tx.get("value_eth")
+    try:
+        if value_eth is not None:
+            numeric = float(value_eth)
+            return f"{numeric:,.8f}".rstrip("0").rstrip(".") + " ETH"
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return None
+
+
+def _transaction_context(tx: Dict) -> str:
+    """Build concise, factual context so explanations are specific to one transaction."""
+    pieces: List[str] = []
+    tx_hash = tx.get("hash")
+    if tx_hash:
+        pieces.append(f"transaction {_short_identifier(tx_hash, 12, 10)}")
+    block_number = tx.get("block_number")
+    if block_number is not None:
+        try:
+            pieces.append(f"block {int(block_number):,}")
+        except (TypeError, ValueError, OverflowError):
+            pass
+    amount = _eth_value_text(tx)
+    if amount:
+        pieces.append(f"value {amount}")
+    from_address = tx.get("from_address")
+    to_address = tx.get("to_address")
+    if from_address:
+        pieces.append(f"from {_short_identifier(from_address)}")
+    if to_address:
+        pieces.append(f"to {_short_identifier(to_address)}")
+    return ", ".join(pieces)
+
+
 def explanation_is_grounded(candidate: str, baseline: str) -> bool:
     """Reject LLM wording that adds facts or evidence references not present in baseline."""
     if not isinstance(candidate, str):
@@ -68,26 +123,36 @@ def explanation_is_grounded(candidate: str, baseline: str) -> bool:
 
 
 def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
-    """Deterministic explanation assembled only from stored scoring evidence."""
+    """Deterministic explanation assembled only from transaction facts and stored scoring evidence."""
     score = max(0, min(100, int(tx.get("risk_score") or 0)))
+    context = _transaction_context(tx)
     reasons: List[str] = []
     for factor in factors or []:
         reason = str(factor.get("reason") or "").strip().rstrip(".")
+        if reason:
+            points = factor.get("points")
+            if points is not None:
+                try:
+                    reason = f"{reason} (+{int(points)} points)"
+                except (TypeError, ValueError, OverflowError):
+                    pass
         if reason and reason not in reasons:
             reasons.append(reason)
         if len(reasons) == 3:
             break
+
+    subject = f"For {context}, " if context else "For this transaction, "
     if reasons:
         cited_reasons = "; ".join(
             f"[E{index}] {reason}" for index, reason in enumerate(reasons, start=1)
         )
         return (
-            f"Rule-based risk assessment: this transaction scored {score}/100. "
+            f"Evidence-based transaction review: {subject}the recorded risk score is {score}/100. "
             f"Recorded evidence: {cited_reasons}. "
             "These indicators warrant review but do not independently prove wrongdoing."
         )
     return (
-        f"Rule-based risk assessment: this transaction scored {score}/100. "
+        f"Evidence-based transaction review: {subject}the recorded risk score is {score}/100. "
         "The available scoring data does not include a specific supporting factor; "
         "an AI conclusion would not be reliable, so review the raw transaction evidence before drawing conclusions."
     )
@@ -116,6 +181,7 @@ Rules:
 - Use ONLY facts already present in SOURCE OF TRUTH.
 - Keep the exact risk score and any numeric evidence unchanged.
 - Preserve at least one applicable [E#] evidence reference and never invent a new reference.
+- Preserve enough transaction-specific context to distinguish this transaction from another one with the same risk score.
 - Do not infer identity, ownership, intent, fraud, sanctions, scams, hacks, theft, laundering, exchange usage, mixer usage, or historical behavior unless SOURCE OF TRUTH explicitly states it.
 - Do not convert values to USD or add market prices.
 - State that the signals are review indicators, not proof of wrongdoing.

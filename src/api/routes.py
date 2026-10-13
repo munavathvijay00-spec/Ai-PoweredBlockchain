@@ -11,6 +11,7 @@ from src.api.models import (
     StatsResponse,
 )
 from src.api.dependencies import get_transaction_repo, get_address_repo
+from src.agents.explainer import evidence_explanation
 from src.risk.evidence_v2 import assess_evidence
 from src.database.repositories import TransactionRepository, AddressRepository
 
@@ -28,13 +29,19 @@ def _explanation_status(explanation) -> str:
     text = explanation.strip()
     if text.startswith("Grounded AI explanation:"):
         return "grounded_ai"
-    if text.startswith("Rule-based risk assessment:") or text.startswith("Evidence-based assessment:"):
+    if text.startswith("Rule-based risk assessment:") or text.startswith("Evidence-based assessment:") or text.startswith("Evidence-based transaction review:"):
         return "deterministic"
     return "legacy_unverified"
 
 
 def _format_tx(row: dict) -> TransactionResponse:
-    """Convert a raw DB row into a TransactionResponse."""
+    """Convert a raw DB row into a TransactionResponse.
+
+    Historical rows may contain missing or legacy generic explanation text. Unless the
+    stored value is a currently grounded AI explanation, materialize a fresh deterministic
+    explanation from the row's own transaction facts and risk evidence. This makes the
+    response transaction-specific without rewriting historical database rows.
+    """
     value_wei = int(row.get('value', 0))
     factors = row.get('risk_factors') or []
     if isinstance(factors, str):
@@ -44,7 +51,24 @@ def _format_tx(row: dict) -> TransactionResponse:
             factors = []
     if not isinstance(factors, list):
         factors = []
+    factors = [factor for factor in factors if isinstance(factor, dict)]
+
     explanation = row.get('ai_explanation')
+    explanation_status = _explanation_status(explanation)
+    if explanation_status != "grounded_ai":
+        explanation = evidence_explanation(
+            {
+                "hash": row['hash'],
+                "from_address": row['from_address'],
+                "to_address": row['to_address'],
+                "value": value_wei,
+                "block_number": row['block_number'],
+                "risk_score": row.get('risk_score', 0),
+            },
+            factors,
+        )
+        explanation_status = "deterministic"
+
     return TransactionResponse(
         hash=row['hash'],
         from_address=row['from_address'],
@@ -55,8 +79,8 @@ def _format_tx(row: dict) -> TransactionResponse:
         timestamp=row['timestamp'],
         risk_score=row.get('risk_score', 0),
         ai_explanation=explanation,
-        explanation_status=_explanation_status(explanation),
-        risk_factors=[factor for factor in factors if isinstance(factor, dict)],
+        explanation_status=explanation_status,
+        risk_factors=factors,
         evidence_assessment=assess_evidence(factors, row['hash']),
     )
 
@@ -128,6 +152,7 @@ async def get_stats(
                 WHERE ai_explanation LIKE 'Grounded AI explanation:%'
                    OR ai_explanation LIKE 'Rule-based risk assessment:%'
                    OR ai_explanation LIKE 'Evidence-based assessment:%'
+                   OR ai_explanation LIKE 'Evidence-based transaction review:%'
             ) AS grounded_explanations
         FROM transactions
     """, FLAGGED_THRESHOLD, HIGH_RISK_THRESHOLD, CRITICAL_THRESHOLD)

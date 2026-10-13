@@ -66,7 +66,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
     const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 60;
     const fitted = Math.max(0.15, Math.min(3, 940 / (maxX - minX), 660 / (maxY - minY)));
     setScale(fitted);
-    setOffset({ x: (500 - (minX + maxX) / 2) * fitted, y: (360 - (minY + maxY) / 2) * fitted });
+    setOffset({ x: 500 - (minX + maxX) / 2 * fitted, y: 360 - (minY + maxY) / 2 * fitted });
   }, [network]);
   const selectedNode = selected?.kind === 'node' ? selected.id : null;
   const selectedEdge = selected?.kind === 'edge' ? network.edges.find(edge => edge.id === selected.id) : null;
@@ -87,12 +87,15 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
   const outgoing = selectedNode ? related.filter(edge => edge.from === selectedNode) : [];
   const counterparties = selectedNode ? new Set(related.map(edge => edge.from === selectedNode ? edge.to : edge.from)) : new Set();
   const focus = selectedNode || (selectedEdge && selectedEdge.from);
-  const visibleEdges = network.edges.filter(edge => !matches || (matches.has(edge.from) && matches.has(edge.to)));
+  const visibleEdges = useMemo(() => network.edges.filter(edge => !matches || (matches.has(edge.from) && matches.has(edge.to))), [network, matches]);
+  const visibleNodes = useMemo(() => network.nodes.filter(node => !matches || matches.has(node.id)), [network, matches]);
+  const MAX_RENDERED_EDGES = 1200;
+  const renderedEdges = visibleEdges.slice(0, MAX_RENDERED_EDGES);
   const exportEvidence = () => {
     // Prevent spreadsheet formula injection when evidence is opened in Excel/Sheets.
     const quote = value => {
       const raw = String(value ?? '');
-      const safe = /^[\\s]*[=+@-]/.test(raw) ? "'" + raw : raw;
+      const safe = /^\s*[=+@-]/.test(raw) ? "'" + raw : raw;
       return '"' + safe.replace(/"/g, '""') + '"';
     };
     const rows = [
@@ -121,7 +124,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
       const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 60;
       const fitted = Math.max(0.15, Math.min(3, 940 / (maxX - minX), 660 / (maxY - minY)));
       setScale(fitted);
-      setOffset({ x: (500 - (minX + maxX) / 2) * fitted, y: (360 - (minY + maxY) / 2) * fitted });
+      setOffset({ x: 500 - (minX + maxX) / 2 * fitted, y: 360 - (minY + maxY) / 2 * fitted });
     } else { setScale(1); setOffset({ x: 0, y: 0 }); }
     setSelected(null); setQuery('');
   };
@@ -153,6 +156,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
           <button onClick={() => setMode('table')} aria-pressed={mode === 'table'} className={`px-4 py-2 ${mode === 'table' ? 'bg-slate-600 text-white' : 'text-slate-300'}`}>Table</button>
         </div>
       </div>
+      {mode === 'graph' && visibleEdges.length > MAX_RENDERED_EDGES && <p role="status" className="px-5 py-2 text-xs text-amber-300 bg-amber-950/40">Showing the first {MAX_RENDERED_EDGES} of {visibleEdges.length} matching transfers on the canvas for responsiveness. The table and CSV export retain all matching transfers.</p>}
       {mode === 'graph' ? <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="relative bg-[#0a1426] overflow-hidden min-h-[490px]">
           <div className="absolute top-3 left-3 z-10 flex gap-2">
@@ -167,7 +171,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
             <defs><marker id="network-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6" fill="none" stroke="#94a3b8" strokeWidth="1.2"/></marker><pattern id="network-grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#1e3a5f"/></pattern></defs>
             <rect width="1000" height="720" fill="url(#network-grid)"/>
             <g transform={`translate(${offset.x} ${offset.y}) translate(500 360) scale(${scale}) translate(-500 -360)`}>
-              {visibleEdges.map(edge => {
+              {renderedEdges.map(edge => {
                 const a = network.positions.get(edge.from), b = network.positions.get(edge.to);
                 if (!a || !b) return null;
                 const active = selectedEdge?.id === edge.id || (focus && (edge.from === focus || edge.to === focus));
@@ -176,7 +180,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
                   <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth="16" className="cursor-pointer" onClick={() => setSelected({ kind: 'edge', id: edge.id })}/>
                 </g>;
               })}
-              {network.nodes.filter(node => !matches || matches.has(node.id)).map(node => {
+              {visibleNodes.map(node => {
                 const active = selectedNode === node.id;
                 const dim = selectedNode && !active && !related.some(edge => edge.from === node.id || edge.to === node.id);
                 return <g key={node.id} data-network-node="true" className="cursor-pointer" onClick={() => setSelected({ kind: 'node', id: node.id })}>

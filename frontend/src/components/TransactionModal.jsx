@@ -30,11 +30,11 @@ function explanationMeta(tx) {
   const explanation = typeof tx.ai_explanation === 'string' ? tx.ai_explanation.trim() : '';
   const status = tx.explanation_status || (
     explanation.startsWith('Grounded AI explanation:') ? 'grounded_ai'
-      : explanation.startsWith('Rule-based risk assessment:') || explanation.startsWith('Evidence-based assessment:') ? 'deterministic'
+      : explanation.startsWith('Rule-based risk assessment:') || explanation.startsWith('Evidence-based assessment:') || explanation.startsWith('Evidence-based transaction review:') ? 'deterministic'
         : explanation ? 'legacy_unverified' : 'none'
   );
   if (status === 'grounded_ai') return { status, explanation, title: 'Grounded AI explanation', trusted: true, badge: 'fact-bound' };
-  if (status === 'deterministic') return { status, explanation, title: 'Evidence-based assessment', trusted: true, badge: 'deterministic' };
+  if (status === 'deterministic') return { status, explanation, title: 'Transaction-specific evidence review', trusted: true, badge: 'deterministic' };
   if (status === 'legacy_unverified') return { status, explanation: '', title: 'Legacy explanation withheld', trusted: false, badge: 'unverified' };
   return { status: 'none', explanation: '', title: 'Explanation unavailable', trusted: false, badge: null };
 }

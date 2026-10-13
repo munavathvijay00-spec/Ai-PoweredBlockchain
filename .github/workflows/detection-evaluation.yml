@@ -4,12 +4,18 @@ on:
   push:
     paths:
       - 'scripts/evaluate_detection.py'
+      - 'scripts/build_labeling_queue.py'
       - 'tests/test_detection_evaluation.py'
+      - 'tests/test_labeling_queue.py'
+      - 'docs/DETECTION_EVALUATION.md'
       - '.github/workflows/detection-evaluation.yml'
   pull_request:
     paths:
       - 'scripts/evaluate_detection.py'
+      - 'scripts/build_labeling_queue.py'
       - 'tests/test_detection_evaluation.py'
+      - 'tests/test_labeling_queue.py'
+      - 'docs/DETECTION_EVALUATION.md'
       - '.github/workflows/detection-evaluation.yml'
   workflow_dispatch:
 
@@ -28,4 +34,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Run standard-library evaluation tests
-        run: python -m unittest discover -s tests -p 'test_detection_evaluation.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_detection_evaluation.py' -v
+          python -m unittest discover -s tests -p 'test_labeling_queue.py' -v

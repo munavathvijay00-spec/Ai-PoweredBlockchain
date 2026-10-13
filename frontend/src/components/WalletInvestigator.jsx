@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../api/client';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
@@ -20,12 +20,14 @@ export default function WalletInvestigator() {
   const [transferFilter, setTransferFilter] = useState('all');
   const [transferQuery, setTransferQuery] = useState('');
   const [selectedPeer, setSelectedPeer] = useState('');
+  const requestVersion = useRef(0);
 
   async function investigate(event) {
     event.preventDefault();
     const target = address.trim();
     if (!VALID.test(target)) { setError('Enter a valid 0x-prefixed 40-byte Ethereum address.'); return; }
-    setLoading(true); setError(''); setPartial([]);
+    const version = ++requestVersion.current;
+    setLoading(true); setMoreLoading(false); setError(''); setPartial([]);
     setWallet(''); setTransfers([]); setReport(null); setGraph(null); setBalance(null); setSelectedPeer(''); setTransferFilter('all'); setTransferQuery('');
     setCursors({ outgoing: null, incoming: null });
     const results = await Promise.allSettled([
@@ -34,6 +36,7 @@ export default function WalletInvestigator() {
       api.getWalletReport(target),
       api.getWalletBalance(target),
     ]);
+    if (version !== requestVersion.current) return;
     const [tx, g, r, b] = results;
     if (tx.status === 'fulfilled') {
       setTransfers((tx.value.transfers || []).filter(t => (t.from_address || '').toLowerCase() === target.toLowerCase() || (t.to_address || '').toLowerCase() === target.toLowerCase()));
@@ -51,13 +54,15 @@ export default function WalletInvestigator() {
   }
 
   async function loadMore() {
-    if (!wallet || (!cursors.outgoing && !cursors.incoming)) return;
+    if (loading || moreLoading || !wallet || (!cursors.outgoing && !cursors.incoming)) return;
+    const version = requestVersion.current;
     setMoreLoading(true); setError('');
     try {
       const next = await api.getWalletTransfers(wallet, {
         outgoing_page_key: cursors.outgoing,
         incoming_page_key: cursors.incoming,
       }, { outgoing: Boolean(cursors.outgoing), incoming: Boolean(cursors.incoming) });
+      if (version !== requestVersion.current) return;
       const key = t => [t.hash, t.from_address, t.to_address, t.category, t.asset, t.block_number_hex, t.value].join('|');
       setTransfers(old => {
         const seen = new Set(old.map(key));
@@ -66,8 +71,8 @@ export default function WalletInvestigator() {
       });
       setCursors({ outgoing: cursors.outgoing ? (next.outgoing_next_page_key || null) : null, incoming: cursors.incoming ? (next.incoming_next_page_key || null) : null });
     } catch (e) {
-      setError(e.message || 'Unable to load more transfers');
-    } finally { setMoreLoading(false); }
+      if (version === requestVersion.current) setError(e.message || 'Unable to load more transfers');
+    } finally { if (version === requestVersion.current) setMoreLoading(false); }
   }
 
   const normalizedWallet = wallet.toLowerCase();

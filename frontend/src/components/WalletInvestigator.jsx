@@ -78,7 +78,11 @@ export default function WalletInvestigator() {
     const q = transferQuery.trim().toLowerCase();
     return !q || [tx.hash, tx.from_address, tx.to_address, tx.asset, tx.category].some(value => String(value || '').toLowerCase().includes(q));
   });
-  const observedPeers = new Set(transfers.flatMap(tx => [tx.from_address, tx.to_address]).filter(Boolean).map(value => value.toLowerCase()).filter(value => value !== normalizedWallet));
+  const observedPeers = new Set(transfers.flatMap(tx => {
+    const from = (tx.from_address || '').toLowerCase();
+    const to = (tx.to_address || '').toLowerCase();
+    return from === normalizedWallet ? [to] : to === normalizedWallet ? [from] : [];
+  }).filter(value => VALID.test(value) && value !== normalizedWallet));
   const peerFilteredTransfers = filteredTransfers.filter(tx => !selectedPeer || (tx.from_address || '').toLowerCase() === selectedPeer || (tx.to_address || '').toLowerCase() === selectedPeer);
 
   const counterpartyRows = (() => {
@@ -87,7 +91,7 @@ export default function WalletInvestigator() {
       const from = (tx.from_address || '').toLowerCase();
       const to = (tx.to_address || '').toLowerCase();
       const peer = from === normalizedWallet ? to : to === normalizedWallet ? from : '';
-      if (!peer || peer === normalizedWallet) continue;
+      if (!VALID.test(peer) || peer === normalizedWallet) continue;
       const row = peers.get(peer) || { address: peer, incoming: 0, outgoing: 0, assets: new Set(), evidence: null };
       if (to === normalizedWallet) row.incoming++;
       if (from === normalizedWallet) row.outgoing++;

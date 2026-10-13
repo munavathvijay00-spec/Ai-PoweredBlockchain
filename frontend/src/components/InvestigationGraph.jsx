@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const short = value => value ? value.slice(0, 8) + '…' + value.slice(-5) : '—';
 const normalized = value => (value || '').toLowerCase();
@@ -59,6 +59,15 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef(null);
   const network = useMemo(() => makeNetwork(transactions), [transactions]);
+  useEffect(() => {
+    if (!network.nodes.length) return;
+    const xs = network.nodes.map(node => node.x), ys = network.nodes.map(node => node.y);
+    const minX = Math.min(...xs) - 60, maxX = Math.max(...xs) + 60;
+    const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 60;
+    const fitted = Math.max(0.15, Math.min(3, 940 / (maxX - minX), 660 / (maxY - minY)));
+    setScale(fitted);
+    setOffset({ x: (500 - (minX + maxX) / 2) * fitted, y: (360 - (minY + maxY) / 2) * fitted });
+  }, [network]);
   const selectedNode = selected?.kind === 'node' ? selected.id : null;
   const selectedEdge = selected?.kind === 'edge' ? network.edges.find(edge => edge.id === selected.id) : null;
   const matches = useMemo(() => {
@@ -77,7 +86,12 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
   const focus = selectedNode || (selectedEdge && selectedEdge.from);
   const visibleEdges = network.edges.filter(edge => !matches || (matches.has(edge.from) && matches.has(edge.to)));
   const exportEvidence = () => {
-    const quote = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    // Prevent spreadsheet formula injection when evidence is opened in Excel/Sheets.
+    const quote = value => {
+      const raw = String(value ?? '');
+      const safe = /^[\\s]*[=+@-]/.test(raw) ? "'" + raw : raw;
+      return '"' + safe.replace(/"/g, '""') + '"';
+    };
     const rows = [
       ['transaction_hash', 'from_address', 'to_address', 'value', 'asset', 'category', 'risk_score', 'evidence_url'],
       ...visibleEdges.map(({ tx, from, to }) => [
@@ -115,7 +129,9 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
   };
   const pointerMove = event => {
     if (!drag.current) return;
-    setOffset({ x: drag.current.ox + event.clientX - drag.current.x, y: drag.current.oy + event.clientY - drag.current.y });
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setOffset({ x: drag.current.ox + (event.clientX - drag.current.x) * 1000 / bounds.width,
+      y: drag.current.oy + (event.clientY - drag.current.y) * 720 / bounds.height });
   };
   const stopDrag = () => { drag.current = null; };
   return (

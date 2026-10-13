@@ -6,7 +6,7 @@ import TransactionModal from './components/TransactionModal';
 import SearchBar from './components/SearchBar';
 import FilterTabs from './components/FilterTabs';
 import RiskChart from './components/RiskChart';
-import InvestigationGraph from './components/InvestigationGraph';
+import WalletGraphWorkspace from './components/WalletGraphWorkspace';
 import WalletInvestigator from './components/WalletInvestigator';
 
 function App() {
@@ -126,7 +126,7 @@ function App() {
           <button onClick={() => setView('investigate')} className={`rounded-lg px-4 py-2 text-sm transition ${view === 'investigate' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>Investigation graph</button>
         </nav>
         {view === 'wallet' && <div className="mb-7"><WalletInvestigator /></div>}
-        {view === 'investigate' && <div className="mb-7"><InvestigationGraph transactions={flagged} onSelect={inspectTransaction} /></div>}
+        {view === 'investigate' && <div className="mb-7"><WalletGraphWorkspace flagged={flagged} onSelect={inspectTransaction} /></div>}
         {view === 'transactions' && <>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

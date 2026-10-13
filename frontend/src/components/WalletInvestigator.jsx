@@ -63,7 +63,7 @@ export default function WalletInvestigator() {
         const fresh = (next.transfers || []).filter(t => { const id = key(t); if (seen.has(id)) return false; seen.add(id); return true; });
         return [...old, ...fresh];
       });
-      setCursors({ outgoing: next.outgoing_next_page_key, incoming: next.incoming_next_page_key });
+      setCursors({ outgoing: cursors.outgoing ? (next.outgoing_next_page_key || null) : null, incoming: cursors.incoming ? (next.incoming_next_page_key || null) : null });
     } catch (e) {
       setError(e.message || 'Unable to load more transfers');
     } finally { setMoreLoading(false); }

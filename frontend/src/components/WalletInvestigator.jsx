@@ -26,7 +26,7 @@ export default function WalletInvestigator() {
     const target = address.trim();
     if (!VALID.test(target)) { setError('Enter a valid 0x-prefixed 40-byte Ethereum address.'); return; }
     setLoading(true); setError(''); setPartial([]);
-    setWallet(''); setTransfers([]); setReport(null); setGraph(null); setBalance(null); setSelectedPeer('');
+    setWallet(''); setTransfers([]); setReport(null); setGraph(null); setBalance(null); setSelectedPeer(''); setTransferFilter('all'); setTransferQuery('');
     setCursors({ outgoing: null, incoming: null });
     const results = await Promise.allSettled([
       api.getWalletTransfers(target),
@@ -157,7 +157,7 @@ export default function WalletInvestigator() {
             <p className="text-sm text-slate-400 mt-3">{signal.explanation || 'No additional rule explanation provided by the API.'}</p>
             <p className="text-xs text-slate-500 mt-2">Rule identifier: <code className="font-mono">{signal.code || 'Not supplied'}</code></p>
             <div className="mt-3 flex flex-wrap gap-3">{(signal.evidence || []).filter(item => /^0x[a-fA-F0-9]{64}$/.test(item.tx_hash || '')).map(item => <a key={item.tx_hash} href={'https://etherscan.io/tx/' + item.tx_hash} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline font-mono">{short(item.tx_hash)} ↗</a>)}</div>
-            {!(signal.evidence || []).length && <p className="text-xs text-amber-300 mt-3">No transaction evidence links supplied for this signal.</p>}
+            {!(signal.evidence || []).some(item => /^0x[a-fA-F0-9]{64}$/.test(item.tx_hash || '')) && <p className="text-xs text-amber-300 mt-3">No valid transaction evidence hashes supplied for this signal.</p>}
             <p className="text-xs text-slate-500 mt-3">Review indicator only; no independently validated fraud classification.</p>
           </details>)}</div>}
         <p className="text-xs text-amber-300 mt-4">Detection evaluation: {report.detection_quality?.status === 'not_evaluated' ? 'Not evaluated against labeled cases' : (report.detection_quality?.status || 'Unknown')}.</p>

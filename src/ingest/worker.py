@@ -58,7 +58,9 @@ def validate_block_snapshot(block: Dict, expected_number: int) -> None:
     validate_block_hash(block_hash)
     for tx in block["transactions"]:
         tx_number = tx.get("blockNumber")
-        if tx_number is None or int(tx_number) != expected_number:
+        if tx_number is None:
+            raise ValueError("Transaction block number missing from full block snapshot")
+        if int(tx_number) != expected_number:
             raise ValueError("Transaction block number differs from fetched block")
         tx_block_hash = tx.get("blockHash")
         if tx_block_hash is None:
@@ -109,8 +111,6 @@ async def process_one_block(
         blacklist_set = await addresses.get_blacklisted_set(addresses_list)
         same_block_factors = analyze_block_behavior(normalized)
 
-        # One bounded query gives every address in this block recent retained context.
-        # This prevents N+1 database scans and makes behavioral factors evidence-backed.
         recent_activity = await load_recent_activity(
             transactions.db,
             addresses_list,

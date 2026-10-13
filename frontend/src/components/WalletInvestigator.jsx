@@ -4,6 +4,7 @@ import { api } from '../api/client';
 const VALID = /^0x[a-fA-F0-9]{40}$/;
 const short = value => value ? value.slice(0, 8) + '…' + value.slice(-6) : '—';
 const block = 'rounded-lg border border-slate-700 bg-slate-800 p-5';
+const transferKey = t => [t.hash, t.from_address, t.to_address, t.category, t.asset, t.block_number_hex, t.value].join('|');
 
 export default function WalletInvestigator() {
   const [address, setAddress] = useState('');
@@ -39,7 +40,14 @@ export default function WalletInvestigator() {
     if (version !== requestVersion.current) return;
     const [tx, g, r, b] = results;
     if (tx.status === 'fulfilled') {
-      setTransfers((tx.value.transfers || []).filter(t => (t.from_address || '').toLowerCase() === target.toLowerCase() || (t.to_address || '').toLowerCase() === target.toLowerCase()));
+      const seen = new Set();
+      setTransfers((tx.value.transfers || []).filter(t => {
+        if ((t.from_address || '').toLowerCase() !== target.toLowerCase() && (t.to_address || '').toLowerCase() !== target.toLowerCase()) return false;
+        const key = transferKey(t);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }));
       setCursors({ outgoing: tx.value.outgoing_next_page_key, incoming: tx.value.incoming_next_page_key });
     }
     if (g.status === 'fulfilled') setGraph(g.value);
@@ -63,10 +71,9 @@ export default function WalletInvestigator() {
         incoming_page_key: cursors.incoming,
       }, { outgoing: Boolean(cursors.outgoing), incoming: Boolean(cursors.incoming) });
       if (version !== requestVersion.current) return;
-      const key = t => [t.hash, t.from_address, t.to_address, t.category, t.asset, t.block_number_hex, t.value].join('|');
       setTransfers(old => {
-        const seen = new Set(old.map(key));
-        const fresh = (next.transfers || []).filter(t => { if ((t.from_address || '').toLowerCase() !== wallet.toLowerCase() && (t.to_address || '').toLowerCase() !== wallet.toLowerCase()) return false; const id = key(t); if (seen.has(id)) return false; seen.add(id); return true; });
+        const seen = new Set(old.map(transferKey));
+        const fresh = (next.transfers || []).filter(t => { if ((t.from_address || '').toLowerCase() !== wallet.toLowerCase() && (t.to_address || '').toLowerCase() !== wallet.toLowerCase()) return false; const id = transferKey(t); if (seen.has(id)) return false; seen.add(id); return true; });
         return [...old, ...fresh];
       });
       setCursors({ outgoing: cursors.outgoing ? (next.outgoing_next_page_key || null) : null, incoming: cursors.incoming ? (next.incoming_next_page_key || null) : null });

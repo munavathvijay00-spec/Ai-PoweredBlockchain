@@ -174,3 +174,26 @@ async def test_both_directions_disabled_is_invalid():
             "0x" + "a" * 40, 25, None, None, False, False
         )
     assert error.value.status_code == 422
+
+
+def test_behavioral_rules_require_evidence_and_do_not_assign_fraud_label():
+    root = "0x" + "a" * 40
+    other = "0x" + "b" * 40
+    records = [
+        {"hash": "0x" + str(i) * 64, "from_address": root, "to_address": other}
+        for i in (1, 2, 3)
+    ]
+    signals = routes._observed_behavioral_signals(records, root)
+    assert len(signals) == 1
+    assert signals[0]["code"] == "repeated_pair"
+    assert len(signals[0]["evidence"]) == 3
+    assert signals[0]["not_a_fraud_verdict"] is True
+    assert routes._observed_behavioral_signals(records[:2], root) == []
+
+
+def test_self_transfer_review_signal():
+    root = "0x" + "a" * 40
+    records = [{"hash": "0x" + "f" * 64, "from_address": root, "to_address": root}]
+    signals = routes._observed_behavioral_signals(records, root)
+    assert signals[0]["code"] == "self_transfer"
+    assert signals[0]["evidence"][0]["url"].endswith("f" * 64)

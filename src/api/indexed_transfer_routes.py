@@ -7,7 +7,10 @@ import re
 from urllib.parse import urlsplit
 
 import aiohttp
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from src.api.dependencies import get_transaction_repo
+from src.database.repositories import TransactionRepository
 from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet intelligence"])
@@ -47,6 +50,43 @@ async def _transfer_page(session, rpc_url, address, direction, count, page_key=N
     return result
 
 
+async def _verified_entity_map(repo: TransactionRepository, addresses) -> dict:
+    """Return only source-attributed entity rows already stored by ChainScope."""
+    normalized = sorted({
+        str(address).lower()
+        for address in addresses
+        if ADDRESS.fullmatch(str(address or ""))
+    })
+    if not normalized:
+        return {}
+    try:
+        rows = await repo.db.fetch(
+            """
+            SELECT source, address, entity_id, entity_name, checked_at
+            FROM verified_address_intelligence
+            WHERE address = ANY($1::varchar[])
+            ORDER BY address, source, entity_id
+            """,
+            normalized,
+        )
+    except Exception:
+        # Entity context is enrichment only; investigation evidence must still work
+        # if the optional intelligence table is unavailable during a migration.
+        return {}
+
+    entity_map = {}
+    for row in rows:
+        address = row["address"].lower()
+        entity_map.setdefault(address, []).append({
+            "source": row["source"],
+            "entity_id": row["entity_id"],
+            "entity_name": row["entity_name"],
+            "checked_at": row["checked_at"].isoformat() if row["checked_at"] else None,
+            "source_attributed": True,
+        })
+    return entity_map
+
+
 @router.get("/{address}/transfers")
 async def wallet_indexed_transfers(
     address: str,
@@ -66,7 +106,6 @@ async def wallet_indexed_transfers(
     hostname = (parsed_rpc.hostname or "").lower()
     if parsed_rpc.scheme != "https" or not (hostname == "alchemy.com" or hostname.endswith(".alchemy.com")):
         raise HTTPException(status_code=503, detail="Alchemy mainnet RPC not configured")
-    # Both directions are independently bounded; page keys reveal further results.
     timeout = aiohttp.ClientTimeout(total=20)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -81,11 +120,14 @@ async def wallet_indexed_transfers(
             incoming = page_results.get("incoming", {"transfers": [], "pageKey": None})
     except (aiohttp.ClientError, asyncio.TimeoutError):
         raise HTTPException(status_code=502, detail="Transfer provider timed out or failed")
+
     unique = {}
     for direction, result in (("outgoing", outgoing), ("incoming", incoming)):
         for transfer in result["transfers"]:
-            # One transfer can appear in both directions for self-transfers.
-            key = (transfer.get("uniqueId") or transfer.get("hash"), transfer.get("category"), transfer.get("from"), transfer.get("to"))
+            key = (
+                transfer.get("uniqueId") or transfer.get("hash"),
+                transfer.get("category"), transfer.get("from"), transfer.get("to"),
+            )
             if key not in unique:
                 unique[key] = {
                     "hash": transfer.get("hash"),
@@ -123,10 +165,11 @@ async def wallet_indexed_graph(
     per_direction: int = Query(25, ge=1, le=50),
     outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
     incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    """One-hop, evidence-backed graph from the same Alchemy transfer source."""
+    """One-hop, evidence-backed graph enriched only with verified stored entity rows."""
     result = await wallet_indexed_transfers(
-        address, per_direction, outgoing_page_key, incoming_page_key
+        address, per_direction, outgoing_page_key, incoming_page_key, True, True
     )
     root = address.lower()
     nodes = {root}
@@ -149,12 +192,24 @@ async def wallet_indexed_graph(
             "evidence_url": transfer.get("evidence_url"),
             "relationship": "indexed_transfer",
         })
+
+    entity_map = await _verified_entity_map(repo, nodes)
     return {
         "root": root,
         "chain_id": 1,
         "depth": 1,
-        "nodes": [{"id": item, "type": "address"} for item in sorted(nodes)],
+        "nodes": [
+            {
+                "id": item,
+                "type": "address",
+                "verified_entities": entity_map.get(item, []),
+                "entity_context_status": "source_attributed_match" if entity_map.get(item) else "no_local_match",
+            }
+            for item in sorted(nodes)
+        ],
         "edges": edges,
+        "verified_entity_matches": sum(len(matches) for matches in entity_map.values()),
+        "entity_context_note": "Only source-attributed records already stored in verified_address_intelligence are shown. No match does not establish anonymity, safety, or lack of attribution elsewhere.",
         "next_page_keys": {
             "outgoing": result["outgoing_next_page_key"],
             "incoming": result["incoming_next_page_key"],
@@ -168,32 +223,47 @@ async def wallet_indexed_graph(
 def _observed_behavioral_signals(transfers, root):
     """Transparent heuristics over observed records; no criminality or ML claims."""
     signals = []
+
     def emit(code, title, evidence, explanation):
         hashes = sorted({t.get("hash") for t in evidence if t.get("hash")})
         if hashes:
             signals.append({
-                "code": code, "title": title, "status": "review",
+                "code": code,
+                "title": title,
+                "status": "review",
                 "observed_count": len(evidence),
                 "evidence": [{"tx_hash": h, "url": "https://etherscan.io/tx/" + h} for h in hashes[:20]],
                 "explanation": explanation,
                 "not_a_fraud_verdict": True,
             })
-    # Multiple distinct transfers between the same pair are reviewable, not proof of risk.
+
     pairs = {}
     for tx in transfers:
         sender = (tx.get("from_address") or "").lower()
         recipient = (tx.get("to_address") or "").lower()
         if ADDRESS.fullmatch(sender) and ADDRESS.fullmatch(recipient) and tx.get("hash"):
             pairs.setdefault((sender, recipient), []).append(tx)
-    for pair, group in sorted(pairs.items()):
+    for _, group in sorted(pairs.items()):
         if len({t["hash"] for t in group}) >= 3:
-            emit("repeated_pair", "Repeated observed transfer pair", group,
-                 "Three or more distinct transaction hashes link the same sender and recipient in the fetched sample.")
-    self_transfers = [t for t in transfers if (t.get("from_address") or "").lower() == root
-                      and (t.get("to_address") or "").lower() == root]
+            emit(
+                "repeated_pair",
+                "Repeated observed transfer pair",
+                group,
+                "Three or more distinct transaction hashes link the same sender and recipient in the fetched sample.",
+            )
+
+    self_transfers = [
+        t for t in transfers
+        if (t.get("from_address") or "").lower() == root
+        and (t.get("to_address") or "").lower() == root
+    ]
     if self_transfers:
-        emit("self_transfer", "Self-transfer observed", self_transfers,
-             "The same address appears as sender and recipient. This can be ordinary wallet activity.")
+        emit(
+            "self_transfer",
+            "Self-transfer observed",
+            self_transfers,
+            "The same address appears as sender and recipient. This can be ordinary wallet activity.",
+        )
     return signals
 
 
@@ -203,15 +273,17 @@ async def wallet_evidence_report(
     per_direction: int = Query(25, ge=1, le=50),
     outgoing_page_key: str | None = Query(None, min_length=1, max_length=2048),
     incoming_page_key: str | None = Query(None, min_length=1, max_length=2048),
+    repo: TransactionRepository = Depends(get_transaction_repo),
 ):
     """Deterministic, source-linked investigation summary without unverified AI claims."""
     result = await wallet_indexed_transfers(
-        address, per_direction, outgoing_page_key, incoming_page_key
+        address, per_direction, outgoing_page_key, incoming_page_key, True, True
     )
     root = address.lower()
     transfers = result["transfers"]
     incoming = [t for t in transfers if (t.get("to_address") or "").lower() == root]
     outgoing = [t for t in transfers if (t.get("from_address") or "").lower() == root]
+
     counterparties = {}
     for tx in transfers:
         src = (tx.get("from_address") or "").lower()
@@ -221,6 +293,12 @@ async def wallet_evidence_report(
                 item = counterparties.setdefault(other, {"address": other, "evidence_hashes": []})
                 if tx.get("hash") and tx["hash"] not in item["evidence_hashes"]:
                     item["evidence_hashes"].append(tx["hash"])
+
+    entity_map = await _verified_entity_map(repo, [root, *counterparties.keys()])
+    for address_key, item in counterparties.items():
+        item["verified_entities"] = entity_map.get(address_key, [])
+        item["entity_context_status"] = "source_attributed_match" if entity_map.get(address_key) else "no_local_match"
+
     signals = _observed_behavioral_signals(transfers, root)
     citations = []
     for tx in transfers:
@@ -231,6 +309,12 @@ async def wallet_evidence_report(
                 "category": tx.get("category"),
                 "asset": tx.get("asset"),
             })
+
+    flattened_entity_matches = [
+        {"address": address_key, **match}
+        for address_key, matches in sorted(entity_map.items())
+        for match in matches
+    ]
     return {
         "address": root,
         "chain_id": 1,
@@ -245,6 +329,14 @@ async def wallet_evidence_report(
         "outgoing_count": len(outgoing),
         "unique_counterparties": len(counterparties),
         "counterparties": sorted(counterparties.values(), key=lambda item: (-len(item["evidence_hashes"]), item["address"])),
+        "verified_entity_intelligence": {
+            "status": "matches_found" if flattened_entity_matches else "no_local_match",
+            "matched_addresses": len(entity_map),
+            "match_records": len(flattened_entity_matches),
+            "investigated_address_matches": entity_map.get(root, []),
+            "matches": flattened_entity_matches,
+            "note": "These are source-attributed records stored by ChainScope. Absence of a local match is not evidence that an address is unassociated, unsanctioned, or safe.",
+        },
         "evidence": citations,
         "behavioral_signals": signals,
         "detection_quality": {
@@ -252,7 +344,7 @@ async def wallet_evidence_report(
             "precision": None,
             "recall": None,
             "false_positive_rate": None,
-            "reason": "No independently labeled evaluation set is available. Rules are review cues, not validated threat detection."
+            "reason": "No independently labeled evaluation set is available. Rules are review cues, not validated threat detection.",
         },
         "coverage_details": {
             "categories": ["external", "erc20"],
@@ -261,6 +353,7 @@ async def wallet_evidence_report(
             "outgoing_has_more": bool(result["outgoing_next_page_key"]),
             "incoming_has_more": bool(result["incoming_next_page_key"]),
             "complete_history": False,
+            "entity_context": "source_attributed_local_matches_only",
         },
         "pagination": {
             "outgoing_next_page_key": result["outgoing_next_page_key"],
@@ -270,12 +363,14 @@ async def wallet_evidence_report(
         "historical_completeness": False,
         "risk_assessment": {
             "status": "not_assessed",
-            "reason": "Transfer counts and counterparties alone do not establish fraud, sanctions exposure, or illicit behavior.",
+            "reason": "Transfer counts, behavioral rules, and entity labels alone do not establish fraud, sanctions exposure, or illicit behavior.",
         },
         "limitations": [
             "This report covers only fetched pages and supported provider transfer categories.",
+            "Entity context is limited to source-attributed records already present in ChainScope's verified intelligence table.",
+            "No local entity match does not establish that no attribution exists elsewhere.",
             "Evidence URLs are references to source transactions, not independent sanctions verification.",
             "Behavioral rules are transparent review cues, not evaluated detection models or fraud verdicts.",
-            "No entity attribution or multi-hop tracing is made.",
+            "No multi-hop tracing or beneficial-ownership inference is made.",
         ],
     }

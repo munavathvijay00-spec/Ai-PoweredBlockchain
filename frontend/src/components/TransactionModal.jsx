@@ -26,6 +26,19 @@ function riskLabel(score) {
   return { text: 'Minimal', color: 'text-emerald-400', bar: 'bg-emerald-500' };
 }
 
+function explanationMeta(tx) {
+  const explanation = typeof tx.ai_explanation === 'string' ? tx.ai_explanation.trim() : '';
+  const status = tx.explanation_status || (
+    explanation.startsWith('Grounded AI explanation:') ? 'grounded_ai'
+      : explanation.startsWith('Rule-based risk assessment:') || explanation.startsWith('Evidence-based assessment:') ? 'deterministic'
+        : explanation ? 'legacy_unverified' : 'none'
+  );
+  if (status === 'grounded_ai') return { status, explanation, title: 'Grounded AI explanation', trusted: true, badge: 'fact-bound' };
+  if (status === 'deterministic') return { status, explanation, title: 'Evidence-based assessment', trusted: true, badge: 'deterministic' };
+  if (status === 'legacy_unverified') return { status, explanation: '', title: 'Legacy explanation withheld', trusted: false, badge: 'unverified' };
+  return { status: 'none', explanation: '', title: 'Explanation unavailable', trusted: false, badge: null };
+}
+
 export default function TransactionModal({ tx, onClose }) {
   useEffect(() => {
     const handleEscape = event => { if (event.key === 'Escape') onClose(); };
@@ -39,10 +52,7 @@ export default function TransactionModal({ tx, onClose }) {
   const evidence = tx.evidence_assessment;
   const insufficient = evidence?.assessment === 'insufficient_evidence';
   const risk = insufficient ? { text: 'Insufficient evidence', color: 'text-amber-300', bar: 'bg-amber-400' } : amountOnly ? { text: 'Amount review only', color: 'text-amber-300', bar: 'bg-amber-400' } : riskLabel(score);
-  const explanation = typeof tx.ai_explanation === 'string' ? tx.ai_explanation : '';
-  const groundedAi = explanation.startsWith('Grounded AI explanation:');
-  const deterministic = explanation.startsWith('Evidence-based assessment:') || explanation.startsWith('Rule-based risk assessment:');
-  const explanationTitle = groundedAi ? 'Grounded AI explanation' : deterministic ? 'Evidence-based assessment' : 'Stored explanation';
+  const explanation = explanationMeta(tx);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -60,13 +70,13 @@ export default function TransactionModal({ tx, onClose }) {
             {amountOnly && <p className="mt-3 text-sm text-amber-200">The score is based only on transfer size, not verified suspicious behavior.</p>}
           </section>
 
-          <section className={`rounded-lg border p-4 ${groundedAi ? 'border-sky-400/25 bg-sky-400/[0.07]' : 'border-[#46556d] bg-[#172236]'}`}>
-            <div className="mb-2 flex items-center justify-between gap-3"><h3 className={`text-sm font-semibold uppercase tracking-wide ${groundedAi ? 'text-sky-300' : 'text-slate-300'}`}>{explanationTitle}</h3>{groundedAi && <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] font-medium text-emerald-300">fact-bound</span>}</div>
-            {explanation ? <p className="leading-7 text-slate-200">{explanation}</p> : <p className="text-sm italic text-slate-400">No explanation is stored for this transaction.</p>}
-            {groundedAi && <p className="mt-3 text-xs leading-5 text-slate-500">AI wording is stored only when it passes validation against the transaction's saved score and evidence. Unsupported claims fall back to deterministic evidence text.</p>}
+          <section className={`rounded-lg border p-4 ${explanation.status === 'grounded_ai' ? 'border-sky-400/25 bg-sky-400/[0.07]' : explanation.trusted ? 'border-emerald-400/20 bg-emerald-400/[0.05]' : 'border-amber-400/20 bg-amber-400/[0.04]'}`}>
+            <div className="mb-2 flex items-center justify-between gap-3"><h3 className={`text-sm font-semibold uppercase tracking-wide ${explanation.status === 'grounded_ai' ? 'text-sky-300' : explanation.trusted ? 'text-emerald-300' : 'text-amber-300'}`}>{explanation.title}</h3>{explanation.badge && <span className={`rounded-full border px-2 py-1 text-[10px] font-medium ${explanation.trusted ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border-amber-400/20 bg-amber-400/10 text-amber-300'}`}>{explanation.badge}</span>}</div>
+            {explanation.explanation ? <p className="leading-7 text-slate-200">{explanation.explanation}</p> : explanation.status === 'legacy_unverified' ? <p className="text-sm leading-6 text-amber-100">A stored explanation exists, but it predates the current grounding contract or cannot be verified against recorded evidence. ChainScope hides it instead of presenting unverified AI text as fact.</p> : <p className="text-sm italic text-slate-400">No trusted explanation is stored for this transaction.</p>}
+            {explanation.status === 'grounded_ai' && <p className="mt-3 text-xs leading-5 text-slate-500">AI wording is accepted only when it stays inside the stored score/evidence boundary and preserves valid [E#] evidence references. Unsupported claims fall back to deterministic evidence text.</p>}
           </section>
 
-          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && <section className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan-300">Risk evidence trail</h3><div className="space-y-2">{tx.risk_factors.map((factor, index) => <div key={index} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>{factor.source && <div className="mt-1 text-xs text-cyan-400">Source: {factor.source}</div>}</div>)}</div><p className="mt-3 text-xs text-slate-500">Signals are investigation cues, not a determination of wrongdoing.</p></section>}
+          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && <section className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan-300">Risk evidence trail</h3><div className="space-y-2">{tx.risk_factors.map((factor, index) => <div key={index} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><div className="flex gap-3"><span className="shrink-0 rounded border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 font-mono text-xs text-cyan-300">E{index + 1}</span><div><div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>{factor.source && <div className="mt-1 text-xs text-cyan-400">Source: {factor.source}</div>}</div></div></div>)}</div><p className="mt-3 text-xs text-slate-500">Evidence IDs map explanation claims back to stored scoring signals. Signals are investigation cues, not a determination of wrongdoing.</p></section>}
 
           <section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Transaction hash</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.hash}</div></section>
           <div className="grid gap-4 md:grid-cols-2"><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">From</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.from_address}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">To</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.to_address}</div></section></div>

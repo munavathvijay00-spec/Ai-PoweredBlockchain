@@ -1,3 +1,8 @@
+function countLabel(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString() : '—';
+}
+
 export default function FilterTabs({ active, onChange, counts }) {
   const tabs = [
     { id: 'all', label: 'All', count: counts.all, tone: 'text-slate-300' },
@@ -8,7 +13,7 @@ export default function FilterTabs({ active, onChange, counts }) {
     <div className="filter-shell" role="tablist" aria-label="Transaction filters">
       {tabs.map(tab => (
         <button key={tab.id} role="tab" aria-selected={active === tab.id} onClick={() => onChange(tab.id)} className={`filter-tab ${active === tab.id ? 'filter-tab-active' : ''}`}>
-          <span>{tab.label}</span><span className={`filter-count ${tab.tone}`}>{tab.count}</span>
+          <span>{tab.label}</span><span className={`filter-count ${tab.tone}`}>{countLabel(tab.count)}</span>
         </button>
       ))}
     </div>

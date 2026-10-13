@@ -61,12 +61,17 @@ function SystemCoverage({ coverage }) {
   const native = coverage.native_transactions || {};
   const checkpoint = coverage.reorg_verification || {};
   const entityIntel = coverage.verified_entity_intelligence || {};
+  const detection = coverage.detection_quality || {};
+
+  const detectionValue = detection.status === 'evaluated'
+    ? `${Math.round(Number(detection.precision || 0) * 100)}% precision`
+    : 'Not measured';
 
   const cards = [
     ['Indexer', health.status || 'unknown', `Checkpoint updated ${ageLabel(health.checkpoint_age_seconds)}`],
     ['Checkpoint block', health.checkpoint_block ? Number(health.checkpoint_block).toLocaleString() : '—', checkpoint.status === 'checkpoint_hash_recorded' ? 'Canonical hash recorded' : 'Canonical hash not verified'],
     ['Retained records', Number(native.stored_transactions || 0).toLocaleString(), `Rolling ${readiness.retention_window_minutes || 30} minute native window`],
-    ['Entity records', Number(entityIntel.records || 0).toLocaleString(), `${Number(entityIntel.unique_addresses || 0).toLocaleString()} unique addresses`],
+    ['Detection quality', detectionValue, detection.status === 'evaluated' ? 'Independent holdout evaluation' : 'Independent labels required before accuracy claims'],
   ];
 
   return (
@@ -85,6 +90,7 @@ function SystemCoverage({ coverage }) {
           <p className="metric-label">Supported today</p>
           <div className="mt-4 space-y-3">
             {(readiness.production_ready_for || []).map(item => <div key={item} className="coverage-row"><span className="text-emerald-400">✓</span><span>{item}</span></div>)}
+            {entityIntel.records > 0 && <div className="coverage-row"><span className="text-emerald-400">✓</span><span>{Number(entityIntel.records).toLocaleString()} source-attributed entity records loaded</span></div>}
           </div>
         </section>
         <section className="platform-card p-5">
@@ -103,6 +109,8 @@ function App() {
   const [coverage, setCoverage] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [flagged, setFlagged] = useState([]);
+  const [flaggedTotal, setFlaggedTotal] = useState(0);
+  const [transactionTotal, setTransactionTotal] = useState(0);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -125,8 +133,14 @@ function App() {
         const [statsResult, coverageResult, txsResult, flaggedResult] = results;
         if (statsResult.status === 'fulfilled') setStats(statsResult.value);
         if (coverageResult.status === 'fulfilled') setCoverage(coverageResult.value);
-        if (txsResult.status === 'fulfilled') setTransactions(txsResult.value.transactions ?? []);
-        if (flaggedResult.status === 'fulfilled') setFlagged(flaggedResult.value.transactions ?? []);
+        if (txsResult.status === 'fulfilled') {
+          setTransactions(txsResult.value.transactions ?? []);
+          setTransactionTotal(Number(txsResult.value.total || 0));
+        }
+        if (flaggedResult.status === 'fulfilled') {
+          setFlagged(flaggedResult.value.transactions ?? []);
+          setFlaggedTotal(Number(flaggedResult.value.total || 0));
+        }
         const failures = results.filter(result => result.status === 'rejected');
         setError(failures.length ? 'Some intelligence services are temporarily unavailable. Latest successful results remain visible.' : null);
         if (failures.length !== results.length) setLastUpdate(new Date());
@@ -144,18 +158,26 @@ function App() {
     return () => { active = false; clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
+  const highThreshold = Number(stats?.high_risk_threshold ?? 40);
   const counts = useMemo(() => ({
-    all: transactions.length,
-    flagged: flagged.length,
-    high: flagged.filter(tx => Number(tx.risk_score) >= 40).length,
-  }), [transactions, flagged]);
+    all: Number(stats?.total_transactions ?? transactionTotal ?? transactions.length),
+    flagged: Number(stats?.flagged_transactions ?? flaggedTotal ?? flagged.length),
+    high: Number(stats?.high_risk_transactions ?? flagged.filter(tx => Number(tx.risk_score) >= highThreshold).length),
+  }), [stats, transactionTotal, transactions.length, flaggedTotal, flagged, highThreshold]);
 
   const filtered = useMemo(() => {
-    let list = filter === 'flagged' ? flagged : filter === 'high' ? flagged.filter(tx => Number(tx.risk_score) >= 40) : transactions;
+    let list = filter === 'flagged' ? flagged : filter === 'high' ? flagged.filter(tx => Number(tx.risk_score) >= highThreshold) : transactions;
     if (!search.trim()) return list;
     const q = search.trim().toLowerCase();
     return list.filter(tx => [tx.hash, tx.from_address, tx.to_address].some(value => (value || '').toLowerCase().includes(q)));
-  }, [transactions, flagged, filter, search]);
+  }, [transactions, flagged, filter, search, highThreshold]);
+
+  const listScope = useMemo(() => {
+    if (search.trim()) return { total: filtered.length, label: 'matches in loaded rows', searchActive: true };
+    if (filter === 'flagged') return { total: counts.flagged, label: `flagged at ≥${Number(stats?.flagged_threshold ?? 20)}`, searchActive: false };
+    if (filter === 'high') return { total: counts.high, label: `high-review at ≥${highThreshold}`, searchActive: false };
+    return { total: counts.all, label: 'retained transactions', searchActive: false };
+  }, [search, filtered.length, filter, counts, stats, highThreshold]);
 
   async function inspectTransaction(tx) {
     setSelectedTx(tx);
@@ -211,10 +233,11 @@ function App() {
               <div className="space-y-4">
                 <SearchBar value={search} onChange={setSearch} />
                 <FilterTabs active={filter} onChange={setFilter} counts={counts} />
+                <p className="px-1 text-xs text-slate-500">Tab counts cover the retained database window. The table loads a bounded page and states exactly how many rows are shown.</p>
               </div>
-              <RiskChart transactions={transactions} />
+              <RiskChart transactions={transactions} retainedFlagged={counts.flagged} flaggedThreshold={Number(stats?.flagged_threshold ?? 20)} />
             </div>
-            <TransactionList transactions={filtered} onSelect={inspectTransaction} />
+            <TransactionList transactions={filtered} onSelect={inspectTransaction} totalMatches={listScope.total} scopeLabel={listScope.label} searchActive={listScope.searchActive} />
             <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-600">
               <span>Ethereum mainnet · Block {latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</span>
               <span>Risk scores are review signals, not fraud verdicts.</span>

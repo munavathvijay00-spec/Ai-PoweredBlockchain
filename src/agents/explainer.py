@@ -28,14 +28,19 @@ _SENSITIVE_CLAIM_TERMS = (
 
 
 def _normalized_numbers(text: str) -> set[str]:
-    """Extract claimed numbers while ignoring hexadecimal hashes/addresses."""
+    """Extract claimed numbers while ignoring hexadecimal hashes/addresses and evidence IDs."""
     without_hex = re.sub(r"0x[a-fA-F0-9]+", "", text or "")
-    values = re.findall(r"(?<![A-Za-z])\d[\d,]*(?:\.\d+)?", without_hex)
+    without_refs = re.sub(r"\[E\d+\]", "", without_hex)
+    values = re.findall(r"(?<![A-Za-z])\d[\d,]*(?:\.\d+)?", without_refs)
     return {value.replace(",", "") for value in values}
 
 
+def _evidence_refs(text: str) -> set[str]:
+    return set(re.findall(r"\[E\d+\]", text or ""))
+
+
 def explanation_is_grounded(candidate: str, baseline: str) -> bool:
-    """Reject LLM wording that adds facts not present in the deterministic baseline."""
+    """Reject LLM wording that adds facts or evidence references not present in baseline."""
     if not isinstance(candidate, str):
         return False
     text = candidate.strip()
@@ -52,6 +57,13 @@ def explanation_is_grounded(candidate: str, baseline: str) -> bool:
             return False
     if not _normalized_numbers(text).issubset(_normalized_numbers(baseline)):
         return False
+
+    baseline_refs = _evidence_refs(baseline)
+    candidate_refs = _evidence_refs(text)
+    if baseline_refs and not candidate_refs:
+        return False
+    if not candidate_refs.issubset(baseline_refs):
+        return False
     return True
 
 
@@ -66,9 +78,12 @@ def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
         if len(reasons) == 3:
             break
     if reasons:
+        cited_reasons = "; ".join(
+            f"[E{index}] {reason}" for index, reason in enumerate(reasons, start=1)
+        )
         return (
             f"Rule-based risk assessment: this transaction scored {score}/100. "
-            f"Detected evidence: {'; '.join(reasons)}. "
+            f"Recorded evidence: {cited_reasons}. "
             "These indicators warrant review but do not independently prove wrongdoing."
         )
     return (
@@ -100,6 +115,7 @@ Rules:
 - Rewrite the source into at most 2 short sentences for a non-technical user.
 - Use ONLY facts already present in SOURCE OF TRUTH.
 - Keep the exact risk score and any numeric evidence unchanged.
+- Preserve at least one applicable [E#] evidence reference and never invent a new reference.
 - Do not infer identity, ownership, intent, fraud, sanctions, scams, hacks, theft, laundering, exchange usage, mixer usage, or historical behavior unless SOURCE OF TRUTH explicitly states it.
 - Do not convert values to USD or add market prices.
 - State that the signals are review indicators, not proof of wrongdoing.

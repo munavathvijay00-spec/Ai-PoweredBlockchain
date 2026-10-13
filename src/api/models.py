@@ -18,6 +18,10 @@ class TransactionResponse(BaseModel):
     timestamp: datetime = Field(..., description="Block timestamp")
     risk_score: int = Field(..., ge=0, le=100, description="Risk score 0-100")
     ai_explanation: Optional[str] = Field(None, description="AI or deterministic evidence-based explanation")
+    explanation_status: str = Field(
+        "none",
+        description="grounded_ai, deterministic, legacy_unverified, or none",
+    )
     risk_factors: List[Dict] = Field(default_factory=list, description="Recorded scoring evidence")
     evidence_assessment: Dict = Field(default_factory=dict, description="Versioned, non-calibrated evidence classification")
 
@@ -32,7 +36,8 @@ class TransactionResponse(BaseModel):
                 "block_number": 26056394,
                 "timestamp": "2026-09-26T00:26:31",
                 "risk_score": 20,
-                "ai_explanation": "This 249 ETH transfer is significant..."
+                "ai_explanation": "Rule-based risk assessment: this transaction scored 20/100.",
+                "explanation_status": "deterministic",
             }
         }
 
@@ -46,13 +51,19 @@ class TransactionListResponse(BaseModel):
 
 
 class StatsResponse(BaseModel):
-    """System-wide statistics."""
+    """System-wide statistics with the thresholds used to derive each count."""
     total_transactions: int
     total_addresses: int
     flagged_transactions: int
+    flagged_threshold: int = 20
+    high_risk_transactions: int = 0
+    high_risk_threshold: int = 40
+    critical_transactions: int = 0
+    critical_threshold: int = 80
     avg_risk_score: float
     max_risk_score: int
     explained_transactions: int
+    grounded_explanations: int = 0
 
 
 class HealthResponse(BaseModel):

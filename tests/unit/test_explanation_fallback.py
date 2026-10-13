@@ -11,6 +11,7 @@ def test_evidence_fallback_includes_score_and_reason():
     )
     assert "Rule-based" in result
     assert "85/100" in result
+    assert "[E1]" in result
     assert "OFAC SDN" in result
     assert "do not independently prove wrongdoing" in result
 
@@ -39,11 +40,12 @@ async def test_ai_explanation_used_only_when_grounded():
     import asyncio
     explainer._semaphore = asyncio.Semaphore(3)
     explainer.provider = "ollama"
-    explainer._call_ollama = AsyncMock(return_value="This transaction scored 30/100 because an unusual transfer size was detected. This is a review indicator, not proof of wrongdoing.")
+    explainer._call_ollama = AsyncMock(return_value="This transaction scored 30/100 because an unusual transfer size was detected [E1]. This is a review indicator, not proof of wrongdoing.")
     explainer._build_prompt = lambda tx, factors: "prompt"
     result = await explainer.explain({"risk_score": 30}, [{"reason": "Unusual transfer size"}])
     assert result.startswith("Grounded AI explanation:")
     assert "30/100" in result
+    assert "[E1]" in result
     assert "Unusual transfer size".lower() in result.lower()
 
 

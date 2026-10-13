@@ -4,12 +4,14 @@ function formatNumber(value) {
 }
 
 export default function StatsBar({ stats, coverage }) {
+  const flaggedThreshold = Number(stats?.flagged_threshold ?? 20);
+  const grounded = stats?.grounded_explanations ?? stats?.explained_transactions;
   const cards = stats ? [
     { label: 'Total transactions', value: formatNumber(coverage?.native_transactions?.stored_transactions ?? stats.total_transactions), accent: 'text-[#57a4ff]' },
     { label: 'Addresses tracked', value: formatNumber(stats.total_addresses), accent: 'text-[#c17cff]' },
-    { label: 'Flagged', value: formatNumber(stats.flagged_transactions), accent: 'text-[#ff6969]' },
+    { label: `Flagged (≥${flaggedThreshold})`, value: formatNumber(stats.flagged_transactions), accent: 'text-[#ff6969]' },
     { label: 'Avg risk score', value: Number.isFinite(Number(stats.avg_risk_score)) ? Number(stats.avg_risk_score).toFixed(2) : '—', accent: 'text-[#ffd21f]' },
-    { label: 'Explained', value: formatNumber(stats.explained_transactions), accent: 'text-[#45db83]' },
+    { label: 'Evidence explained', value: formatNumber(grounded), accent: 'text-[#45db83]' },
   ] : null;
 
   return (

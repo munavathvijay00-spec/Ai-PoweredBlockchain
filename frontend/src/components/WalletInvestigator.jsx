@@ -94,8 +94,8 @@ export default function WalletInvestigator() {
       const peer = from === normalizedWallet ? to : to === normalizedWallet ? from : '';
       if (!VALID.test(peer) || peer === normalizedWallet) continue;
       const row = peers.get(peer) || { address: peer, incoming: 0, outgoing: 0, assets: new Set(), evidence: null };
-      if (to === normalizedWallet) row.incoming++;
-      if (from === normalizedWallet) row.outgoing++;
+      if (to === normalizedWallet && from === peer) row.incoming++;
+      if (from === normalizedWallet && to === peer) row.outgoing++;
       if (tx.asset) row.assets.add(tx.asset);
       if (!row.evidence && /^0x[a-fA-F0-9]{64}$/.test(tx.hash || '')) row.evidence = 'https://etherscan.io/tx/' + tx.hash;
       peers.set(peer, row);

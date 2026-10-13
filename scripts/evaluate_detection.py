@@ -35,6 +35,10 @@ def evaluate(rows):
         "specificity": ratio(tn, tn + fp),
         "f1": ratio(2 * tp, 2 * tp + fp + fn),
         "accuracy": ratio(tp + tn, len(seen)),
+        "false_positive_rate": ratio(fp, fp + tn),
+        "false_negative_rate": ratio(fn, fn + tp),
+        "positive_support": tp + fn,
+        "negative_support": tn + fp,
         "note": "Unmeasured metrics are null. Validity depends on independent ground-truth labels and representative sampling.",
     }
 

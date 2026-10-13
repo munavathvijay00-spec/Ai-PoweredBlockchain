@@ -36,6 +36,21 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(result["false_positive_rate"], 0.0)
         self.assertIsNone(result["false_negative_rate"])
 
+    def test_all_true_positives(self):
+        result = evaluate([row("p1", "1", "1"), row("p2", "1", "1")])
+        self.assertEqual(result["precision"], 1.0)
+        self.assertEqual(result["recall"], 1.0)
+        self.assertEqual(result["false_negative_rate"], 0.0)
+        self.assertIsNone(result["specificity"])
+        self.assertIsNone(result["false_positive_rate"])
+
+    def test_all_false_negatives(self):
+        result = evaluate([row("p1", "1", "0")])
+        self.assertEqual(result["recall"], 0.0)
+        self.assertEqual(result["false_negative_rate"], 1.0)
+        self.assertIsNone(result["precision"])
+        self.assertEqual(result["f1"], 0.0)
+
     def test_duplicate_case_rejected(self):
         with self.assertRaises(ValueError):
             evaluate([row("same", "1", "1"), row("same", "0", "0")])

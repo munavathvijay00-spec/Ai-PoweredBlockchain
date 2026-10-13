@@ -127,7 +127,15 @@ async def ingest_loop(interval_seconds: int = 15):
                 # Stop rather than silently mix orphaned transfers into evidence.
                 if last_block_hash is not None:
                     canonical = await client.get_block(last_processed_block)
-                    if _block_hash(canonical['hash']) != last_block_hash:
+                    canonical_hash = _block_hash(canonical['hash'])
+                    if canonical_hash.lower() != last_block_hash.lower():
+                        logger.critical(
+                            'Checkpoint mismatch diagnostics: height={} saved_hash={} '
+                            'rpc_hash={} chain_head={} confirmations={} '
+                            'action=halt_without_mutation',
+                            last_processed_block, last_block_hash, canonical_hash,
+                            latest_block, latest_block - last_processed_block,
+                        )
                         raise RuntimeError('REORG_DETECTED: checkpoint block hash differs from canonical chain; manual rollback/replay required')
 
                 pending = latest_block - last_processed_block

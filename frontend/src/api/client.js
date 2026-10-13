@@ -38,6 +38,11 @@ export const api = {
     if (cursors.incoming_page_key) params.set('incoming_page_key', cursors.incoming_page_key);
     return request(`/wallets/${encodeURIComponent(address)}/transfers?${params}`, 25000);
   },
-  getWalletGraph: address => request(`/wallets/${encodeURIComponent(address)}/indexed-graph`, 25000),
+  getWalletGraph: (address, cursors = {}) => {
+    const params = new URLSearchParams({ per_direction: '25' });
+    if (cursors.outgoing) params.set('outgoing_page_key', cursors.outgoing);
+    if (cursors.incoming) params.set('incoming_page_key', cursors.incoming);
+    return request(`/wallets/${encodeURIComponent(address)}/indexed-graph?${params}`, 25000);
+  },
   getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report`, 25000),
 };

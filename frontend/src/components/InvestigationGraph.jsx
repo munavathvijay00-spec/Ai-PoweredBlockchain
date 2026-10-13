@@ -76,6 +76,25 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
   const related = selectedNode ? network.edges.filter(edge => edge.from === selectedNode || edge.to === selectedNode) : [];
   const focus = selectedNode || (selectedEdge && selectedEdge.from);
   const visibleEdges = network.edges.filter(edge => !matches || (matches.has(edge.from) && matches.has(edge.to)));
+  const exportEvidence = () => {
+    const quote = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const rows = [
+      ['transaction_hash', 'from_address', 'to_address', 'value', 'asset', 'category', 'risk_score', 'evidence_url'],
+      ...visibleEdges.map(({ tx, from, to }) => [
+        tx.hash, from, to, tx.value, tx.asset, tx.category, tx.risk_score,
+        tx.evidence_url || 'https://etherscan.io/tx/' + tx.hash,
+      ]),
+    ];
+    const csv = rows.map(row => row.map(quote).join(',')).join('\\r\\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'chainscope-observed-transfers.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
   const zoom = delta => setScale(current => Math.max(0.45, Math.min(3, +(current + delta).toFixed(2))));
   const reset = () => { setScale(1); setOffset({ x: 0, y: 0 }); setSelected(null); setQuery(''); };
   const pointerDown = event => {
@@ -98,6 +117,7 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
       <div className="px-5 py-3 flex flex-wrap gap-3 items-center border-b border-slate-700">
         <input aria-label="Find wallet or transaction" value={query} onChange={event => setQuery(event.target.value)}
           placeholder="Find wallet address or transaction hash…" className="flex-1 min-w-[220px] bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400"/>
+        <button type="button" onClick={exportEvidence} disabled={!visibleEdges.length} className="rounded-lg border border-sky-700 px-3 py-2 text-sm text-sky-300 disabled:opacity-40">Export visible evidence CSV</button>
         <div className="flex rounded-lg border border-slate-600 overflow-hidden text-sm">
           <button onClick={() => setMode('graph')} aria-pressed={mode === 'graph'} className={`px-4 py-2 ${mode === 'graph' ? 'bg-slate-600 text-white' : 'text-slate-300'}`}>Network</button>
           <button onClick={() => setMode('table')} aria-pressed={mode === 'table'} className={`px-4 py-2 ${mode === 'table' ? 'bg-slate-600 text-white' : 'text-slate-300'}`}>Table</button>
@@ -159,8 +179,8 @@ export default function InvestigationGraph({ transactions = [], onSelect }) {
           </> : <p className="text-sm text-slate-400">Select a wallet or connection to inspect its observed activity and source transaction.</p>}
           <div className="border-t border-slate-700 pt-3 text-xs text-slate-400">Colors distinguish connected components, not known owners or criminal groups. Layout is based only on the loaded sample.</div>
         </aside>
-      </div> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-900/50 text-slate-400"><tr><th className="p-4">Sender</th><th className="p-4">Recipient</th><th className="p-4">Risk</th><th className="p-4">Evidence</th></tr></thead>
-        <tbody className="divide-y divide-slate-700">{visibleEdges.map(edge => <tr key={edge.id} className="hover:bg-slate-700/40"><td className="p-4 font-mono">{short(edge.from)}</td><td className="p-4 font-mono">{short(edge.to)}</td><td className="p-4">{riskText(edge.tx.risk_score)}</td><td className="p-4"><button className="text-sky-400 hover:underline" onClick={() => onSelect?.(edge.tx)}>{short(edge.tx.hash)} ↗</button></td></tr>)}</tbody></table>
+      </div> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-900/50 text-slate-400"><tr><th className="p-4">Sender</th><th className="p-4">Recipient</th><th className="p-4">Amount / asset</th><th className="p-4">Risk</th><th className="p-4">Evidence</th></tr></thead>
+        <tbody className="divide-y divide-slate-700">{visibleEdges.map(edge => <tr key={edge.id} className="hover:bg-slate-700/40"><td className="p-4 font-mono">{short(edge.from)}</td><td className="p-4 font-mono">{short(edge.to)}</td><td className="p-4">{edge.tx.value ?? "—"} {edge.tx.asset || (edge.tx.category === "external" ? "ETH" : "")}</td><td className="p-4">{riskText(edge.tx.risk_score)}</td><td className="p-4"><button className="text-sky-400 hover:underline" onClick={() => onSelect?.(edge.tx)}>{short(edge.tx.hash)} ↗</button></td></tr>)}</tbody></table>
         {visibleEdges.length === 0 && <p className="p-8 text-sm text-slate-400">No matching transfers in the current sample.</p>}
       </div>}
       <p className="px-5 py-3 text-xs text-slate-500 border-t border-slate-700">Connections are observed transfers, not proof of shared ownership, illicit behavior, or complete transaction history.</p>

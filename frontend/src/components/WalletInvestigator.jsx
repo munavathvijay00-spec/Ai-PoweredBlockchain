@@ -121,7 +121,7 @@ export default function WalletInvestigator() {
         'This export is a point-in-time API snapshot, not a complete chain archive.',
       ],
     };
-    const blob = new Blob([JSON.stringify(bundle, null, 2) + '\\n'], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(bundle, null, 2) + '\n'], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

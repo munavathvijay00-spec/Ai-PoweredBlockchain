@@ -46,6 +46,7 @@ export default function WalletInvestigator() {
     setPartial(failures);
     if (failures.length === results.length) setError('Investigation API unavailable. Check backend deployment and Alchemy configuration.');
     else setWallet(target);
+    if (tx.status === 'rejected' && failures.length < results.length) setError('Transfer history is unavailable; graph, report, or balance may still be shown. Do not interpret zero loaded transfers as inactivity.');
     setLoading(false);
   }
 

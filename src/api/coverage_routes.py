@@ -42,8 +42,23 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             FROM ingest_cursor WHERE stream = 'ethereum_mainnet'
         """)
     except Exception:
-        # API can start before the ingestion worker has created its cursor table.
         cursor = None
+
+    try:
+        entity_stats = await repo.db.fetchrow("""
+            SELECT COUNT(*) AS records,
+                   COUNT(DISTINCT source) AS sources,
+                   COUNT(DISTINCT address) AS addresses,
+                   MAX(checked_at) AS newest_checked_at
+            FROM verified_address_intelligence
+        """)
+    except Exception:
+        entity_stats = None
+
+    entity_records = int(entity_stats["records"] or 0) if entity_stats else 0
+    entity_sources = int(entity_stats["sources"] or 0) if entity_stats else 0
+    entity_addresses = int(entity_stats["addresses"] or 0) if entity_stats else 0
+    entity_checked_at = entity_stats["newest_checked_at"] if entity_stats else None
 
     cursor_age = _age_seconds(cursor["updated_at"] if cursor else None)
     newest_tx_age = _age_seconds(stats["newest_observed_at"])
@@ -61,6 +76,14 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "note": "The ingestion worker checks canonical checkpoint hashes and parent continuity. This does not verify older records, recover orphaned transactions, or prove full chain coverage.",
     }
 
+    production_ready_for = [
+        "recent native-transaction monitoring",
+        "bounded wallet transfer investigation",
+        "evidence-linked transaction review",
+    ]
+    if entity_records:
+        production_ready_for.append("source-attributed entity context for locally verified address matches")
+
     readiness = {
         "api_database": "connected",
         "ingestion": freshness_status,
@@ -69,17 +92,14 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "retention_window_minutes": 30,
         "historical_archive": False,
         "wallet_transfer_provider": "on_demand",
-        "entity_attribution": False,
+        "entity_attribution": bool(entity_records),
+        "entity_attribution_scope": "source_attributed_local_matches_only" if entity_records else "no_verified_records_loaded",
         "internal_trace_indexing": False,
-        "production_ready_for": [
-            "recent native-transaction monitoring",
-            "bounded wallet transfer investigation",
-            "evidence-linked transaction review",
-        ],
+        "production_ready_for": production_ready_for,
         "not_ready_for": [
             "complete historical wallet reconstruction",
-            "entity attribution",
-            "sanctions/compliance verdicts",
+            "comprehensive entity attribution across Ethereum",
+            "sanctions/compliance verdicts without independent source review",
             "multi-hop forensic tracing guarantees",
         ],
     }
@@ -108,6 +128,14 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         },
         "token_events": {"status": "on_demand_only", "historical_completeness": False},
         "internal_traces": {"status": "not_indexed", "historical_completeness": False},
+        "verified_entity_intelligence": {
+            "status": "source_attributed_records_available" if entity_records else "no_records_loaded",
+            "records": entity_records,
+            "unique_addresses": entity_addresses,
+            "sources": entity_sources,
+            "newest_checked_at": entity_checked_at,
+            "note": "This is a bounded local intelligence set. No local match is not evidence that no attribution exists elsewhere.",
+        },
         "reorg_verification": checkpoint,
         "wallet_history": {"status": "sampled_from_retained_native_transactions", "historical_completeness": False},
         "product_readiness": readiness,
@@ -115,5 +143,6 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "No complete address-indexed Ethereum history is available from this database.",
             "No guarantee that all blocks between observed minimum and maximum were indexed.",
             "An empty wallet result does not imply an inactive wallet.",
+            "Verified entity intelligence is only as broad and current as the source-attributed records loaded into the local table.",
         ],
     }

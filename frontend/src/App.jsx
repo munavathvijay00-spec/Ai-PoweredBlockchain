@@ -8,6 +8,7 @@ import FilterTabs from './components/FilterTabs';
 import RiskChart from './components/RiskChart';
 import WalletGraphWorkspace from './components/WalletGraphWorkspace';
 import WalletInvestigator from './components/WalletInvestigator';
+import AIProofPanel from './components/AIProofPanel';
 
 const NAV = [
   { id: 'transactions', label: 'Live monitor' },
@@ -35,7 +36,7 @@ function SectionHeading({ view, freshness }) {
   const copy = {
     wallet: ['Wallet Intelligence', 'Investigate an Ethereum address with bounded, evidence-backed transfer coverage.'],
     investigate: ['Flow Workspace', 'Explore observed transaction relationships without inferring ownership or wrongdoing.'],
-    system: ['System Coverage', 'See freshness, retention, evidence limits, and verified intelligence coverage.'],
+    system: ['System Coverage', 'See freshness, retention, evidence limits, model provenance, and verified intelligence coverage.'],
   };
   const [title, subtitle] = copy[view] || ['', ''];
   const status = statusMeta(freshness);
@@ -107,6 +108,8 @@ function SystemCoverage({ coverage }) {
 function App() {
   const [stats, setStats] = useState(null);
   const [coverage, setCoverage] = useState(null);
+  const [aiStatus, setAIStatus] = useState(null);
+  const [mlStatus, setMLStatus] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [flagged, setFlagged] = useState([]);
   const [flaggedTotal, setFlaggedTotal] = useState(0);
@@ -128,11 +131,14 @@ function App() {
       try {
         const results = await Promise.allSettled([
           api.getStats(), api.getCoverage(), api.getTransactions(50), api.getFlagged(50),
+          api.getAIStatus(), api.getMLStatus(),
         ]);
         if (!active) return;
-        const [statsResult, coverageResult, txsResult, flaggedResult] = results;
+        const [statsResult, coverageResult, txsResult, flaggedResult, aiResult, mlResult] = results;
         if (statsResult.status === 'fulfilled') setStats(statsResult.value);
         if (coverageResult.status === 'fulfilled') setCoverage(coverageResult.value);
+        if (aiResult.status === 'fulfilled') setAIStatus(aiResult.value);
+        if (mlResult.status === 'fulfilled') setMLStatus(mlResult.value);
         if (txsResult.status === 'fulfilled') {
           setTransactions(txsResult.value.transactions ?? []);
           setTransactionTotal(Number(txsResult.value.total || 0));
@@ -248,7 +254,12 @@ function App() {
         {view !== 'transactions' && <SectionHeading view={view} freshness={freshness} />}
         {view === 'wallet' && <WalletInvestigator />}
         {view === 'investigate' && <WalletGraphWorkspace flagged={flagged} onSelect={inspectTransaction} />}
-        {view === 'system' && <SystemCoverage coverage={coverage} />}
+        {view === 'system' && (
+          <div className="space-y-5">
+            <AIProofPanel status={aiStatus} mlStatus={mlStatus} />
+            <SystemCoverage coverage={coverage} />
+          </div>
+        )}
       </main>
 
       <footer className="pb-8 pt-3 text-center text-[11px] text-slate-700">CHAINSCOPE · Evidence first · Review indicators are not proof of wrongdoing</footer>

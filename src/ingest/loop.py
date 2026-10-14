@@ -1,11 +1,9 @@
 """
-Ingest loop — runs forever, ingesting new blocks every N seconds.
+Ingest loop — runs forever, ingesting new canonical blocks every N seconds.
 
-Usage:
-    python -m src.ingest.loop
-    python -m src.ingest.loop --interval 30
-
-Press Ctrl+C to stop gracefully.
+Normal shallow Ethereum reorgs are recovered only after a common ancestor is
+cryptographically/evidentially verified. Deep or unverifiable forks still halt
+fail-closed for manual review.
 """
 import asyncio
 import signal
@@ -24,9 +22,11 @@ from src.ingest.cursor import ensure_cursor_schema, load_cursor_checkpoint, save
 from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
+from src.ingest.reorg import ensure_lineage_schema, record_lineage, recover_shallow_reorg
 
 
 _shutdown_requested = False
+MAX_AUTO_REORG_DEPTH = 12
 
 
 def _block_hash(value):
@@ -34,11 +34,10 @@ def _block_hash(value):
         result = value.hex()
     else:
         result = str(value)
-    return result if result.startswith('0x') else '0x' + result
+    return (result if result.startswith('0x') else '0x' + result).lower()
 
 
 def _handle_shutdown(signum, frame):
-    """Handle Ctrl+C to allow graceful shutdown."""
     global _shutdown_requested
     _shutdown_requested = True
     logger.info("🛑 Shutdown requested. Finishing current iteration...")
@@ -54,30 +53,28 @@ def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list
 
 
 def is_chain_integrity_failure(error: Exception) -> bool:
-    """Never retry past a known reorg or contradictory transaction provenance."""
+    """Classify integrity errors that must not be retried without verification."""
     message = str(error)
     return (
         'REORG_DETECTED:' in message
         or 'TRANSACTION_PROVENANCE_CONFLICT:' in message
         or 'CHECKPOINT_CONFLICT:' in message
+        or 'LINEAGE_CONFLICT:' in message
     )
 
 
 async def ingest_loop(interval_seconds: int = 15):
-    """Infinite loop: fetch latest block → process → sleep → repeat."""
     logger.info(f"🚀 Starting ingest loop (interval: {interval_seconds}s)")
 
-    # Connect to blockchain
     client = BlockchainClient()
     connected = await client.connect()
     if not connected:
         logger.error("❌ Blockchain connection failed. Exiting.")
         return
 
-    # Set up database + dependencies
     db = await get_db()
-    # Checkpoint is essential for gap-free recovery; fail startup if unavailable.
     await ensure_cursor_schema(db)
+    await ensure_lineage_schema(db)
     addresses = AddressRepository(db)
     transactions = TransactionRepository(db, addresses)
     normalizer = TransactionNormalizer()
@@ -87,7 +84,6 @@ async def ingest_loop(interval_seconds: int = 15):
     iteration = 0
     total_inserted = 0
     total_flagged = 0
-    # A missing or inaccessible checkpoint must not silently skip past failures.
     last_processed_block, last_block_hash = await load_cursor_checkpoint(db)
     logger.info(f'Ingestion checkpoint restored: {last_processed_block}')
     max_blocks_per_iteration = 3
@@ -99,61 +95,87 @@ async def ingest_loop(interval_seconds: int = 15):
 
             try:
                 logger.info(f"[{now}] 🔄 Iteration {iteration} — fetching latest block...")
-
                 latest_block = await client.get_latest_block_number()
+
                 if last_processed_block is None:
-                    # First deployment: begin at tip; subsequent restarts resume.
+                    # Fresh deployment: anchor at tip-1 and process successors.
                     last_processed_block = latest_block - 1
                     tip_parent = await client.get_block(last_processed_block)
                     last_block_hash = _block_hash(tip_parent['hash'])
-                    await save_cursor_checkpoint(db, last_processed_block, last_block_hash)
+                    async with db.transaction():
+                        await record_lineage(db, tip_parent)
+                        await save_cursor_checkpoint(db, last_processed_block, last_block_hash)
                 elif latest_block < last_processed_block:
-                    # Never silently roll a durable checkpoint backwards.
                     log_ingestion_health(latest_block, last_processed_block)
                     logger.warning('Chain head below saved checkpoint; waiting for recovery')
+                    await asyncio.sleep(interval_seconds)
                     continue
 
                 if last_processed_block is not None and last_block_hash is None:
-                    # Legacy checkpoints predate block-hash tracking. Anchor their
-                    # current height before processing successors, without claiming
-                    # that older retained records were historically verified.
                     legacy_block = await client.get_block(last_processed_block)
                     last_block_hash = await backfill_cursor_hash(
                         db, last_processed_block, _block_hash(legacy_block['hash'])
                     )
-                    logger.warning(f'Legacy checkpoint anchored at block {last_processed_block}; earlier data is not reorg-verified')
+                    logger.warning(
+                        f'Legacy checkpoint anchored at block {last_processed_block}; earlier data is not reorg-verified'
+                    )
 
-                # A stored hash is an immutable chain continuity assertion.
-                # Stop rather than silently mix orphaned transfers into evidence.
+                # Verify the durable checkpoint before accepting a successor. A
+                # normal shallow fork is repaired only after finding a verified
+                # common ancestor. Unverifiable/deep forks still raise and halt.
                 if last_block_hash is not None:
                     canonical = await client.get_block(last_processed_block)
                     canonical_hash = _block_hash(canonical['hash'])
-                    if canonical_hash.lower() != last_block_hash.lower():
-                        logger.critical(
-                            'Checkpoint mismatch diagnostics: height={} saved_hash={} '
-                            'rpc_hash={} chain_head={} confirmations={} '
-                            'action=halt_without_mutation',
-                            last_processed_block, last_block_hash, canonical_hash,
-                            latest_block, latest_block - last_processed_block,
+                    if canonical_hash != last_block_hash.lower():
+                        logger.warning(
+                            'Checkpoint mismatch: height={} saved_hash={} rpc_hash={} head={} action=verify_bounded_rewind',
+                            last_processed_block, last_block_hash, canonical_hash, latest_block,
                         )
-                        raise RuntimeError('REORG_DETECTED: checkpoint block hash differs from canonical chain; manual rollback/replay required')
+                        recovery = await recover_shallow_reorg(
+                            db,
+                            client,
+                            checkpoint_block=last_processed_block,
+                            checkpoint_hash=last_block_hash,
+                            max_depth=MAX_AUTO_REORG_DEPTH,
+                        )
+                        last_processed_block = recovery.ancestor_block
+                        last_block_hash = recovery.ancestor_hash
+                        logger.warning(
+                            'Reorg recovered; replay will resume from block {} (depth={})',
+                            last_processed_block + 1,
+                            recovery.depth,
+                        )
 
                 pending = latest_block - last_processed_block
                 if iteration == 1 or iteration % 4 == 0:
                     log_ingestion_health(latest_block, last_processed_block)
                 if pending > max_blocks_per_iteration:
                     logger.info(
-                        f"Block catch-up: {pending} pending; "
-                        f"processing up to {max_blocks_per_iteration} sequentially"
+                        f"Block catch-up: {pending} pending; processing up to {max_blocks_per_iteration} sequentially"
                     )
-                for block_number in next_blocks(
-                    last_processed_block, latest_block, max_blocks_per_iteration
-                ):
+
+                recovered_mid_iteration = False
+                for block_number in next_blocks(last_processed_block, latest_block, max_blocks_per_iteration):
                     candidate = await client.get_block(block_number, full_transactions=True)
-                    if last_block_hash is not None and _block_hash(candidate['parentHash']) != last_block_hash:
-                        raise RuntimeError('REORG_DETECTED: next block parent does not match checkpoint; manual rollback/replay required')
+                    if last_block_hash is not None and _block_hash(candidate['parentHash']) != last_block_hash.lower():
+                        # The head changed after the checkpoint validation above.
+                        logger.warning(
+                            'Successor parent mismatch at block {}; verifying bounded rewind before replay',
+                            block_number,
+                        )
+                        recovery = await recover_shallow_reorg(
+                            db,
+                            client,
+                            checkpoint_block=last_processed_block,
+                            checkpoint_hash=last_block_hash,
+                            max_depth=MAX_AUTO_REORG_DEPTH,
+                        )
+                        last_processed_block = recovery.ancestor_block
+                        last_block_hash = recovery.ancestor_hash
+                        recovered_mid_iteration = True
+                        break
+
                     candidate_hash = _block_hash(candidate['hash'])
-                    # Data writes and cursor advance must commit or roll back together.
                     async with db.transaction():
                         summary = await process_one_block(
                             client, normalizer, transactions, addresses, scorer, explainer,
@@ -161,6 +183,7 @@ async def ingest_loop(interval_seconds: int = 15):
                             prefetched_block=candidate,
                             allow_external_ai=False,
                         )
+                        await record_lineage(db, candidate)
                         await save_cursor_checkpoint(db, block_number, candidate_hash)
                     last_processed_block = block_number
                     last_block_hash = candidate_hash
@@ -173,21 +196,22 @@ async def ingest_loop(interval_seconds: int = 15):
                         f"{summary['explained']} explained | "
                         f"{summary['elapsed_seconds']}s"
                     )
-                if pending == 0:
+
+                if recovered_mid_iteration:
+                    logger.info('Canonical head changed mid-iteration; replay deferred to next iteration')
+                elif pending == 0:
                     logger.debug("No new blocks at chain head")
+
                 logger.info(
-                    f"📊 Session totals — Inserted: {total_inserted:,} | "
-                    f"Flagged: {total_flagged}"
+                    f"📊 Session totals — Inserted: {total_inserted:,} | Flagged: {total_flagged}"
                 )
 
-                # Periodic lightweight size diagnostics (~15 minutes at default cadence).
                 if iteration == 1 or iteration % 60 == 0:
                     try:
                         await log_storage_health(db)
                     except Exception as storage_err:
                         logger.warning(f"Storage diagnostics unavailable: {storage_err}")
 
-                # Retain recent transactions; run once every ten iterations.
                 if iteration % 10 == 0:
                     try:
                         deleted = await db.execute("""
@@ -198,9 +222,6 @@ async def ingest_loop(interval_seconds: int = 15):
                     except Exception as cleanup_err:
                         logger.warning(f"Transaction cleanup error (non-fatal): {cleanup_err}")
 
-                # Bounded automatic address retention. Fail-closed guards live in
-                # prune_addresses: FK inspection, linked records, intelligence fields,
-                # and minimum 30-minute age. 500 rows every two iterations.
                 if iteration % 2 == 0:
                     try:
                         await prune_addresses(db, enabled=True, batch_size=500, minutes=30)
@@ -210,10 +231,11 @@ async def ingest_loop(interval_seconds: int = 15):
             except Exception as e:
                 logger.exception(f"❌ Error in iteration {iteration}: {e}")
                 if is_chain_integrity_failure(e):
-                    logger.critical('Ingestion halted on chain-integrity conflict; manual investigation and replay required')
+                    logger.critical(
+                        'Ingestion halted: integrity conflict exceeded automatic verification/recovery policy'
+                    )
                     raise
 
-            # Sleep before next iteration
             if not _shutdown_requested:
                 logger.debug(f"😴 Sleeping {interval_seconds}s...")
                 await asyncio.sleep(interval_seconds)
@@ -226,7 +248,6 @@ async def ingest_loop(interval_seconds: int = 15):
 
 
 def main():
-    """Entry point."""
     interval = 15
     if "--interval" in sys.argv:
         try:
@@ -247,4 +268,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

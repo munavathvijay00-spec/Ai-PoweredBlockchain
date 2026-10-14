@@ -1,5 +1,6 @@
 -- ChainScope intelligence v2: sparse historical evidence, source-attributed entities,
--- and independently labelled detection evaluation. Safe additive migration only.
+-- independently labelled detection evaluation, and canonical block lineage.
+-- Safe additive migration only.
 
 CREATE TABLE IF NOT EXISTS wallet_transfer_evidence (
     chain_id BIGINT NOT NULL DEFAULT 1,
@@ -91,3 +92,17 @@ CREATE TABLE IF NOT EXISTS detection_evaluations (
 );
 CREATE INDEX IF NOT EXISTS idx_detection_evaluations_created
     ON detection_evaluations(created_at DESC);
+
+-- Every successfully committed canonical block gets one durable lineage row.
+-- This allows bounded automatic recovery from normal shallow Ethereum reorgs
+-- without trusting a single checkpoint hash or silently mixing orphaned rows.
+CREATE TABLE IF NOT EXISTS ingest_block_lineage (
+    block_number BIGINT PRIMARY KEY,
+    block_hash VARCHAR(66) NOT NULL,
+    parent_hash VARCHAR(66) NOT NULL,
+    transaction_count INTEGER NOT NULL CHECK (transaction_count >= 0),
+    committed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(block_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_ingest_block_lineage_committed
+    ON ingest_block_lineage(committed_at DESC);

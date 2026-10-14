@@ -1,27 +1,33 @@
-"""
-Chain Agent — specialized in blockchain-wide data.
-"""
+"""Live-chain context agent with explicit evidence provenance."""
 from loguru import logger
 from src.agents.tools import get_tools
 
 
 class ChainAgent:
     name = "chain_agent"
-    role = "Analyzes blockchain-wide data (blocks, network activity)"
+    role = "Provides live Ethereum chain context from RPC without inferring transaction intent"
 
     async def handle(self, query: str, context: dict) -> dict:
         tools = get_tools()
-        q = query.lower()
         try:
             block_num = await tools.get_latest_block_number()
+            evidence = [{
+                "id": "C1",
+                "type": "latest_block",
+                "claim": f"Ethereum RPC reports latest block #{block_num:,}.",
+                "source": "ethereum_rpc",
+            }]
             return {
                 "agent": self.name,
-                "answer": f"The latest Ethereum block is #{block_num:,}.",
+                "status": "ok",
+                "answer": f"Ethereum mainnet latest observed block is #{block_num:,}.",
+                "evidence": evidence,
                 "data": {"latest_block": block_num},
+                "coverage": "Live chain context comes from the configured Ethereum RPC endpoint.",
             }
-        except Exception as e:
-            logger.exception(f"ChainAgent error: {e}")
-            return {"agent": self.name, "answer": "Unable to fetch chain data.", "error": str(e)}
+        except Exception as exc:
+            logger.exception(f"ChainAgent error: {exc}")
+            return {"agent": self.name, "answer": "Unable to fetch live chain data.", "error": str(exc), "evidence": []}
 
 
 _agent = None

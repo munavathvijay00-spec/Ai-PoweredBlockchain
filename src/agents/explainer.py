@@ -6,6 +6,7 @@ numbers is rejected and replaced by the deterministic evidence explanation.
 """
 import asyncio
 import re
+import time
 from typing import Dict, List, Optional
 
 import httpx
@@ -94,32 +95,107 @@ def _transaction_context(tx: Dict) -> str:
     return ", ".join(pieces)
 
 
-def explanation_is_grounded(candidate: str, baseline: str) -> bool:
-    """Reject LLM wording that adds facts or evidence references not present in baseline."""
+def _specificity_tokens(tx: Optional[Dict]) -> list[str]:
+    """Return stable factual tokens a rewrite can preserve to prove it is transaction-specific."""
+    if not tx:
+        return []
+    tokens: list[str] = []
+    if tx.get("hash"):
+        tokens.append(_short_identifier(tx["hash"], 12, 10))
+    if tx.get("block_number") is not None:
+        try:
+            block = int(tx["block_number"])
+            tokens.extend([str(block), f"{block:,}"])
+        except (TypeError, ValueError, OverflowError):
+            pass
+    amount = _eth_value_text(tx)
+    if amount:
+        tokens.append(amount)
+    if tx.get("from_address"):
+        tokens.append(_short_identifier(tx["from_address"]))
+    if tx.get("to_address"):
+        tokens.append(_short_identifier(tx["to_address"]))
+    return [token for token in tokens if token and token != "unknown"]
+
+
+def grounding_report(candidate: str, baseline: str, tx: Optional[Dict] = None) -> Dict:
+    """Return machine-readable grounding checks for one candidate rewrite."""
+    reasons: list[str] = []
+    checks = {
+        "candidate_shape": False,
+        "no_overclaim": False,
+        "sensitive_claims_supported": False,
+        "numbers_supported": False,
+        "evidence_refs_supported": False,
+        "evidence_ref_preserved": False,
+        "transaction_specific": False if tx else True,
+    }
+
     if not isinstance(candidate, str):
-        return False
+        reasons.append("candidate_not_text")
+        return {"grounded": False, "checks": checks, "reasons": reasons}
+
     text = candidate.strip()
-    if len(text) < 20 or len(text) > 700:
-        return False
+    if 20 <= len(text) <= 700:
+        checks["candidate_shape"] = True
+    else:
+        reasons.append("candidate_length_out_of_bounds")
+
     lowered = text.lower()
     baseline_lower = (baseline or "").lower()
-    if any(phrase in lowered for phrase in _OVERCLAIM_PHRASES):
-        return False
-    if "proves" in lowered and "does not prove" not in lowered and "not proof" not in lowered:
-        return False
-    for term in _SENSITIVE_CLAIM_TERMS:
-        if term in lowered and term not in baseline_lower:
-            return False
-    if not _normalized_numbers(text).issubset(_normalized_numbers(baseline)):
-        return False
+    if not any(phrase in lowered for phrase in _OVERCLAIM_PHRASES) and not (
+        "proves" in lowered and "does not prove" not in lowered and "not proof" not in lowered
+    ):
+        checks["no_overclaim"] = True
+    else:
+        reasons.append("unsupported_overclaim")
+
+    unsupported_sensitive = [
+        term for term in _SENSITIVE_CLAIM_TERMS
+        if term in lowered and term not in baseline_lower
+    ]
+    if not unsupported_sensitive:
+        checks["sensitive_claims_supported"] = True
+    else:
+        reasons.append("unsupported_sensitive_claim:" + ",".join(sorted(unsupported_sensitive)))
+
+    if _normalized_numbers(text).issubset(_normalized_numbers(baseline)):
+        checks["numbers_supported"] = True
+    else:
+        reasons.append("invented_numeric_claim")
 
     baseline_refs = _evidence_refs(baseline)
     candidate_refs = _evidence_refs(text)
-    if baseline_refs and not candidate_refs:
-        return False
-    if not candidate_refs.issubset(baseline_refs):
-        return False
-    return True
+    if candidate_refs.issubset(baseline_refs):
+        checks["evidence_refs_supported"] = True
+    else:
+        reasons.append("invented_evidence_reference")
+
+    if not baseline_refs or candidate_refs:
+        checks["evidence_ref_preserved"] = True
+    else:
+        reasons.append("missing_required_evidence_reference")
+
+    if tx:
+        tokens = _specificity_tokens(tx)
+        if not tokens or any(token.lower() in lowered for token in tokens):
+            checks["transaction_specific"] = True
+        else:
+            reasons.append("missing_transaction_specific_context")
+
+    grounded = all(checks.values())
+    return {
+        "grounded": grounded,
+        "checks": checks,
+        "reasons": reasons,
+        "baseline_evidence_refs": sorted(baseline_refs),
+        "candidate_evidence_refs": sorted(candidate_refs),
+    }
+
+
+def explanation_is_grounded(candidate: str, baseline: str, tx: Optional[Dict] = None) -> bool:
+    """Reject LLM wording that adds facts or loses required transaction-specific context."""
+    return bool(grounding_report(candidate, baseline, tx).get("grounded"))
 
 
 def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
@@ -163,8 +239,11 @@ class TransactionExplainer:
 
     def __init__(self):
         self.settings = get_settings()
-        self.provider = self.settings.llm_provider
-        self.model = self.settings.llm_model
+        self.provider = str(self.settings.llm_provider or "disabled").lower()
+        self.model = (
+            self.settings.groq_model if self.provider == "groq"
+            else self.settings.llm_model
+        )
         self.ollama_url = self.settings.ollama_url
         self._semaphore = asyncio.Semaphore(3)
         logger.info(f"🧠 Grounded explainer initialized (provider={self.provider}, model={self.model})")
@@ -181,7 +260,7 @@ Rules:
 - Use ONLY facts already present in SOURCE OF TRUTH.
 - Keep the exact risk score and any numeric evidence unchanged.
 - Preserve at least one applicable [E#] evidence reference and never invent a new reference.
-- Preserve enough transaction-specific context to distinguish this transaction from another one with the same risk score.
+- Preserve at least one transaction-specific fact (transaction identifier, block, amount, sender, or recipient) so same-score transactions remain distinguishable.
 - Do not infer identity, ownership, intent, fraud, sanctions, scams, hacks, theft, laundering, exchange usage, mixer usage, or historical behavior unless SOURCE OF TRUTH explicitly states it.
 - Do not convert values to USD or add market prices.
 - State that the signals are review indicators, not proof of wrongdoing.
@@ -205,41 +284,114 @@ Return only the explanation text."""
 
     async def _call_groq(self, prompt: str) -> Optional[str]:
         from src.agents.providers.groq import get_groq_provider
-        provider = get_groq_provider(api_key=self.settings.groq_api_key, model=self.settings.llm_model)
+        settings = getattr(self, "settings", None)
+        api_key = getattr(settings, "groq_api_key", "not-set")
+        model = getattr(self, "model", None) or getattr(settings, "groq_model", "openai/gpt-oss-20b")
+        provider = get_groq_provider(api_key=api_key, model=model)
         return await provider.generate(prompt)
 
-    async def explain(self, tx: Dict, factors: List[Dict]) -> str:
-        """Return validated AI wording or the deterministic evidence fallback."""
+    def _provider_configured(self) -> bool:
+        provider = str(getattr(self, "provider", "disabled") or "disabled").lower()
+        if provider == "ollama":
+            return True
+        if provider == "groq":
+            settings = getattr(self, "settings", None)
+            api_key = str(getattr(settings, "groq_api_key", "not-set") or "").strip().lower()
+            return api_key not in {"", "not-set", "none", "null", "placeholder", "changeme"}
+        return False
+
+    async def explain_with_audit(self, tx: Dict, factors: List[Dict]) -> Dict:
+        """Return explanation plus proof of whether a real model produced accepted wording."""
         baseline = evidence_explanation(tx, factors)
+        provider = str(getattr(self, "provider", "disabled") or "disabled").lower()
+        model = getattr(self, "model", None)
+        base_result = {
+            "provider": provider,
+            "model": model,
+            "baseline": baseline,
+            "explanation": baseline,
+            "candidate": None,
+            "ai_used": False,
+            "grounded": True,
+            "latency_ms": 0,
+            "grounding_report": {
+                "grounded": True,
+                "checks": {},
+                "reasons": ["deterministic_evidence_fallback"],
+            },
+        }
+
         if not factors:
-            return baseline
+            return {**base_result, "status": "abstained_no_evidence"}
+        if not self._provider_configured():
+            return {**base_result, "status": "provider_not_configured"}
+
+        started = time.monotonic()
+        candidate: Optional[str] = None
         try:
             prompt = self._build_prompt(tx, factors)
             async with self._semaphore:
-                if self.provider == "ollama":
+                if provider == "ollama":
                     candidate = await self._call_ollama(prompt)
-                elif self.provider == "groq":
-                    settings = getattr(self, "settings", None)
-                    api_key = getattr(settings, "groq_api_key", "not-set")
-                    model = getattr(settings, "llm_model", None)
-                    if not api_key or api_key == "not-set":
-                        return baseline
-                    if model:
-                        self.model = model
+                elif provider == "groq":
                     candidate = await self._call_groq(prompt)
                 else:
-                    return baseline
-
-            if not isinstance(candidate, str) or not candidate.strip() or candidate.strip() == "UNSAFE_TO_REWRITE":
-                return baseline
-            candidate = candidate.strip()
-            if not explanation_is_grounded(candidate, baseline):
-                logger.warning("Rejected ungrounded AI explanation; using deterministic evidence")
-                return baseline
-            return f"Grounded AI explanation: {candidate}"
+                    return {**base_result, "status": "provider_not_configured"}
         except Exception as exc:
+            elapsed = int((time.monotonic() - started) * 1000)
             logger.warning(f"AI explanation unavailable ({type(exc).__name__}); using deterministic evidence")
-            return baseline
+            return {
+                **base_result,
+                "status": "provider_no_output",
+                "latency_ms": elapsed,
+                "grounding_report": {
+                    "grounded": False,
+                    "checks": {},
+                    "reasons": [f"provider_exception:{type(exc).__name__}"],
+                },
+            }
+
+        elapsed = int((time.monotonic() - started) * 1000)
+        if not isinstance(candidate, str) or not candidate.strip() or candidate.strip() == "UNSAFE_TO_REWRITE":
+            return {
+                **base_result,
+                "status": "provider_no_output",
+                "candidate": candidate.strip() if isinstance(candidate, str) else None,
+                "latency_ms": elapsed,
+                "grounding_report": {
+                    "grounded": False,
+                    "checks": {},
+                    "reasons": ["provider_returned_no_usable_output"],
+                },
+            }
+
+        candidate = candidate.strip()
+        report = grounding_report(candidate, baseline, tx)
+        if not report["grounded"]:
+            logger.warning("Rejected ungrounded AI explanation; using deterministic evidence")
+            return {
+                **base_result,
+                "status": "grounding_rejected",
+                "candidate": candidate,
+                "latency_ms": elapsed,
+                "grounding_report": report,
+            }
+
+        return {
+            **base_result,
+            "status": "grounded_ai",
+            "candidate": candidate,
+            "explanation": f"Grounded AI explanation: {candidate}",
+            "ai_used": True,
+            "grounded": True,
+            "latency_ms": elapsed,
+            "grounding_report": report,
+        }
+
+    async def explain(self, tx: Dict, factors: List[Dict]) -> str:
+        """Backward-compatible string result for ingestion and existing callers."""
+        result = await self.explain_with_audit(tx, factors)
+        return str(result["explanation"])
 
 
 _explainer: Optional[TransactionExplainer] = None

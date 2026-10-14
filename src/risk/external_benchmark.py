@@ -1,13 +1,12 @@
 """Independent external benchmark for ChainScope transaction triage.
 
 The benchmark is deliberately kept separate from training/scoring data. It pulls a
-small balanced smoke-test sample from the public Stepan4545/tx_scam Hugging Face
-dataset. These labels are external to ChainScope and are never imported into the
-risk engine as intelligence signals.
+balanced, bounded sample from the public Stepan4545/tx_scam Hugging Face dataset.
+These labels are external to ChainScope and are never imported into the rule engine
+as intelligence signals.
 
-This sample is *not* claimed to be representative of current Ethereum traffic. It
-exists to make false positives, missed alerts and abstentions measurable while a
-larger, time-separated validation corpus is assembled.
+The dataset is still not claimed to represent current Ethereum prevalence. It exists
+to make false positives, missed alerts, abstentions and ML generalization measurable.
 """
 from __future__ import annotations
 
@@ -28,6 +27,7 @@ FILTER_URL = "https://datasets-server.huggingface.co/filter"
 ROWS_URL = "https://datasets-server.huggingface.co/rows"
 TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+MAX_PER_CLASS = 500
 
 
 async def ensure_external_benchmark_schema(db) -> None:
@@ -62,7 +62,6 @@ async def ensure_external_benchmark_schema(db) -> None:
 
 
 def _integer_text(value: object) -> str:
-    """Normalize viewer numeric values without pretending float precision is exact."""
     if value is None:
         return "0"
     try:
@@ -94,7 +93,6 @@ def _normalize_row(item: Dict[str, Any], expected_label: int | None = None) -> D
         from_address = ""
     if to_address and not ADDRESS.fullmatch(to_address):
         to_address = ""
-
     try:
         source_row_idx = int(item.get("row_idx"))
     except (TypeError, ValueError):
@@ -107,7 +105,6 @@ def _normalize_row(item: Dict[str, Any], expected_label: int | None = None) -> D
         block_number = int(row.get("block_number") or 0)
     except (TypeError, ValueError):
         block_number = 0
-
     return {
         "source_row_idx": source_row_idx,
         "tx_hash": tx_hash,
@@ -189,14 +186,6 @@ def _add_rows(buckets: dict[int, list[Dict[str, Any]]], seen: set[str], rows, pe
 
 
 async def _fetch_balanced_rows(per_class: int) -> tuple[dict[int, list[Dict[str, Any]]], dict[str, Any]]:
-    """Fetch a bounded class-balanced sample with a resilient rows fallback.
-
-    Hugging Face's filter endpoint can be temporarily unavailable even while the
-    public dataset viewer remains healthy. We prefer the filter endpoint because it
-    returns each class directly. If it fails, we deterministically sample the head,
-    tail and evenly spaced pages of the public `/rows` endpoint until both classes
-    reach the requested quota or the bounded page budget is exhausted.
-    """
     buckets: dict[int, list[Dict[str, Any]]] = {0: [], 1: []}
     seen: set[str] = set()
     source_totals: dict[str, int | None] = {"0": None, "1": None}
@@ -214,28 +203,18 @@ async def _fetch_balanced_rows(per_class: int) -> tuple[dict[int, list[Dict[str,
             filter_errors.append(f"label_{label}_{type(exc).__name__}")
 
     if all(len(buckets[label]) >= per_class for label in (0, 1)):
-        return buckets, {
-            "mode": "filter",
-            "source_label_totals": source_totals,
-            "filter_errors": filter_errors,
-            "pages_scanned": 0,
-        }
+        return buckets, {"mode": "filter", "source_label_totals": source_totals, "filter_errors": filter_errors, "pages_scanned": 0}
 
-    # The rows fallback is deliberately bounded. Head/tail work well for datasets
-    # grouped by class; evenly spaced pages make the fallback robust when they are not.
     first_page, total_rows = await _fetch_rows_page(0, 100)
     _add_rows(buckets, seen, first_page, per_class)
     total_rows = int(total_rows or len(first_page))
-
     max_offset = max(0, total_rows - 100)
+
+    # Sample more pages as the requested corpus grows while keeping startup work bounded.
+    page_budget = min(48, max(16, int(per_class / 20) + 8))
     offsets = [max_offset]
     if max_offset:
-        # Fifteen deterministic interior pages + the head/tail gives broad coverage
-        # without turning API startup into a dataset download.
-        offsets.extend(
-            int(max_offset * step / 16)
-            for step in range(1, 16)
-        )
+        offsets.extend(int(max_offset * step / page_budget) for step in range(1, page_budget))
     offsets = list(dict.fromkeys(max(0, offset) for offset in offsets if offset != 0))
 
     pages_scanned = 1
@@ -249,10 +228,7 @@ async def _fetch_balanced_rows(per_class: int) -> tuple[dict[int, list[Dict[str,
         _add_rows(buckets, seen, page, per_class)
 
     if not buckets[0] or not buckets[1]:
-        raise RuntimeError(
-            "External benchmark fallback could not obtain both independent label classes"
-        )
-
+        raise RuntimeError("External benchmark fallback could not obtain both independent label classes")
     return buckets, {
         "mode": "rows_fallback",
         "source_label_totals": source_totals,
@@ -262,14 +238,13 @@ async def _fetch_balanced_rows(per_class: int) -> tuple[dict[int, list[Dict[str,
     }
 
 
-async def sync_external_benchmark(db, per_class: int = 100) -> Dict[str, Any]:
-    """Best-effort balanced smoke-test import from the external public dataset."""
+async def sync_external_benchmark(db, per_class: int = 250) -> Dict[str, Any]:
+    """Import a bounded class-balanced independent corpus."""
     await ensure_external_benchmark_schema(db)
-    per_class = max(1, min(100, int(per_class)))
+    per_class = max(1, min(MAX_PER_CLASS, int(per_class)))
     buckets, fetch_meta = await _fetch_balanced_rows(per_class)
     rows = buckets[0][:per_class] + buckets[1][:per_class]
     refreshed = 0
-
     for row in rows:
         result = await db.execute(
             """
@@ -279,43 +254,20 @@ async def sync_external_benchmark(db, per_class: int = 100) -> Dict[str, Any]:
                 block_number, category, source_reference
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             ON CONFLICT (source, source_row_idx) DO UPDATE SET
-                tx_hash=EXCLUDED.tx_hash,
-                label=EXCLUDED.label,
-                from_address=EXCLUDED.from_address,
-                to_address=EXCLUDED.to_address,
-                value_wei_text=EXCLUDED.value_wei_text,
-                gas=EXCLUDED.gas,
-                gas_price_text=EXCLUDED.gas_price_text,
-                block_timestamp_text=EXCLUDED.block_timestamp_text,
-                block_number=EXCLUDED.block_number,
-                category=EXCLUDED.category,
-                source_reference=EXCLUDED.source_reference,
-                imported_at=NOW()
+                tx_hash=EXCLUDED.tx_hash,label=EXCLUDED.label,from_address=EXCLUDED.from_address,
+                to_address=EXCLUDED.to_address,value_wei_text=EXCLUDED.value_wei_text,
+                gas=EXCLUDED.gas,gas_price_text=EXCLUDED.gas_price_text,
+                block_timestamp_text=EXCLUDED.block_timestamp_text,block_number=EXCLUDED.block_number,
+                category=EXCLUDED.category,source_reference=EXCLUDED.source_reference,imported_at=NOW()
             """,
-            SOURCE_NAME,
-            row["source_row_idx"],
-            row["tx_hash"],
-            row["label"],
-            row["from_address"],
-            row["to_address"],
-            row["value_wei_text"],
-            row["gas"],
-            row["gas_price_text"],
-            row["block_timestamp_text"],
-            row["block_number"],
-            row["category"],
-            SOURCE_REFERENCE,
+            SOURCE_NAME,row["source_row_idx"],row["tx_hash"],row["label"],row["from_address"],row["to_address"],
+            row["value_wei_text"],row["gas"],row["gas_price_text"],row["block_timestamp_text"],row["block_number"],row["category"],SOURCE_REFERENCE,
         )
         if result:
             refreshed += 1
-
     logger.info(
         "External benchmark sync refreshed {} rows from {} using {} ({} negatives, {} positives)",
-        refreshed,
-        SOURCE_NAME,
-        fetch_meta.get("mode"),
-        len(buckets[0]),
-        len(buckets[1]),
+        refreshed,SOURCE_NAME,fetch_meta.get("mode"),len(buckets[0]),len(buckets[1]),
     )
     return {
         "source": SOURCE_NAME,
@@ -345,8 +297,7 @@ async def external_benchmark_summary(db) -> Dict[str, Any]:
                MAX(imported_at) AS newest_import
         FROM external_detection_benchmark_cases
         WHERE source=$1
-        """,
-        SOURCE_NAME,
+        """, SOURCE_NAME,
     )
     return {
         "source": SOURCE_NAME,
@@ -358,17 +309,11 @@ async def external_benchmark_summary(db) -> Dict[str, Any]:
         "newest_import": row["newest_import"],
         "independent_from_chainscope": True,
         "representative": False,
-        "sampling_note": "Balanced smoke-test subset; not a prevalence estimate for live Ethereum traffic.",
+        "sampling_note": "Balanced external validation/training subset; not a prevalence estimate for live Ethereum traffic.",
     }
 
 
 async def evaluate_external_benchmark(db, scorer, threshold: int = 20) -> Dict[str, Any]:
-    """Measure the current transaction-native scorer against external labels.
-
-    Address-history and entity-enrichment signals are intentionally absent because
-    this external dataset contains only transaction-native fields. The product policy
-    metrics therefore preserve abstention when the available evidence is insufficient.
-    """
     await ensure_external_benchmark_schema(db)
     rows = await db.fetch(
         """
@@ -377,70 +322,33 @@ async def evaluate_external_benchmark(db, scorer, threshold: int = 20) -> Dict[s
         FROM external_detection_benchmark_cases
         WHERE source=$1
         ORDER BY label, source_row_idx
-        """,
-        SOURCE_NAME,
+        """, SOURCE_NAME,
     )
-    if not rows:
-        return {
-            "measured": False,
-            "reason": "external_benchmark_not_synced",
-            "source": SOURCE_NAME,
-            "source_reference": SOURCE_REFERENCE,
-        }
-
-    policy_cases = []
-    raw_score_cases = []
-    score_distribution = {"0_19": 0, "20_39": 0, "40_79": 0, "80_100": 0}
+    evaluation_rows = []
     for row in rows:
         tx = {
             "hash": row["tx_hash"],
-            "from_address": row.get("from_address"),
-            "to_address": row.get("to_address"),
-            "value": int(row.get("value_wei_text") or 0),
-            "block_number": int(row.get("block_number") or 0),
+            "value": int(row["value_wei_text"] or 0),
+            "gas": int(row["gas"] or 0),
+            "gas_price": int(row["gas_price_text"] or 0),
+            "block_number": int(row["block_number"] or 0),
         }
-        scored = await scorer.score_transaction(tx, address_history=[])
-        score = int(scored.get("score") or 0)
-        if score < 20:
-            score_distribution["0_19"] += 1
-        elif score < 40:
-            score_distribution["20_39"] += 1
-        elif score < 80:
-            score_distribution["40_79"] += 1
-        else:
-            score_distribution["80_100"] += 1
-
-        assessment = assess_evidence(scored.get("factors") or [], row["tx_hash"])
-        if assessment.get("assessment") == "review":
-            policy_prediction = "1" if score >= threshold else "0"
-        else:
-            policy_prediction = "abstain"
-
-        label = int(row["label"])
-        policy_cases.append({"case_id": row["tx_hash"], "label": label, "prediction": policy_prediction})
-        raw_score_cases.append({
-            "case_id": row["tx_hash"],
-            "label": label,
-            "prediction": "1" if score >= threshold else "0",
+        result = await scorer.score_transaction(tx, [], is_blacklisted=False, address_age_days=None)
+        evidence = assess_evidence(result.get("factors") or [])
+        prediction = "1" if int(result.get("score") or 0) >= threshold else "0"
+        if evidence.get("status") == "insufficient":
+            prediction = "abstain"
+        evaluation_rows.append({
+            "case_id": f"{SOURCE_NAME}:{row['source_row_idx']}",
+            "label": int(row["label"]),
+            "prediction": prediction,
         })
-
-    policy_metrics = evaluate_predictions(policy_cases)
-    raw_metrics = evaluate_predictions(raw_score_cases)
-    return {
-        "measured": True,
+    metrics = evaluate_predictions(evaluation_rows)
+    metrics.update({
         "source": SOURCE_NAME,
         "source_reference": SOURCE_REFERENCE,
         "threshold": threshold,
-        "sample_size": len(rows),
-        "policy_metrics": policy_metrics,
-        "raw_numeric_score_metrics": raw_metrics,
-        "score_distribution": score_distribution,
-        "evaluation_scope": "transaction-native fields only; no address-history, graph, entity, or sanctions enrichment",
         "representative": False,
-        "limitations": [
-            "The synced subset is intentionally balanced and is not a live-network prevalence estimate.",
-            "The source dataset is external to ChainScope but has not been independently re-labelled by ChainScope.",
-            "History-dependent and entity-intelligence factors cannot be reconstructed from these rows alone.",
-            "Raw numeric score metrics are diagnostic only; ChainScope product policy may abstain when evidence is insufficient.",
-        ],
-    }
+        "scope": "Transaction-native rule evidence only; address-history/entity signals are unavailable in this external corpus.",
+    })
+    return metrics

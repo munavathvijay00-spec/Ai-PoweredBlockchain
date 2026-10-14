@@ -72,6 +72,39 @@ def validate_block_snapshot(block: Dict, expected_number: int) -> None:
             raise ValueError("Transaction block hash differs from fetched block")
 
 
+def build_ai_explanation_tasks(
+    flagged_scores: list,
+    tx_by_hash: dict,
+    explainer,
+    *,
+    allow_external_ai: bool,
+) -> tuple[list, list]:
+    """Create external-AI work only when the caller explicitly enables it.
+
+    The live ingest loop deliberately disables network LLM calls. Returning
+    before calling ``explainer.explain`` is important because calling an async
+    function creates a coroutine object even if it is never awaited, which can
+    leak RuntimeWarnings and make explanation telemetry misleading.
+    """
+    if not allow_external_ai:
+        return [], []
+
+    ai_candidates = [
+        item for item in flagged_scores
+        if assess_evidence(item["factors"], item["hash"])["assessment"] == "review"
+    ][:3]
+    tasks = []
+    task_scores = []
+    for item in ai_candidates:
+        tx = tx_by_hash.get(item["hash"])
+        if tx:
+            tasks.append(explainer.explain(
+                {**tx, "risk_score": item["score"]}, item["factors"]
+            ))
+            task_scores.append(item)
+    return tasks, task_scores
+
+
 async def process_one_block(
     client: BlockchainClient,
     normalizer: TransactionNormalizer,
@@ -169,21 +202,13 @@ async def process_one_block(
                     ),
                 })
 
-        ai_candidates = [
-            item for item in flagged_scores
-            if assess_evidence(item["factors"], item["hash"])["assessment"] == "review"
-        ][:3]
-        tasks = []
-        task_scores = []
-        for item in ai_candidates:
-            tx = tx_by_hash.get(item["hash"])
-            if tx:
-                tasks.append(explainer.explain(
-                    {**tx, "risk_score": item["score"]}, item["factors"]
-                ))
-                task_scores.append(item)
-
-        if tasks and allow_external_ai:
+        tasks, task_scores = build_ai_explanation_tasks(
+            flagged_scores,
+            tx_by_hash,
+            explainer,
+            allow_external_ai=allow_external_ai,
+        )
+        if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             overrides = {}
             for item, result in zip(task_scores, results):

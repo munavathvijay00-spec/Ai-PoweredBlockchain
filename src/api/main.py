@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 import asyncio
+import json
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,7 +26,14 @@ from src.api.entity_routes import router as entity_router
 from src.api.evaluation_routes import router as evaluation_router
 from src.api.ml_routes import router as ml_router
 from src.api.models import HealthResponse
-from src.agents.ai_audit import ensure_ai_audit_schema
+from src.agents.ai_audit import (
+    ai_quality_summary,
+    ensure_ai_audit_schema,
+    provider_configuration,
+    record_ai_run,
+)
+from src.agents.explainer import evidence_explanation
+from src.agents.structured_grounding import structured_explain_with_audit
 from src.database.connection import get_db, close_db
 from src.metrics import api_requests_total, api_request_duration_seconds, db_health_up
 from src.ml.model_registry import model_status as independent_ml_status, train_and_register
@@ -87,6 +95,81 @@ async def _prepare_ai_and_benchmark(db):
         raise
     except Exception as exc:
         logger.warning("External benchmark background sync unavailable; API remains operational: {}", type(exc).__name__)
+
+
+async def _verify_grounded_ai_runtime(db):
+    """Perform one evidence-backed provider verification run when none exists yet.
+
+    This never invents a synthetic transaction and never weakens the grounding gate. It
+    selects one retained transaction with stored risk evidence, asks the configured model
+    for a structured explanation, then records the exact accepted/rejected result in the
+    normal audit table. A successful run makes /api/ai/status runtime-verifiable.
+    """
+    try:
+        await asyncio.sleep(2)
+        await ensure_ai_audit_schema(db)
+        configuration = provider_configuration()
+        provider = configuration.get("provider")
+        model = configuration.get("model")
+        if not configuration.get("provider_configured"):
+            logger.info("Grounded AI runtime verification deferred: provider not configured")
+            return
+
+        quality = await ai_quality_summary(db, provider=provider, model=model)
+        if quality.get("last_grounded_at") is not None:
+            logger.info(
+                "Grounded AI runtime already verified: provider={} model={} accepted_runs={}",
+                provider, model, quality.get("grounded_ai_runs"),
+            )
+            return
+
+        row = await db.fetchrow(
+            """
+            SELECT t.hash, t.block_number, t.value::text AS value_wei, t.risk_score,
+                   t.risk_factors, a_from.address AS from_address, a_to.address AS to_address
+            FROM transactions t
+            JOIN addresses a_from ON t.from_address_id = a_from.id
+            JOIN addresses a_to ON t.to_address_id = a_to.id
+            WHERE t.risk_factors IS NOT NULL
+              AND jsonb_typeof(t.risk_factors) = 'array'
+              AND jsonb_array_length(t.risk_factors) > 0
+            ORDER BY t.risk_score DESC, t.block_number DESC
+            LIMIT 1
+            """
+        )
+        if not row:
+            logger.warning("Grounded AI runtime verification deferred: no retained transaction with risk evidence")
+            return
+
+        factors = row["risk_factors"] or []
+        if isinstance(factors, str):
+            factors = json.loads(factors)
+        factors = [item for item in factors if isinstance(item, dict)] if isinstance(factors, list) else []
+        if not factors:
+            logger.warning("Grounded AI runtime verification deferred: selected evidence row had no usable factors")
+            return
+
+        tx = {
+            "hash": row["hash"],
+            "block_number": row["block_number"],
+            "value": row["value_wei"],
+            "value_wei": row["value_wei"],
+            "risk_score": row["risk_score"],
+            "from_address": row["from_address"],
+            "to_address": row["to_address"],
+        }
+        baseline = evidence_explanation(tx, factors)
+        audit = await asyncio.wait_for(structured_explain_with_audit(tx, factors), timeout=45)
+        await record_ai_run(db, tx_hash=row["hash"], baseline=baseline, audit=audit)
+        logger.info(
+            "Grounded AI runtime verification attempt: provider={} model={} status={} ai_used={} grounded={} latency_ms={}",
+            audit.get("provider"), audit.get("model"), audit.get("status"),
+            audit.get("ai_used"), audit.get("grounded"), audit.get("latency_ms"),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Grounded AI runtime verification unavailable: {}", type(exc).__name__)
 
 
 async def _prepare_independent_ml():
@@ -152,6 +235,7 @@ async def lifespan(app: FastAPI):
     background_tasks = [
         asyncio.create_task(_refresh_verified_intelligence(db)),
         asyncio.create_task(_prepare_ai_and_benchmark(db)),
+        asyncio.create_task(_verify_grounded_ai_runtime(db)),
         asyncio.create_task(_prepare_independent_ml()),
     ]
     logger.success("API ready")

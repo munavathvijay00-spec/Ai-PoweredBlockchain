@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Keep hosted-provider model selection independent from the local Ollama name.
     # This model is a current Groq production model as of the 2026 project build.
     groq_model: str = "openai/gpt-oss-20b"
+    # Grounded AI runs out-of-band from ingestion so chain indexing never waits on
+    # an external model. Keep the batch bounded to control provider rate limits.
+    ai_enrichment_batch_size: int = 8
+    ai_enrichment_min_score: int = 20
 
     # API
     api_key: str
@@ -67,5 +71,6 @@ if __name__ == "__main__":
     print(f"   LLM Provider: {settings.llm_provider}")
     print(f"   Local LLM Model: {settings.llm_model}")
     print(f"   Groq Model: {settings.groq_model}")
+    print(f"   AI enrichment batch: {settings.ai_enrichment_batch_size}")
     print(f"   Ollama URL: {settings.ollama_url}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

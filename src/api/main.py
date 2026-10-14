@@ -102,10 +102,12 @@ async def _prepare_independent_ml():
         runtime_compatible = bool(status.get("runtime_compatible"))
 
         if status.get("available") and runtime_compatible and model_rows >= benchmark_rows:
+            test = status.get("test_metrics") or {}
             logger.info(
-                "Independent ML model current: family={} mode={} rows={} gate={}",
+                "Independent ML model current: family={} mode={} rows={} gate={} test_auc={} test_f1={} test_precision={} test_brier={}",
                 status.get("model_family"), status.get("deployment_mode"), model_rows,
-                status.get("production_quality_gate_passed"),
+                status.get("production_quality_gate_passed"), test.get("roc_auc"), test.get("f1"),
+                test.get("precision"), test.get("brier"),
             )
             return
 
@@ -124,10 +126,12 @@ async def _prepare_independent_ml():
             timeout=120,
         )
         logger.info(
-            "Independent ML model registered/refreshed: family={} rows={} AUC={} F1={} mode={} gate={}",
+            "Independent ML model registered/refreshed: family={} rows={} AUC={} F1={} precision={} brier={} mode={} gate={}",
             metadata.get("model_family"), metadata.get("dataset_rows"),
             (metadata.get("test_metrics") or {}).get("roc_auc"),
             (metadata.get("test_metrics") or {}).get("f1"),
+            (metadata.get("test_metrics") or {}).get("precision"),
+            (metadata.get("test_metrics") or {}).get("brier"),
             metadata.get("deployment_mode"), metadata.get("production_quality_gate_passed"),
         )
     except asyncio.CancelledError:

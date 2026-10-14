@@ -64,6 +64,10 @@ class StatsResponse(BaseModel):
     max_risk_score: int
     explained_transactions: int
     grounded_explanations: int = 0
+    ai_generated_explanations: int = Field(
+        0,
+        description="Retained rows whose stored explanation passed grounding validation and came from an LLM rewrite",
+    )
 
 
 class HealthResponse(BaseModel):

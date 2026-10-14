@@ -1,4 +1,5 @@
 """Truthful observed-data coverage, never presented as full Ethereum history."""
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
@@ -34,13 +35,33 @@ def _freshness(age_seconds):
     return "stale"
 
 
+def _json_object(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
 @router.get("/coverage")
 async def get_coverage(repo: TransactionRepository = Depends(get_transaction_repo)):
     stats = await repo.db.fetchrow("""
         SELECT MIN(block_number) AS min_block, MAX(block_number) AS max_block,
                MIN(timestamp) AS oldest_observed_at, MAX(timestamp) AS newest_observed_at,
                COUNT(*) AS stored_transactions,
-               COUNT(DISTINCT block_number) AS blocks_with_stored_transactions
+               COUNT(DISTINCT block_number) AS blocks_with_stored_transactions,
+               COUNT(*) FILTER (
+                   WHERE ai_explanation LIKE 'Grounded AI explanation:%'
+               ) AS ai_generated_explanations,
+               COUNT(*) FILTER (
+                   WHERE ai_explanation LIKE 'Rule-based risk assessment:%'
+                      OR ai_explanation LIKE 'Evidence-based assessment:%'
+                      OR ai_explanation LIKE 'Evidence-based transaction review:%'
+               ) AS deterministic_explanations
         FROM transactions
     """)
     try:
@@ -51,16 +72,30 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
     except Exception:
         cursor = None
 
+    entity_stats = None
+    entity_store = "none"
     try:
         entity_stats = await repo.db.fetchrow("""
             SELECT COUNT(*) AS records,
                    COUNT(DISTINCT source) AS sources,
                    COUNT(DISTINCT address) AS addresses,
-                   MAX(checked_at) AS newest_checked_at
-            FROM verified_address_intelligence
+                   MAX(verified_at) AS newest_checked_at
+            FROM entity_attributions
+            WHERE chain_id=1 AND (expires_at IS NULL OR expires_at > NOW())
         """)
+        entity_store = "entity_attributions"
     except Exception:
-        entity_stats = None
+        try:
+            entity_stats = await repo.db.fetchrow("""
+                SELECT COUNT(*) AS records,
+                       COUNT(DISTINCT source) AS sources,
+                       COUNT(DISTINCT address) AS addresses,
+                       MAX(checked_at) AS newest_checked_at
+                FROM verified_address_intelligence
+            """)
+            entity_store = "verified_address_intelligence"
+        except Exception:
+            entity_stats = None
 
     try:
         persistent_history_rows = int(await repo.db.fetchval(
@@ -69,10 +104,36 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
     except Exception:
         persistent_history_rows = 0
 
+    try:
+        label_rows = int(await repo.db.fetchval(
+            "SELECT COUNT(*) FROM detection_labels"
+        ) or 0)
+        unique_labelled_transactions = int(await repo.db.fetchval(
+            "SELECT COUNT(DISTINCT tx_hash) FROM detection_labels"
+        ) or 0)
+    except Exception:
+        label_rows = 0
+        unique_labelled_transactions = 0
+
+    try:
+        latest_evaluation = await repo.db.fetchrow("""
+            SELECT id,evaluator_version,threshold,sample_size,metrics,label_sources,created_at
+            FROM detection_evaluations
+            ORDER BY created_at DESC
+            LIMIT 1
+        """)
+    except Exception:
+        latest_evaluation = None
+
     entity_records = int(entity_stats["records"] or 0) if entity_stats else 0
     entity_sources = int(entity_stats["sources"] or 0) if entity_stats else 0
     entity_addresses = int(entity_stats["addresses"] or 0) if entity_stats else 0
     entity_checked_at = entity_stats["newest_checked_at"] if entity_stats else None
+    ai_generated_explanations = int((stats.get("ai_generated_explanations") if hasattr(stats, "get") else 0) or 0)
+    deterministic_explanations = int((stats.get("deterministic_explanations") if hasattr(stats, "get") else 0) or 0)
+
+    evaluation_metrics = _json_object(latest_evaluation.get("metrics")) if latest_evaluation else {}
+    evaluation_measured = bool(latest_evaluation)
 
     cursor_age = _age_seconds(cursor["updated_at"] if cursor else None)
     newest_tx_age = _age_seconds(stats["newest_observed_at"])
@@ -114,7 +175,8 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "entity_attribution": bool(entity_records),
         "entity_attribution_scope": "source_attributed_local_matches_only" if entity_records else "no_verified_records_loaded",
         "internal_trace_indexing": False,
-        "detection_quality": "not_evaluated",
+        "detection_quality": "independently_evaluated" if evaluation_measured else "not_evaluated",
+        "ai_explanation_mode": "grounded_llm_rewrites_present" if ai_generated_explanations else "deterministic_evidence_only_in_retained_window",
         "storage_profile": "free_tier_bounded",
         "production_ready_for": production_ready_for,
         "not_ready_for": [
@@ -122,7 +184,7 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "complete EVM call-trace reconstruction",
             "comprehensive entity attribution across Ethereum",
             "sanctions/compliance verdicts without independent source review",
-            "validated fraud-detection accuracy claims",
+            "fraud-probability claims beyond independently labelled validation evidence",
             "multi-hop forensic tracing guarantees",
         ],
     }
@@ -187,19 +249,39 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "unique_addresses": entity_addresses,
             "sources": entity_sources,
             "newest_checked_at": entity_checked_at,
+            "store": entity_store,
             "note": "This is a bounded local intelligence set. No local match is not evidence that no attribution exists elsewhere.",
         },
+        "explanation_quality": {
+            "grounded_ai_rows": ai_generated_explanations,
+            "deterministic_evidence_rows": deterministic_explanations,
+            "status": "grounded_ai_present" if ai_generated_explanations else "deterministic_only",
+            "note": "Only explanations stored with the Grounded AI prefix passed the LLM grounding validator. Deterministic evidence explanations are not counted as AI-generated.",
+        },
         "detection_quality": {
-            "status": "not_evaluated",
-            "precision": None,
-            "recall": None,
-            "false_positive_rate": None,
-            "abstention_rate": None,
+            "status": "independently_evaluated" if evaluation_measured else "not_evaluated",
+            "precision": evaluation_metrics.get("precision") if evaluation_measured else None,
+            "recall": evaluation_metrics.get("recall") if evaluation_measured else None,
+            "false_positive_rate": evaluation_metrics.get("false_positive_rate") if evaluation_measured else None,
+            "abstention_rate": evaluation_metrics.get("abstention_rate") if evaluation_measured else None,
+            "decision_coverage": evaluation_metrics.get("decision_coverage") if evaluation_measured else None,
+            "sample_size": int(latest_evaluation["sample_size"]) if latest_evaluation else 0,
+            "evaluation_id": latest_evaluation["id"] if latest_evaluation else None,
+            "evaluator_version": latest_evaluation["evaluator_version"] if latest_evaluation else None,
+            "threshold": latest_evaluation["threshold"] if latest_evaluation else None,
+            "created_at": latest_evaluation["created_at"] if latest_evaluation else None,
+            "label_sources": latest_evaluation.get("label_sources") if latest_evaluation else [],
+            "label_rows": label_rows,
+            "unique_labelled_transactions": unique_labelled_transactions,
             "evaluation_harness": "available",
             "labeling_queue_tool": "scripts/build_labeling_queue.py",
             "evaluation_tool": "scripts/evaluate_detection.py",
             "protocol": "docs/DETECTION_EVALUATION.md",
-            "note": "ChainScope does not claim validated fraud-detection accuracy until an independently labeled representative holdout set is evaluated.",
+            "note": (
+                "Metrics describe only the independent labelled validation set and are not calibrated fraud probabilities."
+                if evaluation_measured
+                else "ChainScope does not claim validated fraud-detection accuracy until an independently labeled representative holdout set is evaluated."
+            ),
         },
         "reorg_verification": checkpoint,
         "wallet_history": {
@@ -214,6 +296,6 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "An empty wallet result does not imply an inactive wallet.",
             "Provider-indexed internal value transfers are not a full EVM trace tree.",
             "Verified entity intelligence is only as broad and current as the source-attributed records loaded into the local table.",
-            "Behavioral review signals have not yet been validated on an independently labeled representative holdout set.",
+            "Detection metrics, when present, apply only to the independently labelled evaluation set and do not establish a universal fraud probability.",
         ],
     }

@@ -1,8 +1,8 @@
 """Persistent sparse wallet-history cache backed by Alchemy transfers.
 
-ChainScope does not attempt to warehouse the full Ethereum chain on a small
-prototype database. Instead it persistently caches deep history for wallets that
-are actually investigated, preserving provider provenance and pagination state.
+ChainScope does not warehouse Ethereum history in the free-tier database. It
+stores normalized evidence for investigated wallets under strict row budgets;
+older cache entries can always be re-fetched from the provider on demand.
 """
 import asyncio
 import hashlib
@@ -18,6 +18,11 @@ from src.api.dependencies import get_transaction_repo
 from src.api.indexed_transfer_routes import _transfer_page, _selected_categories
 from src.database.repositories import TransactionRepository
 from src.metrics import historical_provider_requests_total
+from src.storage_budget import (
+    HISTORY_MAX_ROWS_GLOBAL,
+    HISTORY_MAX_ROWS_PER_WALLET,
+    prune_historical_evidence,
+)
 from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api/wallets", tags=["historical wallet evidence"])
@@ -32,11 +37,6 @@ async def require_history_key(x_api_key: str | None = Header(default=None)):
 
 
 def _alchemy_rpc_url(settings) -> str | None:
-    """Build the dedicated historical-provider URL from the Alchemy key.
-
-    Historical coverage must not silently disappear when the live canonical RPC
-    is switched to another provider. The key is never returned to clients.
-    """
     key = (settings.alchemy_api_key or "").strip()
     if key.lower() in _INVALID_PROVIDER_KEYS:
         return None
@@ -102,6 +102,7 @@ async def _require_schema(repo: TransactionRepository):
 
 
 async def _save_page(repo, wallet: str, direction: str, transfers: list[dict]) -> int:
+    """Persist compact normalized evidence, not the provider's full JSON payload."""
     inserted = 0
     async with repo.db.transaction():
         for transfer in transfers:
@@ -121,7 +122,7 @@ async def _save_page(repo, wallet: str, direction: str, transfers: list[dict]) -
                 ) VALUES (
                     1, $1, $2, 'alchemy_getAssetTransfers',
                     $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                    $12, $13, $14, $15::jsonb, $16, NOW()
+                    $12, $13, $14, '{}'::jsonb, $15, NOW()
                 )
                 ON CONFLICT (chain_id, wallet_address, evidence_key) DO NOTHING
                 """,
@@ -139,12 +140,19 @@ async def _save_page(repo, wallet: str, direction: str, transfers: list[dict]) -
                 _contract_address(transfer),
                 _block_number(transfer.get("blockNum")),
                 _block_timestamp(transfer),
-                json.dumps(transfer, default=str),
                 f"https://etherscan.io/tx/{tx_hash}" if tx_hash else None,
             )
             if result.endswith(" 1"):
                 inserted += 1
     return inserted
+
+
+async def _wallet_bounds(repo: TransactionRepository, wallet: str):
+    return await repo.db.fetchrow(
+        """SELECT COUNT(*) AS count, MIN(block_number) AS oldest, MAX(block_number) AS newest
+           FROM wallet_transfer_evidence WHERE chain_id=1 AND wallet_address=$1""",
+        wallet,
+    )
 
 
 @router.post("/{address}/history/sync", dependencies=[Depends(require_history_key)])
@@ -223,11 +231,7 @@ async def sync_wallet_history(
         ).inc()
         raise HTTPException(status_code=502, detail="Historical transfer provider failed")
 
-    bounds = await repo.db.fetchrow(
-        """SELECT COUNT(*) AS count, MIN(block_number) AS oldest, MAX(block_number) AS newest
-           FROM wallet_transfer_evidence WHERE chain_id=1 AND wallet_address=$1""",
-        wallet,
-    )
+    bounds = await _wallet_bounds(repo, wallet)
     await repo.db.execute(
         """
         INSERT INTO wallet_history_sync (
@@ -252,6 +256,29 @@ async def sync_wallet_history(
         outgoing_complete, incoming_complete,
         bounds.get("newest"), bounds.get("oldest"), int(bounds.get("count") or 0),
     )
+
+    pruning = await prune_historical_evidence(repo.db, wallet)
+    pruned = pruning["wallet_deleted"] + pruning["global_deleted"]
+    if pruned:
+        outgoing_complete = False
+        incoming_complete = False
+    bounds = await _wallet_bounds(repo, wallet)
+
+    await repo.db.execute(
+        """
+        UPDATE wallet_history_sync
+        SET newest_block=$2,
+            oldest_block=$3,
+            records_cached=$4,
+            updated_at=NOW()
+        WHERE chain_id=1 AND wallet_address=$1 AND provider='alchemy_getAssetTransfers'
+        """,
+        wallet,
+        bounds.get("newest"),
+        bounds.get("oldest"),
+        int(bounds.get("count") or 0),
+    )
+
     return {
         "address": wallet,
         "provider": "alchemy_getAssetTransfers",
@@ -264,7 +291,14 @@ async def sync_wallet_history(
         "incoming_complete": incoming_complete,
         "historical_complete_for_selected_categories": outgoing_complete and incoming_complete,
         "categories": categories,
-        "warning": "Completeness applies only to selected provider categories, not full EVM execution traces.",
+        "cache_pruned_this_request": pruned,
+        "cache_policy": {
+            "max_rows_per_wallet": HISTORY_MAX_ROWS_PER_WALLET,
+            "max_rows_global": HISTORY_MAX_ROWS_GLOBAL,
+            "raw_provider_payloads_stored": False,
+            "refetchable": True,
+        },
+        "warning": "Provider history is deeper than the local cache. Completeness applies only while selected-category pagination is complete and no cache rows were evicted; this is not full EVM execution tracing.",
     }
 
 
@@ -310,5 +344,11 @@ async def cached_wallet_history(
         "historical_complete_for_selected_categories": bool(
             sync and sync.get("outgoing_complete") and sync.get("incoming_complete")
         ),
-        "warning": "This is persistent investigated-wallet evidence, not a claim of complete Ethereum execution history.",
+        "cache_policy": {
+            "max_rows_per_wallet": HISTORY_MAX_ROWS_PER_WALLET,
+            "max_rows_global": HISTORY_MAX_ROWS_GLOBAL,
+            "raw_provider_payloads_stored": False,
+            "refetchable": True,
+        },
+        "warning": "This is a bounded persistent cache of investigated-wallet evidence. Deeper provider history is fetched on demand; the local database is not an Ethereum archive.",
     }

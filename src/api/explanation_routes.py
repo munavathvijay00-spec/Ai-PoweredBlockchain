@@ -1,8 +1,8 @@
 """On-demand grounded LLM explanations.
 
 The endpoint is intentionally separate from ingestion so RPC/indexing throughput
-never depends on an external LLM. Every accepted AI sentence is bounded by the
-stored transaction facts and [E#] evidence references, and every attempt is audited.
+never depends on an external LLM. The live AI path now uses structured claims that
+must pass evidence-contract validation before any generated language is returned.
 """
 import hmac
 import json
@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from src.agents.ai_audit import record_ai_run
 from src.agents.evidence_contract import build_evidence_contract
-from src.agents.explainer import get_explainer, evidence_explanation
+from src.agents.explainer import evidence_explanation
+from src.agents.structured_grounding import structured_explain_with_audit
 from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
 from src.metrics import ai_explanations_total, ai_grounding_rejections_total
@@ -79,13 +80,14 @@ async def explain_transaction(
     }
     evidence_contract = build_evidence_contract(tx, factors)
     baseline = evidence_explanation(tx, factors)
-    audit = await get_explainer().explain_with_audit(tx, factors)
+
+    # The model must first produce structured claims; prose is rendered only after validation.
+    audit = await structured_explain_with_audit(tx, factors)
     provider = str(audit.get("provider") or "disabled")
     status = str(audit.get("status") or "unknown")
     result = str(audit.get("explanation") or baseline)
     grounded_ai = bool(audit.get("ai_used") and audit.get("grounded"))
 
-    # Persist proof of whether the model actually ran and why a fallback happened.
     await record_ai_run(repo.db, tx_hash=row["hash"], baseline=baseline, audit=audit)
 
     if grounded_ai:
@@ -93,18 +95,20 @@ async def explain_transaction(
         await repo.update_explanation(row["hash"], result)
     else:
         ai_explanations_total.labels(provider=provider, status=status).inc()
-        if status == "grounding_rejected":
+        if status in {"grounding_rejected", "structured_parse_rejected"}:
             ai_grounding_rejections_total.labels(provider=provider).inc()
 
     warning = "Risk evidence is a review signal, not a fraud verdict."
     if status == "abstained_no_evidence":
-        warning = "No supporting risk factor is stored, so ChainScope did not ask an LLM to infer one."
+        warning = "No supporting risk factor is stored, so ChainScope abstained instead of asking the LLM to infer one."
     elif status == "provider_not_configured":
         warning = "A real LLM provider is not configured; deterministic evidence was returned."
     elif status == "provider_no_output":
         warning = "The configured LLM did not return usable output; deterministic evidence was returned."
+    elif status == "structured_parse_rejected":
+        warning = "The LLM did not return the required structured evidence JSON; its output was withheld."
     elif status == "grounding_rejected":
-        warning = "The LLM output failed grounding checks and was withheld; deterministic evidence was returned."
+        warning = "The LLM produced claims that failed evidence validation; its output was withheld."
 
     return {
         "transaction_hash": row["hash"],
@@ -113,6 +117,7 @@ async def explain_transaction(
         "provider": provider,
         "model": audit.get("model") if grounded_ai else None,
         "explanation": result,
+        "structured_claims": audit.get("structured_payload") if grounded_ai else None,
         "citations": _citations(row["hash"], factors),
         "evidence_contract": evidence_contract,
         "grounded": True,

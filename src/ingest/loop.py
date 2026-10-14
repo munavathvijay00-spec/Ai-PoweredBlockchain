@@ -4,10 +4,16 @@ Ingest loop — runs forever, ingesting new canonical blocks every N seconds.
 Normal shallow Ethereum reorgs are recovered only after a common ancestor is
 cryptographically/evidentially verified. Deep or unverifiable forks still halt
 fail-closed for manual review.
+
+The live transaction table is intentionally a short retention window. During
+catch-up, blocks already older than that window advance canonical lineage and the
+checkpoint without writing thousands of immediately-expired transaction rows.
+This prevents catch-up WAL amplification on small databases.
 """
 import asyncio
 import signal
 import sys
+import time
 from datetime import datetime
 from loguru import logger
 
@@ -27,6 +33,7 @@ from src.ingest.reorg import ensure_lineage_schema, record_lineage, recover_shal
 
 _shutdown_requested = False
 MAX_AUTO_REORG_DEPTH = 12
+LIVE_RETENTION_MINUTES = 30
 
 
 def _block_hash(value):
@@ -53,12 +60,7 @@ def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list
 
 
 def catchup_batch_size(pending: int) -> int:
-    """Increase throughput only while materially behind chain head.
-
-    Blocks remain strictly sequential and individually transactional; the batch
-    size only controls how many canonical successors are attempted before the
-    next head check.
-    """
+    """Bound how many sequential canonical successors are attempted per head check."""
     if pending > 100:
         return 12
     if pending > 20:
@@ -73,6 +75,21 @@ def catchup_sleep_seconds(pending_after_iteration: int, normal_interval: int) ->
     if pending_after_iteration > 20:
         return min(normal_interval, 5)
     return normal_interval
+
+
+def block_outside_live_retention(block: dict, *, retention_minutes: int = LIVE_RETENTION_MINUTES, now_ts: int | None = None) -> bool:
+    """Return True only when a block is definitely older than the live window."""
+    if retention_minutes < 1:
+        raise ValueError("retention_minutes must be positive")
+    raw = block.get("timestamp")
+    if raw is None:
+        return False
+    try:
+        timestamp = int(raw)
+    except (TypeError, ValueError):
+        return False
+    current = int(time.time()) if now_ts is None else int(now_ts)
+    return timestamp < current - retention_minutes * 60
 
 
 def is_chain_integrity_failure(error: Exception) -> bool:
@@ -107,6 +124,7 @@ async def ingest_loop(interval_seconds: int = 15):
     iteration = 0
     total_inserted = 0
     total_flagged = 0
+    total_header_only = 0
     last_processed_block, last_block_hash = await load_cursor_checkpoint(db)
     logger.info(f'Ingestion checkpoint restored: {last_processed_block}')
     latest_block = last_processed_block or 0
@@ -178,8 +196,11 @@ async def ingest_loop(interval_seconds: int = 15):
 
                 recovered_mid_iteration = False
                 for block_number in next_blocks(last_processed_block, latest_block, batch_limit):
-                    candidate = await client.get_block(block_number, full_transactions=True)
-                    if last_block_hash is not None and _block_hash(candidate['parentHash']) != last_block_hash.lower():
+                    # Read the canonical header first. Old blocks need only durable
+                    # lineage/checkpoint state; their transaction rows would be
+                    # immediately deleted by the 30-minute live-retention policy.
+                    header = await client.get_block(block_number, full_transactions=False)
+                    if last_block_hash is not None and _block_hash(header['parentHash']) != last_block_hash.lower():
                         logger.warning(
                             'Successor parent mismatch at block {}; verifying bounded rewind before replay',
                             block_number,
@@ -196,7 +217,32 @@ async def ingest_loop(interval_seconds: int = 15):
                         recovered_mid_iteration = True
                         break
 
-                    candidate_hash = _block_hash(candidate['hash'])
+                    candidate_hash = _block_hash(header['hash'])
+                    if block_outside_live_retention(header):
+                        async with db.transaction():
+                            await record_lineage(db, header)
+                            await save_cursor_checkpoint(db, block_number, candidate_hash)
+                        last_processed_block = block_number
+                        last_block_hash = candidate_hash
+                        total_header_only += 1
+                        logger.info(
+                            "⏩ Canonical block #{:,} advanced header-only; outside {}m live retention",
+                            block_number,
+                            LIVE_RETENTION_MINUTES,
+                        )
+                        continue
+
+                    candidate = await client.get_block(block_number, full_transactions=True)
+                    if _block_hash(candidate['hash']) != candidate_hash:
+                        # Head changed between header and full-block fetch. Do not
+                        # persist either version; next iteration re-verifies lineage.
+                        logger.warning(
+                            'Block {} changed between header and full snapshot; deferring to reorg verification',
+                            block_number,
+                        )
+                        recovered_mid_iteration = True
+                        break
+
                     async with db.transaction():
                         summary = await process_one_block(
                             client, normalizer, transactions, addresses, scorer, explainer,
@@ -224,7 +270,10 @@ async def ingest_loop(interval_seconds: int = 15):
                     logger.debug("No new blocks at chain head")
 
                 logger.info(
-                    f"📊 Session totals — Inserted: {total_inserted:,} | Flagged: {total_flagged}"
+                    "📊 Session totals — Inserted: {:,} | Flagged: {} | Header-only catch-up: {}",
+                    total_inserted,
+                    total_flagged,
+                    total_header_only,
                 )
 
                 if iteration == 1 or iteration % 60 == 0:
@@ -233,7 +282,9 @@ async def ingest_loop(interval_seconds: int = 15):
                     except Exception as storage_err:
                         logger.warning(f"Storage diagnostics unavailable: {storage_err}")
 
-                if iteration % 10 == 0:
+                # Keep the live table within its declared window. Catch-up blocks
+                # outside this horizon are no longer written in the first place.
+                if iteration % 5 == 0:
                     try:
                         deleted = await db.execute("""
                             DELETE FROM transactions

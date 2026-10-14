@@ -1,4 +1,4 @@
-"""Coverage endpoint must distinguish checkpoint verification from historical completeness."""
+"""Coverage endpoint must distinguish reorg recovery from historical completeness."""
 import pytest
 from unittest.mock import AsyncMock
 from src.api.coverage_routes import get_coverage
@@ -14,9 +14,11 @@ async def test_coverage_reports_hash_guard_without_claiming_full_history():
         {"last_block": 101, "block_hash": "0x" + "a" * 64, "updated_at": None},
     ]
     response = await get_coverage(repo)
-    assert response["reorg_verification"]["status"] == "checkpoint_hash_recorded"
-    assert response["reorg_verification"]["automatic_rollback"] is False
-    assert response["reorg_verification"]["historical_completeness"] is False
+    verification = response["reorg_verification"]
+    assert verification["status"] == "checkpoint_hash_recorded"
+    assert verification["automatic_shallow_reorg_recovery"] is True
+    assert verification["reorg_recovery_lineage_blocks"] >= 64
+    assert verification["historical_completeness"] is False
     assert response["native_transactions"]["historical_completeness"] is False
 
 

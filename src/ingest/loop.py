@@ -5,10 +5,10 @@ Normal shallow Ethereum reorgs are recovered only after a common ancestor is
 cryptographically/evidentially verified. Deep or unverifiable forks still halt
 fail-closed for manual review.
 
-The live transaction table is intentionally a short retention window. During
-catch-up, blocks already older than that window advance canonical lineage and the
-checkpoint without writing thousands of immediately-expired transaction rows.
-This prevents catch-up WAL amplification on small databases.
+The live transaction table is intentionally tiny on the free-tier profile.
+Blocks already older than the live window advance canonical lineage/checkpoint
+without writing transaction rows that would immediately expire. Canonical
+lineage itself is also pruned to a bounded recovery horizon.
 """
 import asyncio
 import signal
@@ -29,11 +29,11 @@ from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
 from src.ingest.reorg import ensure_lineage_schema, record_lineage, recover_shallow_reorg
+from src.storage_budget import LIVE_RETENTION_MINUTES, prune_lineage
 
 
 _shutdown_requested = False
 MAX_AUTO_REORG_DEPTH = 12
-LIVE_RETENTION_MINUTES = 30
 
 
 def _block_hash(value):
@@ -104,7 +104,11 @@ def is_chain_integrity_failure(error: Exception) -> bool:
 
 
 async def ingest_loop(interval_seconds: int = 15):
-    logger.info(f"🚀 Starting ingest loop (interval: {interval_seconds}s)")
+    logger.info(
+        "🚀 Starting ingest loop (interval={}s, live_retention={}m)",
+        interval_seconds,
+        LIVE_RETENTION_MINUTES,
+    )
 
     client = BlockchainClient()
     connected = await client.connect()
@@ -196,9 +200,6 @@ async def ingest_loop(interval_seconds: int = 15):
 
                 recovered_mid_iteration = False
                 for block_number in next_blocks(last_processed_block, latest_block, batch_limit):
-                    # Read the canonical header first. Old blocks need only durable
-                    # lineage/checkpoint state; their transaction rows would be
-                    # immediately deleted by the 30-minute live-retention policy.
                     header = await client.get_block(block_number, full_transactions=False)
                     if last_block_hash is not None and _block_hash(header['parentHash']) != last_block_hash.lower():
                         logger.warning(
@@ -234,8 +235,6 @@ async def ingest_loop(interval_seconds: int = 15):
 
                     candidate = await client.get_block(block_number, full_transactions=True)
                     if _block_hash(candidate['hash']) != candidate_hash:
-                        # Head changed between header and full-block fetch. Do not
-                        # persist either version; next iteration re-verifies lineage.
                         logger.warning(
                             'Block {} changed between header and full snapshot; deferring to reorg verification',
                             block_number,
@@ -282,23 +281,42 @@ async def ingest_loop(interval_seconds: int = 15):
                     except Exception as storage_err:
                         logger.warning(f"Storage diagnostics unavailable: {storage_err}")
 
-                # Keep the live table within its declared window. Catch-up blocks
-                # outside this horizon are no longer written in the first place.
-                if iteration % 5 == 0:
+                # Free-tier profile: trim expired live rows aggressively so WAL/table
+                # growth cannot run away between cleanup cycles.
+                if iteration % 2 == 0:
                     try:
-                        deleted = await db.execute("""
+                        deleted = await db.execute(
+                            """
                             DELETE FROM transactions
-                            WHERE timestamp < NOW() - INTERVAL '30 minutes'
-                        """)
-                        logger.info(f"🗑️ Retention cleanup: {deleted}")
+                            WHERE timestamp < NOW() - ($1 * INTERVAL '1 minute')
+                            """,
+                            LIVE_RETENTION_MINUTES,
+                        )
+                        logger.info(
+                            "🗑️ Live retention cleanup ({}m): {}",
+                            LIVE_RETENTION_MINUTES,
+                            deleted,
+                        )
                     except Exception as cleanup_err:
                         logger.warning(f"Transaction cleanup error (non-fatal): {cleanup_err}")
 
-                if iteration % 2 == 0:
                     try:
-                        await prune_addresses(db, enabled=True, batch_size=500, minutes=30)
+                        await prune_addresses(
+                            db,
+                            enabled=True,
+                            batch_size=500,
+                            minutes=LIVE_RETENTION_MINUTES,
+                        )
                     except Exception as cleanup_err:
                         logger.warning(f"Address cleanup error (non-fatal): {cleanup_err}")
+
+                if iteration % 10 == 0:
+                    try:
+                        lineage_deleted = await prune_lineage(db, last_processed_block)
+                        if lineage_deleted:
+                            logger.info("🧹 Canonical lineage pruned: {} old rows", lineage_deleted)
+                    except Exception as cleanup_err:
+                        logger.warning(f"Lineage cleanup error (non-fatal): {cleanup_err}")
 
             except Exception as e:
                 logger.exception(f"❌ Error in iteration {iteration}: {e}")

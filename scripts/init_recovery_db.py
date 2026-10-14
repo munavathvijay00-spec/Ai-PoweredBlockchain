@@ -10,14 +10,23 @@ async def main():
     settings = get_settings()
     conn = await asyncpg.connect(settings.database_url)
     try:
-        existing = await conn.fetchval(
-            "SELECT COUNT(*) FROM pg_catalog.pg_tables WHERE schemaname = current_schema() AND tablename IN ('addresses','transactions','alerts','blacklist','verified_address_intelligence','ingest_cursor')"
-        )
-        if existing:
-            raise RuntimeError("Recovery database is not empty; initialization stopped")
         schema = Path('/app/scripts/init.sql').read_text(encoding='utf-8')
         async with conn.transaction():
             await conn.execute(schema)
+        required = {
+            'addresses',
+            'transactions',
+            'alerts',
+            'blacklist',
+            'verified_address_intelligence',
+        }
+        rows = await conn.fetch(
+            "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema()"
+        )
+        present = {row['tablename'] for row in rows}
+        missing = sorted(required - present)
+        if missing:
+            raise RuntimeError(f"Recovery schema initialization incomplete: {missing}")
         print('RECOVERY_SCHEMA_READY')
     finally:
         await conn.close()

@@ -5,6 +5,12 @@ from fastapi import APIRouter, Depends
 
 from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
+from src.storage_budget import (
+    LIVE_RETENTION_MINUTES,
+    LINEAGE_RETENTION_BLOCKS,
+    HISTORY_MAX_ROWS_PER_WALLET,
+    HISTORY_MAX_ROWS_GLOBAL,
+)
 
 router = APIRouter(prefix="/api", tags=["data coverage"])
 WALLET_PROVIDER_CATEGORIES = ["external", "erc20", "internal", "erc721", "erc1155"]
@@ -56,6 +62,13 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
     except Exception:
         entity_stats = None
 
+    try:
+        persistent_history_rows = int(await repo.db.fetchval(
+            "SELECT COUNT(*) FROM wallet_transfer_evidence"
+        ) or 0)
+    except Exception:
+        persistent_history_rows = 0
+
     entity_records = int(entity_stats["records"] or 0) if entity_stats else 0
     entity_sources = int(entity_stats["sources"] or 0) if entity_stats else 0
     entity_addresses = int(entity_stats["addresses"] or 0) if entity_stats else 0
@@ -72,14 +85,16 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "updated_at": cursor["updated_at"] if cursor else None,
         "age_seconds": cursor_age,
         "freshness_status": freshness_status,
-        "automatic_rollback": False,
+        "automatic_shallow_reorg_recovery": True,
+        "reorg_recovery_lineage_blocks": LINEAGE_RETENTION_BLOCKS,
         "historical_completeness": False,
-        "note": "The ingestion worker checks canonical checkpoint hashes and parent continuity. This does not verify older records, recover orphaned transactions, or prove full chain coverage.",
+        "note": "The worker verifies checkpoint hashes and parent continuity, keeps bounded canonical lineage, and automatically rewinds only when a common ancestor is verified. Deep or unverifiable forks still halt fail-closed.",
     }
 
     production_ready_for = [
-        "recent native-transaction monitoring",
+        "recent native-transaction monitoring under a bounded free-tier retention budget",
         "bounded paginated wallet transfer investigation across ETH, internal value transfers, ERC-20, ERC-721 and ERC-1155",
+        "persistent normalized evidence cache for investigated wallets",
         "evidence-linked transaction review",
     ]
     if entity_records:
@@ -90,9 +105,9 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "ingestion": freshness_status,
         "checkpoint_integrity": checkpoint["status"],
         "recent_data_available": bool(stats["stored_transactions"]),
-        "retention_window_minutes": 30,
+        "retention_window_minutes": LIVE_RETENTION_MINUTES,
         "historical_archive": False,
-        "wallet_transfer_provider": "on_demand_paginated",
+        "wallet_transfer_provider": "on_demand_paginated_with_bounded_cache",
         "wallet_transfer_categories": WALLET_PROVIDER_CATEGORIES,
         "internal_value_transfers": True,
         "nft_transfers": True,
@@ -100,9 +115,10 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "entity_attribution_scope": "source_attributed_local_matches_only" if entity_records else "no_verified_records_loaded",
         "internal_trace_indexing": False,
         "detection_quality": "not_evaluated",
+        "storage_profile": "free_tier_bounded",
         "production_ready_for": production_ready_for,
         "not_ready_for": [
-            "complete historical wallet reconstruction",
+            "complete chain-wide historical Ethereum warehousing",
             "complete EVM call-trace reconstruction",
             "comprehensive entity attribution across Ethereum",
             "sanctions/compliance verdicts without independent source review",
@@ -122,6 +138,16 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "newest_observed_transaction_age_seconds": newest_tx_age,
             "stored_transactions": stats["stored_transactions"],
         },
+        "storage_budget": {
+            "profile": "free_tier_bounded",
+            "live_retention_minutes": LIVE_RETENTION_MINUTES,
+            "canonical_lineage_rows_target": LINEAGE_RETENTION_BLOCKS,
+            "historical_cache_rows_per_wallet": HISTORY_MAX_ROWS_PER_WALLET,
+            "historical_cache_rows_global": HISTORY_MAX_ROWS_GLOBAL,
+            "historical_cache_rows_current": persistent_history_rows,
+            "raw_provider_payloads_persisted": False,
+            "note": "Deep wallet history is provider-backed and re-fetchable; the local database stores only compact bounded evidence.",
+        },
         "native_transactions": {
             "status": "partial_recent_retained",
             "stored_transactions": stats["stored_transactions"],
@@ -131,16 +157,16 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "oldest_observed_at": stats["oldest_observed_at"],
             "newest_observed_at": stats["newest_observed_at"],
             "historical_completeness": False,
-            "note": "Worker starts at chain tip on first run and currently deletes transactions older than 30 minutes. Observed block bounds do not prove contiguous coverage.",
+            "note": f"The live native table retains about {LIVE_RETENTION_MINUTES} minutes. Older catch-up blocks preserve canonical checkpoint/lineage state without storing expired transaction rows.",
         },
         "wallet_transfer_provider": {
-            "status": "on_demand_paginated",
+            "status": "on_demand_paginated_with_bounded_persistent_cache",
             "provider": "alchemy_getAssetTransfers",
             "categories": WALLET_PROVIDER_CATEGORIES,
             "sort": "newest_first",
             "historical_completeness": False,
             "page_size_shared_across_categories": True,
-            "note": "Internal value transfers are provider-indexed transfer records, not complete EVM call traces. Provider-specific specialnft records are not included.",
+            "note": "Internal value transfers are provider-indexed transfer records, not complete EVM call traces. Cache eviction does not imply the provider lacks older history.",
         },
         "token_events": {
             "status": "on_demand_provider",
@@ -177,13 +203,14 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         },
         "reorg_verification": checkpoint,
         "wallet_history": {
-            "status": "bounded_paginated_provider_plus_recent_native_index",
+            "status": "provider_backed_bounded_persistent_cache_plus_recent_native_index",
+            "persistent_rows": persistent_history_rows,
             "historical_completeness": False,
         },
         "product_readiness": readiness,
         "limitations": [
-            "No complete address-indexed Ethereum history is available from the rolling database or bounded provider pages.",
-            "No guarantee that all blocks between observed minimum and maximum were indexed in the rolling native store.",
+            "The rolling native database is deliberately not a chain-wide Ethereum archive.",
+            "No guarantee that all blocks between observed minimum and maximum have retained native transaction rows; canonical checkpoint continuity is tracked separately.",
             "An empty wallet result does not imply an inactive wallet.",
             "Provider-indexed internal value transfers are not a full EVM trace tree.",
             "Verified entity intelligence is only as broad and current as the source-attributed records loaded into the local table.",

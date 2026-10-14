@@ -27,6 +27,7 @@ export const api = {
   getStats: () => request('/stats'),
   getCoverage: () => request('/coverage'),
   getAIStatus: () => request('/ai/status'),
+  getMLStatus: () => request('/ml/status'),
   getExternalEvaluation: () => request('/evaluation/external', 20000),
   getTransactions: (limit = 50) => request(`/transactions?limit=${limit}`),
   getFlagged: (limit = 50, minScore = 20) => request(`/flagged?min_score=${minScore}&limit=${limit}`),
@@ -46,6 +47,10 @@ export const api = {
     if (cursors.outgoing) params.set('outgoing_page_key', cursors.outgoing);
     if (cursors.incoming) params.set('incoming_page_key', cursors.incoming);
     return request(`/wallets/${encodeURIComponent(address)}/indexed-graph?${params}`, 25000);
+  },
+  getObservedWalletGraph: (address, depth = 2, limit = 150) => {
+    const params = new URLSearchParams({ depth: String(depth), limit: String(limit), per_hop_limit: '120' });
+    return request(`/wallets/${encodeURIComponent(address)}/graph?${params}`, 25000);
   },
   getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report`, 25000),
 };

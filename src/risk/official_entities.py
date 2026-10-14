@@ -1,9 +1,9 @@
 """Small, high-confidence registry sourced from first-party protocol documentation.
 
 This registry deliberately favors provenance over breadth. Each row is an exact
-Ethereum mainnet contract address published by the protocol's own documentation
-or repository. These labels provide address-level context only; they do not infer
-beneficial ownership, user identity, intent, or transaction legitimacy.
+Ethereum mainnet contract address published by the protocol or issuer's own
+documentation/repository. These labels provide address-level context only; they do
+not infer beneficial ownership, user identity, intent, or transaction legitimacy.
 """
 import json
 from loguru import logger
@@ -70,6 +70,16 @@ OFFICIAL_ENTITY_RECORDS = (
         "source_url": "https://docs.lido.fi/deployed-contracts/",
         "evidence": {"publisher": "Lido", "method": "exact Ethereum mainnet deployment address"},
     },
+    {
+        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "source": "circle_official_usdc",
+        "entity_id": "circle-usdc-ethereum",
+        "entity_name": "USDC on Ethereum",
+        "entity_type": "contract",
+        "confidence": 1.0,
+        "source_url": "https://www.circle.com/multi-chain-usdc/ethereum",
+        "evidence": {"publisher": "Circle", "method": "native USDC Ethereum mainnet contract address"},
+    },
 )
 
 
@@ -102,5 +112,5 @@ async def sync_official_entities(db) -> int:
             json.dumps(row["evidence"]),
         )
 
-    logger.info("Verified entity registry: synced {} first-party protocol addresses", len(OFFICIAL_ENTITY_RECORDS))
+    logger.info("Verified entity registry: synced {} first-party addresses", len(OFFICIAL_ENTITY_RECORDS))
     return len(OFFICIAL_ENTITY_RECORDS)

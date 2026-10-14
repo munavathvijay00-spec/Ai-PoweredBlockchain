@@ -1,8 +1,8 @@
 """Persistent registry for independently supervised ML models.
 
 Railway containers are ephemeral, so production model artifacts and provenance are
-stored in PostgreSQL. Only independently supervised, feature-compatible model bundles
-may be registered or used for shadow inference.
+stored in PostgreSQL. Only independently supervised, feature-compatible, split-compatible
+model bundles may be registered or used for shadow inference.
 """
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from src.database.connection import get_db
 from src.ml.independent_model import (
     FEATURE_COLUMNS,
     MODEL_FAMILY,
+    MODEL_SCHEMA_VERSION,
+    SPLIT_STRATEGY,
     _vector,
     load_independent_bundle,
     train_independent_model,
@@ -62,6 +64,15 @@ def _validate_metadata(metadata: Dict[str, Any]) -> None:
         raise ValueError(
             f"Model runtime family mismatch: expected {MODEL_FAMILY}, got {metadata.get('model_family') or 'legacy'}"
         )
+    if int(metadata.get("schema_version") or 0) != MODEL_SCHEMA_VERSION:
+        raise ValueError(
+            f"Model schema mismatch: expected {MODEL_SCHEMA_VERSION}, got {metadata.get('schema_version') or 'legacy'}"
+        )
+    if metadata.get("split_strategy") != SPLIT_STRATEGY:
+        raise ValueError("Model split strategy is not wallet-isolated")
+    overlaps = metadata.get("address_overlap_counts") or {}
+    if any(int(value or 0) for value in overlaps.values()):
+        raise ValueError("Model metadata reports address leakage across partitions")
 
 
 def _deserialize(blob: bytes) -> Dict[str, Any]:
@@ -81,7 +92,10 @@ async def train_and_register(limit: int = 5000) -> Dict[str, Any]:
     _validate_metadata(metadata)
     bundle = load_independent_bundle()
     artifact = _serialize(bundle)
-    version = f"{metadata['trained_at']}:{metadata['dataset_fingerprint_sha256'][:12]}:{MODEL_FAMILY}"
+    version = (
+        f"{metadata['trained_at']}:{metadata['dataset_fingerprint_sha256'][:12]}:"
+        f"{MODEL_FAMILY}:schema{MODEL_SCHEMA_VERSION}"
+    )
     await db.execute("""
         INSERT INTO ml_model_registry
           (model_name, version, supervision, deployment_mode,
@@ -122,6 +136,8 @@ async def model_status() -> Dict[str, Any]:
             "model_name": MODEL_NAME,
             "deployment_mode": "not_trained",
             "model_family": MODEL_FAMILY,
+            "schema_version": MODEL_SCHEMA_VERSION,
+            "split_strategy": SPLIT_STRATEGY,
             "runtime_compatible": False,
             "production_quality_gate_passed": False,
         }
@@ -129,10 +145,16 @@ async def model_status() -> Dict[str, Any]:
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
     family = metadata.get("model_family")
+    schema_version = int(metadata.get("schema_version") or 0)
+    split_strategy = metadata.get("split_strategy")
+    overlaps = metadata.get("address_overlap_counts") or {}
     runtime_compatible = bool(
         family == MODEL_FAMILY
+        and schema_version == MODEL_SCHEMA_VERSION
+        and split_strategy == SPLIT_STRATEGY
         and metadata.get("supervision") == "independent_external_labels"
         and tuple(metadata.get("features") or ()) == FEATURE_COLUMNS
+        and not any(int(value or 0) for value in overlaps.values())
     )
     return {
         "available": True,
@@ -140,6 +162,11 @@ async def model_status() -> Dict[str, Any]:
         "version": row["version"],
         "model_family": family or "legacy_unknown",
         "expected_model_family": MODEL_FAMILY,
+        "schema_version": schema_version,
+        "expected_schema_version": MODEL_SCHEMA_VERSION,
+        "split_strategy": split_strategy,
+        "expected_split_strategy": SPLIT_STRATEGY,
+        "address_overlap_counts": overlaps,
         "runtime_compatible": runtime_compatible,
         "supervision": row["supervision"],
         "deployment_mode": row["deployment_mode"] if runtime_compatible else "migration_required",
@@ -171,8 +198,8 @@ async def _load_latest_bundle() -> tuple[Dict[str, Any], Dict[str, Any]]:
     metadata = row["metadata"] or {}
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
-    # Check compatibility before unpickling, so a legacy artifact cannot force imports
-    # for a model library that is intentionally absent from the production image.
+    # Validate compatibility before unpickling. This blocks legacy artifacts and
+    # prevents silently serving scores from a weaker train/test split.
     _validate_metadata(metadata)
     return _deserialize(row["artifact"]), dict(row)
 
@@ -190,6 +217,8 @@ async def predict_shadow(row: Dict[str, Any]) -> Dict[str, Any]:
         "model_name": MODEL_NAME,
         "version": registry["version"],
         "model_family": metadata.get("model_family"),
+        "schema_version": metadata.get("schema_version"),
+        "split_strategy": metadata.get("split_strategy"),
         "label": int(probability >= threshold),
         "calibrated_score": probability,
         "threshold": threshold,

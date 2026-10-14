@@ -125,5 +125,4 @@ uvloop==0.22.1
 watchfiles==1.2.0
 web3==6.15.0
 websockets==17.2
-xgboost==2.1.4
 yarl==1.25.1

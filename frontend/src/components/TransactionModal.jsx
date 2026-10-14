@@ -39,6 +39,43 @@ function explanationMeta(tx) {
   return { status: 'none', explanation: '', title: 'Explanation unavailable', trusted: false, badge: null };
 }
 
+function entityRows(tx) {
+  const context = tx?.entity_context || {};
+  const rows = [];
+  for (const [role, items] of [['sender', context.sender], ['recipient', context.recipient]]) {
+    if (!Array.isArray(items)) continue;
+    for (const item of items) rows.push({ role, ...item });
+  }
+  return rows;
+}
+
+function EntityContext({ tx }) {
+  const rows = entityRows(tx);
+  if (!rows.length) return null;
+  return (
+    <section className="rounded-lg border border-violet-400/20 bg-violet-400/[0.04] p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-violet-300">Source-attributed entity context</h3>
+        <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-1 text-[10px] font-medium text-violet-200">exact-address labels</span>
+      </div>
+      <div className="space-y-2">
+        {rows.map((item, index) => (
+          <div key={`${item.role}-${item.source}-${item.entity_id}-${index}`} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded border border-violet-400/25 bg-violet-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-violet-200">{item.role}</span>
+              <span className="text-sm font-medium text-slate-100">{item.entity_name || item.entity_id || 'Source-labelled address'}</span>
+              {item.entity_type && <span className="rounded bg-slate-700/70 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">{item.entity_type}</span>}
+            </div>
+            <div className="mt-2 text-xs text-slate-400">Source: {item.source || 'unknown'}{Number.isFinite(Number(item.confidence)) ? ` • confidence ${Number(item.confidence).toFixed(2)}` : ''}</div>
+            {item.source_url && <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-sky-400 hover:text-sky-300">Open source evidence ↗</a>}
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs leading-5 text-slate-500">These are address-level labels from cited sources. They do not establish beneficial ownership, transaction intent, or wrongdoing. No local match would not prove an address is benign or unattributed elsewhere.</p>
+    </section>
+  );
+}
+
 export default function TransactionModal({ tx, onClose }) {
   useEffect(() => {
     const handleEscape = event => { if (event.key === 'Escape') onClose(); };
@@ -76,7 +113,9 @@ export default function TransactionModal({ tx, onClose }) {
             {explanation.status === 'grounded_ai' && <p className="mt-3 text-xs leading-5 text-slate-500">AI wording is accepted only when it stays inside the stored score/evidence boundary and preserves valid [E#] evidence references. Unsupported claims fall back to deterministic evidence text.</p>}
           </section>
 
-          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && <section className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan-300">Risk evidence trail</h3><div className="space-y-2">{tx.risk_factors.map((factor, index) => <div key={index} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><div className="flex gap-3"><span className="shrink-0 rounded border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 font-mono text-xs text-cyan-300">E{index + 1}</span><div><div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>{factor.source && <div className="mt-1 text-xs text-cyan-400">Source: {factor.source}</div>}</div></div></div>)}</div><p className="mt-3 text-xs text-slate-500">Evidence IDs map explanation claims back to stored scoring signals. Signals are investigation cues, not a determination of wrongdoing.</p></section>}
+          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && <section className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan-300">Risk evidence trail</h3><div className="space-y-2">{tx.risk_factors.map((factor, index) => <div key={index} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><div className="flex gap-3"><span className="shrink-0 rounded border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 font-mono text-xs text-cyan-300">E{index + 1}</span><div><div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>{factor.source && <div className="mt-1 text-xs text-cyan-400">Source: {factor.source}</div>}{factor.source_url && <a href={factor.source_url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-sky-400 hover:text-sky-300">Open cited source ↗</a>}</div></div></div>)}</div><p className="mt-3 text-xs text-slate-500">Evidence IDs map explanation claims back to stored scoring signals. Signals are investigation cues, not a determination of wrongdoing.</p></section>}
+
+          <EntityContext tx={tx} />
 
           <section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Transaction hash</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.hash}</div></section>
           <div className="grid gap-4 md:grid-cols-2"><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">From</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.from_address}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">To</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.to_address}</div></section></div>

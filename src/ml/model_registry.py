@@ -1,20 +1,26 @@
 """Persistent registry for independently supervised ML models.
 
 Railway containers are ephemeral, so production model artifacts and provenance are
-stored in PostgreSQL. Only independently supervised bundles may be registered.
+stored in PostgreSQL. Only independently supervised, feature-compatible model bundles
+may be registered or used for shadow inference.
 """
 from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import joblib
 import numpy as np
 
 from src.database.connection import get_db
-from src.ml.independent_model import FEATURE_COLUMNS, _vector, train_independent_model, load_independent_bundle
+from src.ml.independent_model import (
+    FEATURE_COLUMNS,
+    MODEL_FAMILY,
+    _vector,
+    load_independent_bundle,
+    train_independent_model,
+)
 
 MODEL_NAME = "independent_transaction_risk"
 
@@ -47,26 +53,35 @@ def _serialize(bundle: Dict[str, Any]) -> bytes:
     return stream.getvalue()
 
 
+def _validate_metadata(metadata: Dict[str, Any]) -> None:
+    if metadata.get("supervision") != "independent_external_labels":
+        raise ValueError("Model provenance gate failed")
+    if tuple(metadata.get("features") or ()) != FEATURE_COLUMNS:
+        raise ValueError("Model feature schema mismatch")
+    if metadata.get("model_family") != MODEL_FAMILY:
+        raise ValueError(
+            f"Model runtime family mismatch: expected {MODEL_FAMILY}, got {metadata.get('model_family') or 'legacy'}"
+        )
+
+
 def _deserialize(blob: bytes) -> Dict[str, Any]:
     bundle = joblib.load(io.BytesIO(bytes(blob)))
     if not isinstance(bundle, dict):
         raise ValueError("Invalid model bundle")
     metadata = bundle.get("metadata") or {}
-    if metadata.get("supervision") != "independent_external_labels":
-        raise ValueError("Model provenance gate failed")
-    if tuple(metadata.get("features") or ()) != FEATURE_COLUMNS:
-        raise ValueError("Model feature schema mismatch")
+    _validate_metadata(metadata)
     return bundle
 
 
 async def train_and_register(limit: int = 5000) -> Dict[str, Any]:
-    """Train from external labels, persist artifact + immutable provenance metadata."""
+    """Train from external labels and persist artifact + immutable provenance."""
     db = await get_db()
     await ensure_model_registry_schema(db)
     metadata = await train_independent_model(limit=limit)
+    _validate_metadata(metadata)
     bundle = load_independent_bundle()
     artifact = _serialize(bundle)
-    version = f"{metadata['trained_at']}:{metadata['dataset_fingerprint_sha256'][:12]}"
+    version = f"{metadata['trained_at']}:{metadata['dataset_fingerprint_sha256'][:12]}:{MODEL_FAMILY}"
     await db.execute("""
         INSERT INTO ml_model_registry
           (model_name, version, supervision, deployment_mode,
@@ -106,18 +121,29 @@ async def model_status() -> Dict[str, Any]:
             "available": False,
             "model_name": MODEL_NAME,
             "deployment_mode": "not_trained",
+            "model_family": MODEL_FAMILY,
+            "runtime_compatible": False,
             "production_quality_gate_passed": False,
         }
     metadata = row.get("metadata") or {}
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
+    family = metadata.get("model_family")
+    runtime_compatible = bool(
+        family == MODEL_FAMILY
+        and metadata.get("supervision") == "independent_external_labels"
+        and tuple(metadata.get("features") or ()) == FEATURE_COLUMNS
+    )
     return {
         "available": True,
         "model_name": row["model_name"],
         "version": row["version"],
+        "model_family": family or "legacy_unknown",
+        "expected_model_family": MODEL_FAMILY,
+        "runtime_compatible": runtime_compatible,
         "supervision": row["supervision"],
-        "deployment_mode": row["deployment_mode"],
-        "production_quality_gate_passed": bool(row["quality_gate_passed"]),
+        "deployment_mode": row["deployment_mode"] if runtime_compatible else "migration_required",
+        "production_quality_gate_passed": bool(row["quality_gate_passed"] and runtime_compatible),
         "dataset_rows": metadata.get("dataset_rows"),
         "sample_tier": metadata.get("sample_tier"),
         "test_metrics": metadata.get("test_metrics"),
@@ -141,6 +167,13 @@ async def _load_latest_bundle() -> tuple[Dict[str, Any], Dict[str, Any]]:
     """, MODEL_NAME)
     if not row:
         raise FileNotFoundError("No independently supervised model is registered")
+
+    metadata = row["metadata"] or {}
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+    # Check compatibility before unpickling, so a legacy artifact cannot force imports
+    # for a model library that is intentionally absent from the production image.
+    _validate_metadata(metadata)
     return _deserialize(row["artifact"]), dict(row)
 
 
@@ -156,6 +189,7 @@ async def predict_shadow(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "model_name": MODEL_NAME,
         "version": registry["version"],
+        "model_family": metadata.get("model_family"),
         "label": int(probability >= threshold),
         "calibrated_score": probability,
         "threshold": threshold,

@@ -31,6 +31,8 @@ from src.risk.ofac_intelligence import refresh_ofac
 from src.risk.official_entities import sync_official_entities
 from src.utils.config import get_settings
 
+TARGET_EXTERNAL_BENCHMARK = 500
+
 
 async def _refresh_verified_intelligence(db):
     """Best-effort official-source refresh that never blocks API readiness."""
@@ -41,10 +43,7 @@ async def _refresh_verified_intelligence(db):
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "First-party entity registry refresh unavailable; preserving stored rows: {}",
-            type(exc).__name__,
-        )
+        logger.warning("First-party entity registry refresh unavailable; preserving stored rows: {}", type(exc).__name__)
 
     try:
         count = await asyncio.wait_for(refresh_ofac(db), timeout=45)
@@ -55,14 +54,11 @@ async def _refresh_verified_intelligence(db):
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "Verified OFAC background refresh unavailable; preserving last-known-good snapshot: {}",
-            type(exc).__name__,
-        )
+        logger.warning("Verified OFAC background refresh unavailable; preserving last-known-good snapshot: {}", type(exc).__name__)
 
 
 async def _prepare_ai_and_benchmark(db):
-    """Create additive audit storage and seed an external independent smoke benchmark."""
+    """Create audit storage and grow the independent benchmark toward evaluation scale."""
     try:
         await ensure_ai_audit_schema(db)
     except asyncio.CancelledError:
@@ -72,56 +68,60 @@ async def _prepare_ai_and_benchmark(db):
 
     try:
         summary = await external_benchmark_summary(db)
-        if summary.get("sample_size", 0) < 100:
-            result = await asyncio.wait_for(sync_external_benchmark(db, per_class=100), timeout=45)
+        if summary.get("sample_size", 0) < TARGET_EXTERNAL_BENCHMARK:
+            result = await asyncio.wait_for(sync_external_benchmark(db, per_class=TARGET_EXTERNAL_BENCHMARK // 2), timeout=90)
             logger.info(
-                "External detection benchmark refreshed: {} rows from {}",
-                result.get("rows_fetched", 0),
-                result.get("source"),
+                "External detection benchmark refreshed: {} rows from {} (target={})",
+                result.get("rows_fetched", 0), result.get("source"), TARGET_EXTERNAL_BENCHMARK,
             )
         else:
-            logger.info(
-                "External detection benchmark already present: {} cases",
-                summary.get("sample_size"),
-            )
+            logger.info("External detection benchmark already present: {} cases", summary.get("sample_size"))
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "External benchmark background sync unavailable; API remains operational: {}",
-            type(exc).__name__,
-        )
+        logger.warning("External benchmark background sync unavailable; API remains operational: {}", type(exc).__name__)
 
 
 async def _prepare_independent_ml():
-    """Bootstrap a provenance-gated shadow model without blocking API readiness."""
-    # Benchmark sync is a sibling startup task, so give it a brief head start on a fresh DB.
-    await asyncio.sleep(3)
+    """Train or refresh a provenance-gated shadow model after benchmark growth."""
     try:
+        db = await get_db()
+        # Benchmark sync runs concurrently. Poll briefly for corpus growth without delaying API readiness.
+        benchmark = await external_benchmark_summary(db)
+        for _ in range(10):
+            if benchmark.get("sample_size", 0) >= TARGET_EXTERNAL_BENCHMARK:
+                break
+            await asyncio.sleep(5)
+            benchmark = await external_benchmark_summary(db)
+
         status = await independent_ml_status()
-        if status.get("available"):
+        model_rows = int(status.get("dataset_rows") or 0) if status.get("available") else 0
+        benchmark_rows = int(benchmark.get("sample_size") or 0)
+
+        if status.get("available") and model_rows >= benchmark_rows:
             logger.info(
-                "Independent ML model already registered: mode={} rows={} gate={}",
-                status.get("deployment_mode"),
-                status.get("dataset_rows"),
-                status.get("production_quality_gate_passed"),
+                "Independent ML model current: mode={} rows={} gate={}",
+                status.get("deployment_mode"), model_rows, status.get("production_quality_gate_passed"),
             )
             return
-        metadata = await asyncio.wait_for(train_and_register(limit=5000), timeout=90)
+
+        if benchmark_rows < 100:
+            logger.warning("Independent ML bootstrap deferred: only {} external cases available", benchmark_rows)
+            return
+
+        metadata = await asyncio.wait_for(train_and_register(limit=max(benchmark_rows, 500)), timeout=120)
         logger.info(
-            "Independent ML shadow model registered: rows={} AUC={} F1={} mode={}",
+            "Independent ML model registered/refreshed: rows={} AUC={} F1={} mode={} gate={}",
             metadata.get("dataset_rows"),
             (metadata.get("test_metrics") or {}).get("roc_auc"),
             (metadata.get("test_metrics") or {}).get("f1"),
             metadata.get("deployment_mode"),
+            metadata.get("production_quality_gate_passed"),
         )
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "Independent ML bootstrap unavailable; production rule scoring remains unchanged: {}",
-            type(exc).__name__,
-        )
+        logger.warning("Independent ML bootstrap unavailable; production rule scoring remains unchanged: {}", type(exc).__name__)
 
 
 @asynccontextmanager
@@ -155,7 +155,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.4.0",
+    version="1.5.0",
     lifespan=lifespan,
 )
 
@@ -206,7 +206,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.4.0",
+        version="1.5.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

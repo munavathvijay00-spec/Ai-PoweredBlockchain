@@ -21,6 +21,7 @@ from src.metrics import historical_provider_requests_total
 from src.storage_budget import (
     HISTORY_MAX_ROWS_GLOBAL,
     HISTORY_MAX_ROWS_PER_WALLET,
+    HISTORY_MAX_WALLETS,
     prune_historical_evidence,
 )
 from src.utils.config import get_settings
@@ -258,11 +259,23 @@ async def sync_wallet_history(
     )
 
     pruning = await prune_historical_evidence(repo.db, wallet)
-    pruned = pruning["wallet_deleted"] + pruning["global_deleted"]
-    if pruned:
+    pruned = pruning["wallet_deleted"] + pruning["evicted_rows"]
+    if pruning["wallet_deleted"]:
         outgoing_complete = False
         incoming_complete = False
     bounds = await _wallet_bounds(repo, wallet)
+
+    current_sync = await repo.db.fetchrow(
+        """
+        SELECT outgoing_complete, incoming_complete
+        FROM wallet_history_sync
+        WHERE chain_id=1 AND wallet_address=$1 AND provider='alchemy_getAssetTransfers'
+        """,
+        wallet,
+    )
+    if current_sync:
+        outgoing_complete = bool(current_sync.get("outgoing_complete"))
+        incoming_complete = bool(current_sync.get("incoming_complete"))
 
     await repo.db.execute(
         """
@@ -292,13 +305,15 @@ async def sync_wallet_history(
         "historical_complete_for_selected_categories": outgoing_complete and incoming_complete,
         "categories": categories,
         "cache_pruned_this_request": pruned,
+        "cache_evicted_wallets_this_request": pruning["evicted_wallets"],
         "cache_policy": {
             "max_rows_per_wallet": HISTORY_MAX_ROWS_PER_WALLET,
+            "max_wallets": HISTORY_MAX_WALLETS,
             "max_rows_global": HISTORY_MAX_ROWS_GLOBAL,
             "raw_provider_payloads_stored": False,
             "refetchable": True,
         },
-        "warning": "Provider history is deeper than the local cache. Completeness applies only while selected-category pagination is complete and no cache rows were evicted; this is not full EVM execution tracing.",
+        "warning": "Provider history is deeper than the local cache. Completeness applies only while selected-category pagination is complete and no rows for this wallet were evicted; this is not full EVM execution tracing.",
     }
 
 
@@ -346,6 +361,7 @@ async def cached_wallet_history(
         ),
         "cache_policy": {
             "max_rows_per_wallet": HISTORY_MAX_ROWS_PER_WALLET,
+            "max_wallets": HISTORY_MAX_WALLETS,
             "max_rows_global": HISTORY_MAX_ROWS_GLOBAL,
             "raw_provider_payloads_stored": False,
             "refetchable": True,

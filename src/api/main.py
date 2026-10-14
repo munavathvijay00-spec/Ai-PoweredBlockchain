@@ -2,8 +2,11 @@
 import asyncio
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from prometheus_client import generate_latest, REGISTRY
 
@@ -32,6 +35,7 @@ from src.risk.official_entities import sync_official_entities
 from src.utils.config import get_settings
 
 TARGET_EXTERNAL_BENCHMARK = 500
+FRONTEND_DIST = Path("/app/frontend_dist")
 
 
 async def _refresh_verified_intelligence(db):
@@ -234,3 +238,10 @@ async def metrics():
         content=generate_latest(REGISTRY),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
+
+
+if FRONTEND_DIST.exists():
+    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="chainscope_frontend")
+    logger.info("Bundled ChainScope frontend mounted at /app")
+else:
+    logger.warning("Bundled ChainScope frontend not found; API-only mode")

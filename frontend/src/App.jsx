@@ -70,7 +70,7 @@ function SystemCoverage({ coverage }) {
   const cards = [
     ['Indexer', health.status || 'unknown', `Checkpoint updated ${ageLabel(health.checkpoint_age_seconds)}`],
     ['Checkpoint block', health.checkpoint_block ? Number(health.checkpoint_block).toLocaleString() : '—', checkpoint.status === 'checkpoint_hash_recorded' ? 'Canonical hash recorded' : 'Canonical hash not verified'],
-    ['Retained records', Number(native.stored_transactions || 0).toLocaleString(), `Rolling ${readiness.retention_window_minutes || 30} minute native window`],
+    ['Retained records', Number(native.stored_transactions || 0).toLocaleString(), `Rolling ${readiness.retention_window_minutes || 5} minute native window`],
     ['Detection quality', detectionValue, detection.status === 'evaluated' ? 'Independent holdout evaluation' : 'Independent labels required before accuracy claims'],
   ];
 

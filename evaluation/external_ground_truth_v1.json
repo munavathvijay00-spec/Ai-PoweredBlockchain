@@ -1,0 +1,48 @@
+{
+  "dataset_id": "external-ground-truth-v1",
+  "created_at": "2026-10-14",
+  "chain": "ethereum-mainnet",
+  "label_semantics": {
+    "1": "transfer involves an address independently attributed by an authoritative external source to a named malicious theft/laundering campaign",
+    "0": "transfer is independently adjudicated as a negative control with explicit external provenance",
+    "unscored": "no independent ground-truth match; must not be silently treated as negative"
+  },
+  "sources": [
+    {
+      "source_id": "fbi-stake-2023",
+      "publisher": "Federal Bureau of Investigation",
+      "title": "FBI Identifies Lazarus Group Cyber Actors as Responsible for Theft of $41 Million from Stake.com",
+      "published_date": "2023-09-06",
+      "url": "https://www.fbi.gov/news/press-releases/fbi-identifies-lazarus-group-cyber-actors-as-responsible-for-theft-of-41-million-from-stakecom",
+      "source_type": "law_enforcement_attribution"
+    },
+    {
+      "source_id": "fbi-harmony-2023",
+      "publisher": "Federal Bureau of Investigation",
+      "title": "FBI Confirms Lazarus Group Cyber Actors Responsible for Harmony's Horizon Bridge Currency Theft",
+      "published_date": "2023-01-23",
+      "url": "https://www.fbi.gov/news/press-releases/fbi-confirms-lazarus-group-cyber-actors-responsible-for-harmonys-horizon-bridge-currency-theft",
+      "source_type": "law_enforcement_attribution"
+    }
+  ],
+  "address_labels": [
+    {"address":"0x94f1b9b64e2932f6a2db338f616844400cd58e8a","label":1,"incident":"stake-com-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-stake-2023","confidence":"high"},
+    {"address":"0xba36735021a9ccd7582ebc7f70164794154ff30e","label":1,"incident":"stake-com-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-stake-2023","confidence":"high"},
+    {"address":"0xbda83686c90314cfbaaeb18db46723d83fdf0c83","label":1,"incident":"stake-com-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-stake-2023","confidence":"high"},
+    {"address":"0x7d84d78bb9b6044a45fa08b7fe109f2c8648ab4e","label":1,"incident":"stake-com-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-stake-2023","confidence":"high"},
+    {"address":"0xb231759890157ca3bd7d664b9795796660374752","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"},
+    {"address":"0x89f89d61644c6e606efb25a01210159f102fbd8b","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"},
+    {"address":"0x8bab0b7962fb7537e7766175f211d8e4f7afa834","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"},
+    {"address":"0x4fd7d95f721dac5b01daf306fa686b1f8c4dd66a","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"},
+    {"address":"0x20dbccd46eef96a1b78383cf0d26bb575ec00201","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"},
+    {"address":"0x40efc580e5cb5701797a762990d9e690108dadfd","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"},
+    {"address":"0x8a0858888beeb5d1435ecd3657831699f169c3f4","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"},
+    {"address":"0x5238ccab659ab626daf0c80910c69ee96632f975","label":1,"incident":"harmony-horizon-bridge-theft","attribution":"Lazarus Group / DPRK","source_id":"fbi-harmony-2023","confidence":"high"}
+  ],
+  "readiness": {
+    "positive_seed_complete": true,
+    "negative_controls_complete": false,
+    "publish_precision_recall_f1": false,
+    "reason": "High-confidence positive seed exists, but independently adjudicated negative controls are not yet populated."
+  }
+}

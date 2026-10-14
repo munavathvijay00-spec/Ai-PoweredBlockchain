@@ -59,6 +59,20 @@ async def test_bounded_cleanup_checks_references():
 
 
 @pytest.mark.asyncio
+async def test_free_tier_five_minute_cleanup_is_valid():
+    db = FakeDB(references=("transactions", "alerts"))
+    assert await prune_addresses(db, enabled=True, batch_size=500, minutes=5) == 3
+    sql = next(q for q in db.queries if "DELETE FROM addresses" in q)
+    assert "INTERVAL '1 minute'" in sql
+
+
+@pytest.mark.asyncio
 async def test_rejects_invalid_batch():
     with pytest.raises(ValueError):
         await prune_addresses(FakeDB(), enabled=True, batch_size=1001)
+
+
+@pytest.mark.asyncio
+async def test_rejects_zero_minute_retention():
+    with pytest.raises(ValueError):
+        await prune_addresses(FakeDB(), enabled=True, minutes=0)

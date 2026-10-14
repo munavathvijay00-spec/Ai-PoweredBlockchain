@@ -88,7 +88,7 @@ async def structured_explain_with_audit(tx: dict[str, Any], factors: list[dict[s
             if provider == "ollama":
                 raw = await explainer._call_ollama(prompt)
             elif provider == "groq":
-                raw = await explainer._call_groq(prompt)
+                raw = await explainer._call_groq(prompt, json_mode=True)
             else:
                 return {**base, "status": "provider_not_configured"}
     except Exception as exc:

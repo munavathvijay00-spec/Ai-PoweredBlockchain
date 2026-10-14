@@ -11,6 +11,7 @@ import re
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from src.agents.ai_audit import record_ai_run
+from src.agents.evidence_contract import build_evidence_contract
 from src.agents.explainer import get_explainer, evidence_explanation
 from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
@@ -76,6 +77,7 @@ async def explain_transaction(
         "block_number": row["block_number"],
         "risk_score": row.get("risk_score", 0),
     }
+    evidence_contract = build_evidence_contract(tx, factors)
     baseline = evidence_explanation(tx, factors)
     audit = await get_explainer().explain_with_audit(tx, factors)
     provider = str(audit.get("provider") or "disabled")
@@ -112,10 +114,11 @@ async def explain_transaction(
         "model": audit.get("model") if grounded_ai else None,
         "explanation": result,
         "citations": _citations(row["hash"], factors),
+        "evidence_contract": evidence_contract,
         "grounded": True,
         "ai_used": grounded_ai,
         "latency_ms": audit.get("latency_ms"),
         "grounding_report": audit.get("grounding_report"),
-        "source_of_truth": "stored transaction facts + stored risk factors",
+        "source_of_truth": "structured evidence contract from stored transaction facts + stored risk factors",
         "warning": warning,
     }

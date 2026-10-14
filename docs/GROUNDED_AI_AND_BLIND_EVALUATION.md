@@ -11,15 +11,22 @@ These are separate measurements. A grounded LLM can still explain a poor detecto
 
 The LLM is not a data source. It receives a structured evidence contract containing transaction facts and enumerated evidence items (`E1`, `E2`, ...).
 
-Every generated factual claim must contain one or more evidence IDs. Unknown evidence IDs, uncited claims, missing uncertainty language, or claims produced when no source evidence exists are rejected. Rejected or unavailable model output must fall back to the deterministic evidence explanation.
+The live explanation path is now:
 
-The production path should therefore be:
+`verified chain data -> detector/risk evidence -> evidence contract -> LLM structured JSON claims -> validator -> rendered explanation`
 
-`verified chain data -> detector/risk evidence -> evidence contract -> LLM structured claims -> validator -> rendered explanation`
+The model must return a JSON object containing a summary, evidence-cited claims, and uncertainty language. The validator checks:
 
-Not:
+- valid structured JSON;
+- every factual claim has one or more known evidence IDs;
+- sensitive claims such as mixer, sanctions, scam, hack, theft, laundering, exchange or bridge usage are explicitly supported by the cited evidence;
+- numeric claims already exist in transaction facts or cited evidence;
+- explicit certainty/overclaim language is rejected;
+- generated claims are withheld when evidence is absent.
 
-`transaction -> LLM -> plausible explanation`
+Only a payload that survives validation is rendered to the investigator. Any parse error, unknown citation, uncited claim, unsupported sensitive assertion, invented number, provider failure, or overclaim falls back to the deterministic evidence explanation.
+
+This means a citation ID alone is not sufficient. A statement such as "this wallet used a mixer [E1]" is rejected when E1 only describes a rapid onward transfer.
 
 The model must never independently infer wallet identity, criminal intent, sanctions status, mixer use, exchange ownership, theft, laundering, or scam status unless that fact is already represented by verified evidence supplied to the contract.
 
@@ -92,5 +99,7 @@ ChainScope should not claim production-grade AI intelligence until all of these 
 - a blind independent holdout exists and is versioned;
 - reported detector metrics come from that holdout rather than synthetic or self-labelled examples;
 - failures and abstentions are visible rather than silently converted into confident conclusions.
+
+The structured grounding path now satisfies the architectural requirement that AI cannot become an independent source of blockchain facts. The remaining evidence-quality milestone is to populate and adjudicate a genuinely independent holdout and publish measured results from it.
 
 This standard is intentionally stricter than a hackathon demo. It is what turns the AI layer from presentation text into an auditable blockchain-intelligence component.

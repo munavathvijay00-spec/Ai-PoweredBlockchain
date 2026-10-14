@@ -18,9 +18,9 @@ class AddressRepository:
     async def get_or_create(self, address: str) -> int:
         """Get address ID, creating if not exists."""
         query = """
-            INSERT INTO addresses (address) 
-            VALUES ($1) 
-            ON CONFLICT (address) DO UPDATE 
+            INSERT INTO addresses (address)
+            VALUES ($1)
+            ON CONFLICT (address) DO UPDATE
             SET last_seen = CURRENT_TIMESTAMP
             RETURNING id
         """
@@ -29,9 +29,9 @@ class AddressRepository:
     async def get_by_address(self, address: str) -> Optional[Dict]:
         """Fetch address by string value."""
         query = """
-            SELECT id, address, first_seen, last_seen, 
+            SELECT id, address, first_seen, last_seen,
                    label, is_blacklisted, risk_score
-            FROM addresses 
+            FROM addresses
             WHERE address = $1
         """
         return await self.db.fetchrow(query, address.lower())
@@ -52,20 +52,60 @@ class AddressRepository:
         )
         return {row['address'].lower() for row in rows}
 
-    async def get_verified_matches(self, addresses: list) -> dict:
-        """Source-attributed sanctions matches for transaction risk evidence."""
+    async def get_entity_matches(self, addresses: list) -> dict:
+        """Return all current source-attributed exact-address matches, grouped by address."""
         if not addresses:
             return {}
+        normalized = sorted({str(a).lower() for a in addresses if a})
+        try:
+            rows = await self.db.fetch("""
+                SELECT address, source, entity_id, entity_name, entity_type,
+                       confidence, attribution_scope, source_url, evidence,
+                       verified_at, expires_at
+                FROM entity_attributions
+                WHERE chain_id=1
+                  AND address = ANY($1::text[])
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY address, confidence DESC, verified_at DESC
+            """, normalized)
+            grouped = {}
+            for row in rows:
+                item = dict(row)
+                address = str(item["address"]).lower()
+                grouped.setdefault(address, []).append(item)
+            return grouped
+        except Exception as exc:
+            logger.warning(f'Source-attributed entity evidence unavailable: {exc}')
+
+        # Backward-compatible sanctions-only fallback for a partially migrated DB.
         try:
             rows = await self.db.fetch("""
                 SELECT address, source, entity_id, entity_name, checked_at
                 FROM verified_address_intelligence
                 WHERE address = ANY($1::text[])
-            """, [a.lower() for a in addresses])
+            """, normalized)
         except Exception as exc:
-            logger.warning(f'Verified intelligence evidence unavailable: {exc}')
+            logger.warning(f'Legacy verified intelligence evidence unavailable: {exc}')
             return {}
-        return {r["address"]: dict(r) for r in rows}
+
+        grouped = {}
+        for row in rows:
+            item = dict(row)
+            item.update({
+                "entity_type": "sanctions",
+                "confidence": 1.0,
+                "attribution_scope": "address",
+                "source_url": None,
+                "evidence": {},
+                "verified_at": item.get("checked_at"),
+                "expires_at": None,
+            })
+            grouped.setdefault(str(item["address"]).lower(), []).append(item)
+        return grouped
+
+    async def get_verified_matches(self, addresses: list) -> dict:
+        """Compatibility alias for callers upgraded from sanctions-only intelligence."""
+        return await self.get_entity_matches(addresses)
 
     async def bulk_get_or_create_addresses(self, addresses: list) -> dict:
         """
@@ -74,9 +114,9 @@ class AddressRepository:
         """
         if not addresses:
             return {}
-        
+
         addresses = [a.lower() for a in addresses]
-        
+
         query = """
             WITH input_addresses(address) AS (
                 SELECT unnest($1::text[])
@@ -89,7 +129,7 @@ class AddressRepository:
             )
             SELECT address, id FROM inserted
             UNION
-            SELECT a.address, a.id 
+            SELECT a.address, a.id
             FROM addresses a
             WHERE a.address = ANY($1::text[])
         """
@@ -124,11 +164,11 @@ class TransactionRepository:
         to_id = await self.addresses.get_or_create(tx['to_address'])
 
         query = """
-            INSERT INTO transactions 
-            (hash, from_address_id, to_address_id, value, 
+            INSERT INTO transactions
+            (hash, from_address_id, to_address_id, value,
              block_number, timestamp, status, risk_score)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (hash) DO UPDATE 
+            ON CONFLICT (hash) DO UPDATE
             SET risk_score = EXCLUDED.risk_score
             RETURNING id
         """
@@ -171,9 +211,6 @@ class TransactionRepository:
         if not hashes:
             return 0
 
-        # A hash already indexed at a different height or with different
-        # native transfer facts must not be treated as an idempotent retry.
-        # The ingestion loop's atomic transaction will roll back on conflict.
         existing = await self.db.fetch("""
             SELECT t.hash, t.block_number, t.from_address_id, t.to_address_id,
                    t.value
@@ -205,7 +242,7 @@ class TransactionRepository:
                 )
 
         query = """
-            INSERT INTO transactions 
+            INSERT INTO transactions
             (hash, from_address_id, to_address_id, value, gas_price, gas_used,
              block_number, timestamp, status, risk_score)
             SELECT * FROM unnest(
@@ -220,8 +257,6 @@ class TransactionRepository:
             hashes, from_ids, to_ids, values, gas_prices, gas_useds,
             block_numbers, timestamps, statuses, risk_scores,
         )
-        # asyncpg returns e.g. "INSERT 0 5"; ON CONFLICT DO NOTHING
-        # can insert fewer rows than submitted.
         try:
             inserted = int(result.rsplit(' ', 1)[-1])
         except (AttributeError, ValueError) as exc:
@@ -276,7 +311,7 @@ class TransactionRepository:
     async def get_by_hash(self, tx_hash: str) -> Optional[Dict]:
         """Fetch a transaction by its hash."""
         query = """
-            SELECT 
+            SELECT
                 t.hash,
                 a_from.address AS from_address,
                 a_to.address AS to_address,
@@ -290,13 +325,14 @@ class TransactionRepository:
         return await self.db.fetchrow(query, tx_hash)
 
     async def list_recent(self, limit: int = 10, offset: int = 0) -> List[Dict]:
-        """List recent transactions."""
+        """List recent transactions with the same evidence contract as detail/flagged views."""
         query = """
-            SELECT 
+            SELECT
                 t.hash,
                 a_from.address AS from_address,
                 a_to.address AS to_address,
-                t.value, t.block_number, t.timestamp, t.risk_score
+                t.value, t.block_number, t.timestamp, t.risk_score,
+                t.risk_factors, t.ai_explanation
             FROM transactions t
             JOIN addresses a_from ON t.from_address_id = a_from.id
             JOIN addresses a_to ON t.to_address_id = a_to.id
@@ -308,7 +344,7 @@ class TransactionRepository:
     async def list_all(self, limit: int = 1000) -> List[Dict]:
         """Fetch all transactions for batch risk scoring."""
         query = """
-            SELECT 
+            SELECT
                 t.hash,
                 a_from.address AS from_address,
                 a_to.address AS to_address,
@@ -324,7 +360,7 @@ class TransactionRepository:
     async def list_flagged(self, min_score: int = 20, limit: int = 100) -> List[Dict]:
         """Fetch flagged transactions."""
         query = """
-            SELECT 
+            SELECT
                 t.hash,
                 a_from.address AS from_address,
                 a_to.address AS to_address,
@@ -352,7 +388,7 @@ class TransactionRepository:
     async def update_risk(self, tx_hash: str, score: int, factors: list) -> None:
         """Update risk score and factors for a transaction."""
         query = """
-            UPDATE transactions 
+            UPDATE transactions
             SET risk_score = $1, risk_factors = $2::jsonb
             WHERE hash = $3
         """
@@ -361,7 +397,7 @@ class TransactionRepository:
     async def update_explanation(self, tx_hash: str, explanation: str) -> None:
         """Update AI-generated explanation for a transaction."""
         query = """
-            UPDATE transactions 
+            UPDATE transactions
             SET ai_explanation = $1
             WHERE hash = $2
         """

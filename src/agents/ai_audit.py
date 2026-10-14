@@ -22,7 +22,6 @@ def _configured_secret(value: object) -> bool:
 
 
 def provider_configuration() -> Dict[str, Any]:
-    """Return non-secret provider configuration and whether a real model can be attempted."""
     settings = get_settings()
     provider = str(settings.llm_provider or "disabled").strip().lower()
     if provider == "groq":
@@ -31,8 +30,6 @@ def provider_configuration() -> Dict[str, Any]:
         reason = "configured" if configured else "missing_groq_api_key_or_model"
     elif provider == "ollama":
         model = str(settings.llm_model or "").strip() or None
-        # A URL means the provider is configured, but runtime success is proven only
-        # by an accepted grounded run. localhost on a hosted service often has no model.
         configured = bool(str(settings.ollama_url or "").strip()) and bool(model)
         reason = "configured_unverified" if configured else "missing_ollama_configuration"
     else:
@@ -49,7 +46,6 @@ def provider_configuration() -> Dict[str, Any]:
 
 
 async def ensure_ai_audit_schema(db) -> None:
-    """Create the additive audit table if the deployment has not applied the SQL migration yet."""
     await db.execute(
         """
         CREATE TABLE IF NOT EXISTS ai_explanation_runs (
@@ -84,7 +80,6 @@ async def ensure_ai_audit_schema(db) -> None:
 
 
 async def record_ai_run(db, *, tx_hash: str, baseline: str, audit: Dict[str, Any]) -> None:
-    """Persist one attempt without storing credentials or prompt secrets."""
     await ensure_ai_audit_schema(db)
     baseline_hash = hashlib.sha256((baseline or "").encode("utf-8")).hexdigest()
     report = audit.get("grounding_report") or {}
@@ -116,12 +111,6 @@ async def ai_quality_summary(
     provider: str | None = None,
     model: str | None = None,
 ) -> Dict[str, Any]:
-    """Summarize observed grounding quality, optionally for one exact provider/model.
-
-    Readiness checks pass the currently configured provider/model so a successful
-    historical run from a different model cannot make a new configuration look
-    runtime-verified.
-    """
     await ensure_ai_audit_schema(db)
     where = ""
     args = []
@@ -137,7 +126,8 @@ async def ai_quality_summary(
         SELECT
             COUNT(*) AS total_runs,
             COUNT(*) FILTER (WHERE ai_used AND grounded) AS grounded_ai_runs,
-            COUNT(*) FILTER (WHERE status = 'grounding_rejected') AS grounding_rejections,
+            COUNT(*) FILTER (WHERE status IN ('grounding_rejected','structured_parse_rejected')) AS grounding_rejections,
+            COUNT(*) FILTER (WHERE status = 'structured_parse_rejected') AS structured_parse_rejections,
             COUNT(*) FILTER (WHERE status = 'provider_no_output') AS provider_no_output,
             COUNT(*) FILTER (WHERE status = 'provider_not_configured') AS provider_not_configured,
             COUNT(*) FILTER (WHERE status = 'abstained_no_evidence') AS abstained_no_evidence,
@@ -150,14 +140,17 @@ async def ai_quality_summary(
     )
     total = int(row["total_runs"] or 0)
     grounded = int(row["grounded_ai_runs"] or 0)
-    attempted_model_runs = grounded + int(row["grounding_rejections"] or 0) + int(row["provider_no_output"] or 0)
+    rejected = int(row["grounding_rejections"] or 0)
+    failed = int(row["provider_no_output"] or 0)
+    attempted_model_runs = grounded + rejected + failed
     return {
         "provider_filter": provider,
         "model_filter": model,
         "total_runs": total,
         "grounded_ai_runs": grounded,
-        "grounding_rejections": int(row["grounding_rejections"] or 0),
-        "provider_no_output": int(row["provider_no_output"] or 0),
+        "grounding_rejections": rejected,
+        "structured_parse_rejections": int(row["structured_parse_rejections"] or 0),
+        "provider_no_output": failed,
         "provider_not_configured": int(row["provider_not_configured"] or 0),
         "abstained_no_evidence": int(row["abstained_no_evidence"] or 0),
         "model_attempts": attempted_model_runs,

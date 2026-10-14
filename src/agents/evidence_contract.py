@@ -68,19 +68,63 @@ def contract_prompt_payload(contract: dict[str, Any]) -> str:
     return json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def _extract_balanced_json_object(text: str) -> str | None:
+    """Return the first balanced JSON object outside quoted-string braces."""
+    start = -1
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                return text[start:index + 1]
+    return None
+
+
 def parse_json_object(raw: str) -> dict[str, Any] | None:
-    """Parse a provider response while tolerating fenced JSON and surrounding whitespace."""
+    """Parse one provider JSON object without trusting surrounding model prose.
+
+    Providers sometimes wrap valid JSON in markdown fences or a short preamble even when
+    explicitly instructed not to. ChainScope may extract that object, but the extracted
+    payload still has to pass the normal evidence-grounding validator before any AI text
+    is accepted.
+    """
     if not isinstance(raw, str) or not raw.strip():
         return None
     text = raw.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text)
-    try:
-        value = json.loads(text)
-        return value if isinstance(value, dict) else None
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
+
+    candidates = [text]
+    extracted = _extract_balanced_json_object(text)
+    if extracted and extracted != text:
+        candidates.append(extracted)
+
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+            if isinstance(value, dict):
+                return value
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return None
 
 
 def _support_text(contract: dict[str, Any], refs: set[str]) -> str:

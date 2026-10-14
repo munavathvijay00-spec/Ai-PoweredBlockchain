@@ -7,7 +7,6 @@ import csv
 import io
 import re
 import urllib.request
-from datetime import datetime, timezone
 from loguru import logger
 
 OFAC_SDN_CSV = "https://www.treasury.gov/ofac/downloads/sdn.csv"
@@ -28,7 +27,6 @@ def parse_ofac_eth_csv(content: bytes) -> dict:
         if len(row) < 12:
             continue
         seen += 1
-        # OFAC legacy SDN CSV: col 0 ent_num, col 1 SDN_Name, col 11 remarks.
         entity_id, name, remarks = row[0].strip(), row[1].strip(), row[11]
         if not entity_id.isdigit():
             continue
@@ -68,7 +66,7 @@ async def ensure_intelligence_schema(db):
 
 
 async def sync_ofac(db, payload: bytes):
-    """Atomically replace only this source's matches; never modify manual blacklist."""
+    """Atomically replace this source while preserving the last-known-good snapshot."""
     matches = parse_ofac_eth_csv(payload)
     async with db.acquire() as conn:
         async with conn.transaction():
@@ -85,12 +83,9 @@ async def sync_ofac(db, payload: bytes):
             previous_count = await conn.fetchval(
                 "SELECT COUNT(*) FROM verified_address_intelligence WHERE source = $1", SOURCE
             )
-            # Reject a sudden large drop: a partially downloaded CSV can be valid CSV.
-            # Keep the last known-good sanctions snapshot until reviewed.
             if previous_count >= 10 and len(matches) < previous_count // 2:
                 raise ValueError(
-                    f"OFAC feed unexpectedly shrank from {previous_count} to "
-                    f"{len(matches)} ETH addresses; preserving existing snapshot"
+                    f"OFAC feed unexpectedly shrank from {previous_count} to {len(matches)} ETH addresses; preserving existing snapshot"
                 )
             await conn.execute("DELETE FROM verified_address_intelligence WHERE source = $1", SOURCE)
             await conn.executemany("""
@@ -98,6 +93,32 @@ async def sync_ofac(db, payload: bytes):
                     (source, address, entity_id, entity_name, checked_at)
                 VALUES ($1, $2, $3, $4, NOW())
             """, [(SOURCE, address, entity_id, name) for address, (entity_id, name) in matches.items()])
+
+            # If intelligence-v2 is installed, mirror the exact same verified rows
+            # into the generic attribution store with explicit provenance. Absence
+            # of that additive table must not break sanctions refresh.
+            has_v2 = await conn.fetchval("SELECT to_regclass('entity_attributions') IS NOT NULL")
+            if has_v2:
+                await conn.execute(
+                    "DELETE FROM entity_attributions WHERE chain_id=1 AND source=$1",
+                    SOURCE,
+                )
+                await conn.executemany("""
+                    INSERT INTO entity_attributions (
+                        chain_id,address,source,entity_id,entity_name,entity_type,
+                        confidence,attribution_scope,source_url,evidence,verified_at
+                    ) VALUES (1,$1,$2,$3,$4,'sanctions',1.0,'address',$5,$6::jsonb,NOW())
+                """, [
+                    (
+                        address,
+                        SOURCE,
+                        entity_id,
+                        name,
+                        OFAC_SDN_CSV,
+                        '{"method":"explicit ETH-tagged address in official OFAC SDN CSV"}',
+                    )
+                    for address, (entity_id, name) in matches.items()
+                ])
     logger.info(f"Verified intelligence: synced {len(matches)} OFAC Ethereum addresses")
     return len(matches)
 

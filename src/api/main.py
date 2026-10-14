@@ -20,10 +20,12 @@ from src.api.ai_routes import router as ai_router
 from src.api.historical_routes import router as historical_router
 from src.api.entity_routes import router as entity_router
 from src.api.evaluation_routes import router as evaluation_router
+from src.api.ml_routes import router as ml_router
 from src.api.models import HealthResponse
 from src.agents.ai_audit import ensure_ai_audit_schema
 from src.database.connection import get_db, close_db
 from src.metrics import api_requests_total, api_request_duration_seconds, db_health_up
+from src.ml.model_registry import model_status as independent_ml_status, train_and_register
 from src.risk.external_benchmark import external_benchmark_summary, sync_external_benchmark
 from src.risk.ofac_intelligence import refresh_ofac
 from src.risk.official_entities import sync_official_entities
@@ -91,6 +93,37 @@ async def _prepare_ai_and_benchmark(db):
         )
 
 
+async def _prepare_independent_ml():
+    """Bootstrap a provenance-gated shadow model without blocking API readiness."""
+    # Benchmark sync is a sibling startup task, so give it a brief head start on a fresh DB.
+    await asyncio.sleep(3)
+    try:
+        status = await independent_ml_status()
+        if status.get("available"):
+            logger.info(
+                "Independent ML model already registered: mode={} rows={} gate={}",
+                status.get("deployment_mode"),
+                status.get("dataset_rows"),
+                status.get("production_quality_gate_passed"),
+            )
+            return
+        metadata = await asyncio.wait_for(train_and_register(limit=5000), timeout=90)
+        logger.info(
+            "Independent ML shadow model registered: rows={} AUC={} F1={} mode={}",
+            metadata.get("dataset_rows"),
+            (metadata.get("test_metrics") or {}).get("roc_auc"),
+            (metadata.get("test_metrics") or {}).get("f1"),
+            metadata.get("deployment_mode"),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Independent ML bootstrap unavailable; production rule scoring remains unchanged: {}",
+            type(exc).__name__,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Blockchain Intelligence API")
@@ -99,6 +132,7 @@ async def lifespan(app: FastAPI):
     background_tasks = [
         asyncio.create_task(_refresh_verified_intelligence(db)),
         asyncio.create_task(_prepare_ai_and_benchmark(db)),
+        asyncio.create_task(_prepare_independent_ml()),
     ]
     logger.success("API ready")
     try:
@@ -121,7 +155,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.3.0",
+    version="1.4.0",
     lifespan=lifespan,
 )
 
@@ -163,6 +197,7 @@ app.include_router(ai_router)
 app.include_router(historical_router)
 app.include_router(entity_router)
 app.include_router(evaluation_router)
+app.include_router(ml_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])
@@ -171,7 +206,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.3.0",
+        version="1.4.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

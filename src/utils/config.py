@@ -24,9 +24,13 @@ class Settings(BaseSettings):
     # AI
     openai_api_key: str = "not-set"
     llm_provider: str = "ollama"
+    # LLM_MODEL remains the local/Ollama model for backward compatibility.
     llm_model: str = "llama3.2:1b"
     ollama_url: str = "http://localhost:11434"
     groq_api_key: str = "not-set"
+    # Keep hosted-provider model selection independent from the local Ollama name.
+    # This model is a current Groq production model as of the 2026 project build.
+    groq_model: str = "openai/gpt-oss-20b"
 
     # API
     api_key: str
@@ -61,6 +65,7 @@ if __name__ == "__main__":
     print(f"   Database: {settings.postgres_db}")
     print(f"   API Port: {settings.api_port}")
     print(f"   LLM Provider: {settings.llm_provider}")
-    print(f"   LLM Model: {settings.llm_model}")
+    print(f"   Local LLM Model: {settings.llm_model}")
+    print(f"   Groq Model: {settings.groq_model}")
     print(f"   Ollama URL: {settings.ollama_url}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

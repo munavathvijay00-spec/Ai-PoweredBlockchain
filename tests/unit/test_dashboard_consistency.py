@@ -26,6 +26,7 @@ async def test_stats_exposes_exact_thresholds_used_by_sql():
         "critical": 1,
         "explained": 10,
         "grounded_explanations": 8,
+        "ai_generated_explanations": 3,
     }
 
     result = await get_stats(tx_repo=tx_repo, addr_repo=addr_repo)
@@ -37,9 +38,11 @@ async def test_stats_exposes_exact_thresholds_used_by_sql():
     assert result.critical_transactions == 1
     assert result.critical_threshold == CRITICAL_THRESHOLD == 80
     assert result.grounded_explanations == 8
+    assert result.ai_generated_explanations == 3
 
     sql, flagged, high, critical = tx_repo.db.fetchrow.await_args.args
     assert "risk_score >= $1" in sql
+    assert "Grounded AI explanation:%" in sql
     assert (flagged, high, critical) == (20, 40, 80)
 
 

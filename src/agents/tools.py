@@ -4,7 +4,7 @@ These helpers keep facts grounded in Ethereum RPC or retained database evidence.
 must not invent labels, intent, ownership, or historical coverage that is not returned by
 these tools.
 """
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -75,7 +75,7 @@ class AgentTools:
         return dict(row) if row else None
 
     async def get_address_profile(self, address: str) -> Dict:
-        """Bounded retained-window profile plus current ETH balance."""
+        """Bounded retained-window profile plus best-effort current ETH balance."""
         normalized = address.lower()
         db = await get_db()
         row = await db.fetchrow("""
@@ -94,11 +94,18 @@ class AgentTools:
             JOIN addresses at ON at.id=t.to_address_id
             WHERE af.address=$1 OR at.address=$1
         """, normalized)
-        balance = await self.get_eth_balance(normalized)
+        balance = None
+        balance_status = "unavailable"
+        try:
+            balance = await self.get_eth_balance(normalized)
+            balance_status = "live_rpc"
+        except Exception:
+            pass
         entity_matches = await self.get_entity_matches([normalized])
         return {
             "address": normalized,
             "balance_eth": balance,
+            "balance_status": balance_status,
             "outgoing_count": int(row["outgoing_count"] or 0),
             "incoming_count": int(row["incoming_count"] or 0),
             "unique_counterparties": int(row["unique_counterparties"] or 0),
@@ -109,7 +116,7 @@ class AgentTools:
             "retained_first_seen": str(row["retained_first_seen"]) if row["retained_first_seen"] else None,
             "retained_last_seen": str(row["retained_last_seen"]) if row["retained_last_seen"] else None,
             "entity_matches": entity_matches.get(normalized, []),
-            "coverage_note": "Counts summarize only transactions retained by ChainScope; balance is current RPC state.",
+            "coverage_note": "Counts summarize only transactions retained by ChainScope; balance is current RPC state when available.",
         }
 
     async def get_transaction_context(self, tx_hash: str, neighbor_limit: int = 12) -> Optional[Dict]:
@@ -119,18 +126,17 @@ class AgentTools:
         addresses = [tx.get("from_address"), tx.get("to_address")]
         matches = await self.get_entity_matches([a for a in addresses if a])
         db = await get_db()
+        normalized = [a.lower() for a in addresses if a]
         neighbors = await db.fetch("""
             SELECT t.hash, af.address AS from_address, at.address AS to_address,
                    t.value, t.block_number, t.timestamp, t.risk_score
             FROM transactions t
             JOIN addresses af ON af.id=t.from_address_id
             JOIN addresses at ON at.id=t.to_address_id
-            WHERE t.hash <> $1 AND (
-              af.address = ANY($2::text[]) OR at.address = ANY($2::text[])
-            )
+            WHERE t.hash <> $1 AND (af.address = ANY($2::text[]) OR at.address = ANY($2::text[]))
             ORDER BY ABS(t.block_number - $3), t.timestamp DESC
             LIMIT $4
-        """, tx_hash, [a.lower() for a in addresses if a], int(tx.get("block_number") or 0), neighbor_limit)
+        """, tx_hash, normalized, int(tx.get("block_number") or 0), neighbor_limit)
         return {"transaction": tx, "entity_matches": matches, "nearby_activity": [dict(r) for r in neighbors]}
 
     async def find_counterparties(self, address: str, limit: int = 10) -> List[str]:
@@ -138,21 +144,17 @@ class AgentTools:
         rows = await db.fetch("""
             SELECT counterparty, COUNT(*) AS cnt FROM (
               SELECT at.address AS counterparty FROM transactions t
-              JOIN addresses af ON t.from_address_id=af.id
-              JOIN addresses at ON t.to_address_id=at.id
+              JOIN addresses af ON t.from_address_id=af.id JOIN addresses at ON t.to_address_id=at.id
               WHERE af.address=$1
               UNION ALL
               SELECT af.address AS counterparty FROM transactions t
-              JOIN addresses af ON t.from_address_id=af.id
-              JOIN addresses at ON t.to_address_id=at.id
+              JOIN addresses af ON t.from_address_id=af.id JOIN addresses at ON t.to_address_id=at.id
               WHERE at.address=$1
-            ) q
-            GROUP BY counterparty ORDER BY cnt DESC, counterparty LIMIT $2
+            ) q GROUP BY counterparty ORDER BY cnt DESC, counterparty LIMIT $2
         """, address.lower(), limit)
         return [r["counterparty"] for r in rows]
 
     async def analyze_address_patterns(self, address: str, limit: int = 120) -> Dict:
-        """Compute explainable graph/temporal motifs from retained transactions."""
         normalized = address.lower()
         txs = await self.get_recent_transactions(normalized, limit=limit)
         outgoing = [t for t in txs if str(t.get("from_address", "")).lower() == normalized]
@@ -160,23 +162,15 @@ class AgentTools:
         out_cp = Counter(str(t.get("to_address", "")).lower() for t in outgoing if t.get("to_address"))
         in_cp = Counter(str(t.get("from_address", "")).lower() for t in incoming if t.get("from_address"))
         repeated_amounts = Counter(str(t.get("value")) for t in txs if t.get("value") is not None)
-
-        timestamps = []
-        for tx in txs:
-            ts = tx.get("timestamp")
-            if isinstance(ts, datetime):
-                timestamps.append(ts)
-        timestamps.sort()
+        timestamps = sorted(t["timestamp"] for t in txs if isinstance(t.get("timestamp"), datetime))
         max_in_10m = 0
         left = 0
         for right, ts in enumerate(timestamps):
             while left <= right and (ts - timestamps[left]).total_seconds() > 600:
                 left += 1
             max_in_10m = max(max_in_10m, right - left + 1)
-
         reciprocal = sorted(set(out_cp).intersection(in_cp))
-        fan_out = len(out_cp)
-        fan_in = len(in_cp)
+        fan_out, fan_in = len(out_cp), len(in_cp)
         repeats = [{"value_wei": value, "count": count} for value, count in repeated_amounts.most_common(5) if count >= 3]
         signals = []
         if max_in_10m >= 10:
@@ -189,18 +183,11 @@ class AgentTools:
             signals.append({"type": "reciprocal_flow", "severity": "context", "counterparties": reciprocal[:10]})
         if repeats:
             signals.append({"type": "repeated_amounts", "severity": "context", "amounts": repeats})
-
         return {
-            "address": normalized,
-            "sample_size": len(txs),
-            "outgoing_count": len(outgoing),
-            "incoming_count": len(incoming),
-            "fan_out": fan_out,
-            "fan_in": fan_in,
-            "max_transactions_in_10m": max_in_10m,
-            "reciprocal_counterparties": reciprocal[:10],
-            "repeated_amounts": repeats,
-            "signals": signals,
+            "address": normalized, "sample_size": len(txs), "outgoing_count": len(outgoing),
+            "incoming_count": len(incoming), "fan_out": fan_out, "fan_in": fan_in,
+            "max_transactions_in_10m": max_in_10m, "reciprocal_counterparties": reciprocal[:10],
+            "repeated_amounts": repeats, "signals": signals,
             "coverage_note": "Pattern analysis is bounded to retained ChainScope transactions and is not a fraud verdict.",
         }
 

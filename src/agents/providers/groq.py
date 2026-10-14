@@ -35,14 +35,19 @@ class GroqProvider:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0 if json_mode else 0.1,
-            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
         }
+        # GPT-OSS reasoning can otherwise consume/return extra reasoning content and make
+        # a short structured answer incomplete. Keep the verifier concise and final-answer only.
+        if self.model.startswith("openai/gpt-oss-"):
+            kwargs["include_reasoning"] = False
+            kwargs["reasoning_effort"] = "low"
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         response = await self.client.chat.completions.create(**kwargs)
         return (response.choices[0].message.content or "").strip()
 
-    async def generate(self, prompt: str, max_tokens: int = 350, json_mode: bool = False) -> str:
+    async def generate(self, prompt: str, max_tokens: int = 700, json_mode: bool = False) -> str:
         if time.monotonic() < self._cooldown_until:
             groq_requests_total.labels(status="cooldown").inc()
             return ""
@@ -57,12 +62,11 @@ class GroqProvider:
                     groq_requests_total.labels(status="success_json" if json_mode else "success").inc()
                     return text
                 except Exception as exc:
-                    # Some Groq-hosted models reject response_format=json_object even though
-                    # they can reliably follow an explicit JSON-only prompt. Fall back once
-                    # without response_format, then let ChainScope's parser + grounding gate
-                    # decide whether the output is trustworthy.
+                    # If a hosted-model/API combination rejects JSON mode, retry once with
+                    # the exact same JSON-only prompt and leave acceptance to ChainScope's
+                    # parser + evidence-grounding validator.
                     if json_mode and BadRequestError is not None and isinstance(exc, BadRequestError):
-                        logger.info("Groq model rejected JSON response_format; retrying with prompt-only JSON contract")
+                        logger.info("Groq JSON mode rejected; retrying with prompt-only JSON contract")
                         text = await self._create(prompt, max_tokens, json_mode=False)
                         groq_requests_total.labels(status="success_json_fallback").inc()
                         return text

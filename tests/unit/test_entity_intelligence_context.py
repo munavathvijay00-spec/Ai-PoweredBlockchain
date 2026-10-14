@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.api.routes import _format_tx
+from src.api.routes import _format_tx, _public_entity_match
 from src.risk.evidence_v2 import assess_evidence
 from src.risk.intelligence_signals import apply_verified_intelligence
 from src.risk.official_entities import OFFICIAL_ENTITY_RECORDS, sync_official_entities
@@ -87,18 +87,17 @@ def test_verified_entity_factor_is_not_mixed_with_unverified_heuristics():
 
 def test_transaction_response_exposes_current_entity_context_without_calling_it_ownership():
     row = _tx()
-    entity_matches = {
-        row["to_address"]: [{
-            "source": "lido_official_docs",
-            "entity_id": "lido-steth",
-            "entity_name": "Lido stETH / staking pool",
-            "entity_type": "protocol",
-            "confidence": 1.0,
-            "source_url": "https://docs.lido.fi/deployed-contracts/",
-            "attribution_scope": "address",
-            "evidence": {"publisher": "Lido"},
-        }]
-    }
+    match = _public_entity_match({
+        "source": "lido_official_docs",
+        "entity_id": "lido-steth",
+        "entity_name": "Lido stETH / staking pool",
+        "entity_type": "protocol",
+        "confidence": 1.0,
+        "source_url": "https://docs.lido.fi/deployed-contracts/",
+        "attribution_scope": "address",
+        "evidence": {"publisher": "Lido"},
+    })
+    entity_matches = {row["to_address"]: [match]}
 
     response = _format_tx(row, entity_matches)
 

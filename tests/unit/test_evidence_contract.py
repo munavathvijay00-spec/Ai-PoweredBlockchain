@@ -1,4 +1,9 @@
-from src.agents.evidence_contract import build_evidence_contract, validate_claims_payload
+from src.agents.evidence_contract import (
+    build_evidence_contract,
+    parse_json_object,
+    render_validated_payload,
+    validate_claims_payload,
+)
 
 
 def _contract():
@@ -22,6 +27,7 @@ def test_contract_assigns_stable_evidence_ids():
     contract = _contract()
     assert [item["evidence_id"] for item in contract["evidence"]] == ["E1", "E2"]
     assert contract["transaction"]["risk_score"] == 62
+    assert contract["contract_version"] == "1.1"
 
 
 def test_claims_require_real_evidence_ids():
@@ -60,3 +66,55 @@ def test_uncited_claim_is_rejected():
     )
     assert report["grounded"] is False
     assert "claim_0_uncited" in report["reasons"]
+
+
+def test_sensitive_claim_cannot_hide_behind_unrelated_citation():
+    report = validate_claims_payload(
+        {
+            "summary": "Review recommended.",
+            "claims": [{"text": "This wallet used a mixer", "evidence_ids": ["E1"]}],
+            "uncertainty": "This is not proof of wrongdoing.",
+        },
+        _contract(),
+    )
+    assert report["grounded"] is False
+    assert "claim_0_unsupported_sensitive:mixer" in report["reasons"]
+
+
+def test_new_numeric_claim_is_rejected():
+    report = validate_claims_payload(
+        {
+            "summary": "Review recommended.",
+            "claims": [{"text": "There were 999 linked transfers", "evidence_ids": ["E1"]}],
+            "uncertainty": "This is not proof of wrongdoing.",
+        },
+        _contract(),
+    )
+    assert report["grounded"] is False
+    assert any("unsupported_numbers:999" in reason for reason in report["reasons"])
+
+
+def test_explicit_overclaim_is_rejected_even_with_valid_citation():
+    report = validate_claims_payload(
+        {
+            "summary": "Review recommended.",
+            "claims": [{"text": "This is definitely suspicious", "evidence_ids": ["E1"]}],
+            "uncertainty": "This is not proof of wrongdoing.",
+        },
+        _contract(),
+    )
+    assert report["grounded"] is False
+    assert "claim_0_overclaim" in report["reasons"]
+
+
+def test_fenced_json_is_parsed_and_rendered_after_validation():
+    raw = '''```json
+{"summary":"Review recommended.","claims":[{"text":"Rapid onward transfer observed","evidence_ids":["E1"]}],"uncertainty":"This signal is not proof of wrongdoing."}
+```'''
+    payload = parse_json_object(raw)
+    assert payload is not None
+    report = validate_claims_payload(payload, _contract())
+    assert report["grounded"] is True
+    rendered = render_validated_payload(payload)
+    assert "[E1]" in rendered
+    assert "not proof of wrongdoing" in rendered

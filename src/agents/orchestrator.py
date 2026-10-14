@@ -1,6 +1,10 @@
+"""Evidence-led orchestrator for ChainScope specialist agents.
+
+The orchestrator routes by explicit entity/query intent, runs independent specialists in
+parallel, namespaces their evidence, and synthesizes only observations returned by those
+agents. It never upgrades review signals into claims of wrongdoing.
 """
-Orchestrator — coordinates multiple specialized agents.
-"""
+import asyncio
 import re
 from typing import Dict, List, Optional
 from loguru import logger
@@ -15,44 +19,92 @@ class Orchestrator:
     ADDRESS_RE = re.compile(r"0x[a-fA-F0-9]{40}")
     TX_HASH_RE = re.compile(r"0x[a-fA-F0-9]{64}")
 
-    CHAIN_KEYWORDS = ["block", "network", "latest", "chain", "gas"]
-    ACCOUNT_KEYWORDS = ["address", "wallet", "account", "balance"]
-    TX_KEYWORDS = ["transaction", "tx", "hash", "transfer"]
-    PATTERN_KEYWORDS = ["pattern", "suspicious", "bursty", "unusual", "behavior"]
+    CHAIN_KEYWORDS = ("block", "network", "latest", "chain", "gas", "mainnet")
+    ACCOUNT_KEYWORDS = ("address", "wallet", "account", "balance", "counterparty")
+    TX_KEYWORDS = ("transaction", "tx", "hash", "transfer", "risk", "explain")
+    PATTERN_KEYWORDS = ("pattern", "suspicious", "bursty", "unusual", "behavior", "flow", "fan-in", "fan-out", "reciprocal")
 
     def _extract_entities(self, query: str) -> Dict:
-        entities = {}
+        entities: Dict[str, str] = {}
         tx_match = self.TX_HASH_RE.search(query)
         if tx_match:
             entities["tx_hash"] = tx_match.group(0)
-            return entities
-        addr_match = self.ADDRESS_RE.search(query)
+        # A transaction hash contains an address-shaped prefix, so only search for an
+        # independent address after removing the tx hash.
+        remainder = self.TX_HASH_RE.sub("", query)
+        addr_match = self.ADDRESS_RE.search(remainder)
         if addr_match:
             entities["address"] = addr_match.group(0)
         return entities
 
     def _select_agents(self, query: str, entities: Dict) -> List[str]:
         q = query.lower()
-        agents = []
+        agents: List[str] = []
 
         if "tx_hash" in entities:
             agents.append("transaction")
-        elif "address" in entities:
-            agents.append("account")
-            agents.append("pattern")
+        if "address" in entities:
+            agents.extend(["account", "pattern"])
 
-        if any(k in q for k in self.CHAIN_KEYWORDS) and "chain" not in agents:
+        if any(k in q for k in self.CHAIN_KEYWORDS):
             agents.append("chain")
-        if any(k in q for k in self.PATTERN_KEYWORDS) and "pattern" not in agents:
+        if any(k in q for k in self.ACCOUNT_KEYWORDS) and "address" in entities:
+            agents.append("account")
+        if any(k in q for k in self.TX_KEYWORDS) and "tx_hash" in entities:
+            agents.append("transaction")
+        if any(k in q for k in self.PATTERN_KEYWORDS) and "address" in entities:
             agents.append("pattern")
 
         if not agents:
             agents.append("chain")
 
-        return agents
+        # Stable de-duplication keeps deterministic output ordering.
+        return list(dict.fromkeys(agents))
+
+    async def _run_one(self, name: str, agent, query: str, context: Dict) -> Dict:
+        try:
+            return await asyncio.wait_for(agent.handle(query, context), timeout=20)
+        except asyncio.TimeoutError:
+            return {"agent": name, "answer": f"{name} timed out.", "error": "timeout", "evidence": []}
+        except Exception as exc:
+            logger.exception(f"{name} failed: {exc}")
+            return {"agent": name, "answer": f"{name} failed safely.", "error": str(exc), "evidence": []}
+
+    @staticmethod
+    def _evidence_ledger(results: List[Dict]) -> List[Dict]:
+        ledger: List[Dict] = []
+        seen = set()
+        for result in results:
+            agent = str(result.get("agent") or "agent")
+            for item in result.get("evidence") or []:
+                claim = str(item.get("claim") or "").strip()
+                if not claim:
+                    continue
+                key = (agent, claim)
+                if key in seen:
+                    continue
+                seen.add(key)
+                entry = dict(item)
+                entry["agent"] = agent
+                entry["id"] = f"{agent}:{item.get('id') or len(ledger)+1}"
+                ledger.append(entry)
+        return ledger
+
+    @staticmethod
+    def _synthesize(results: List[Dict], ledger: List[Dict]) -> str:
+        successful = [r for r in results if not r.get("error")]
+        if not successful:
+            return "No specialist completed successfully; no investigation conclusion was produced."
+
+        pieces = [str(r.get("answer") or "").strip() for r in successful if str(r.get("answer") or "").strip()]
+        summary = " ".join(pieces)
+        if ledger:
+            summary += f" The investigation ledger contains {len(ledger)} explicit evidence item(s)."
+        summary += " Review indicators and graph motifs are contextual evidence, not proof of wrongdoing."
+        return summary
 
     async def run(self, query: str) -> Dict:
-        logger.info(f"🎯 Orchestrator: {query[:80]}")
+        logger.info(f"Orchestrator investigation: {query[:100]}")
         entities = self._extract_entities(query)
         agent_names = self._select_agents(query, entities)
         context = dict(entities)
@@ -63,27 +115,31 @@ class Orchestrator:
             "transaction": get_transaction_agent(),
             "pattern": get_pattern_agent(),
         }
-
-        results = []
-        for name in agent_names:
-            agent = agent_map.get(name)
-            if not agent:
-                continue
-            try:
-                result = await agent.handle(query, context)
-                results.append(result)
-            except Exception as e:
-                logger.exception(f"❌ {name} failed: {e}")
-                results.append({"agent": name, "answer": f"Failed: {e}", "error": str(e)})
-
-        combined = " ".join(r.get("answer", "") for r in results if r.get("answer"))
+        tasks = [self._run_one(name, agent_map[name], query, context) for name in agent_names]
+        results = list(await asyncio.gather(*tasks))
+        ledger = self._evidence_ledger(results)
+        failures = [r for r in results if r.get("error")]
+        successful = len(results) - len(failures)
 
         return {
             "query": query,
             "entities": entities,
             "agents_used": agent_names,
-            "answer": combined,
+            "answer": self._synthesize(results, ledger),
+            "evidence_ledger": ledger,
             "agent_results": results,
+            "investigation_quality": {
+                "agents_requested": len(agent_names),
+                "agents_successful": successful,
+                "agents_failed": len(failures),
+                "evidence_items": len(ledger),
+                "complete": successful == len(agent_names),
+                "grounding_mode": "specialist evidence only",
+            },
+            "limitations": [
+                "ChainScope transaction/history observations are bounded to available retained or indexed coverage.",
+                "Behavioral patterns are review signals and do not establish identity, intent, or illegality.",
+            ],
         }
 
 

@@ -72,7 +72,8 @@ def apply_verified_intelligence(result: dict, tx: dict, verified_matches: dict) 
                 factor_name = "verified_sanctions_match"
                 reason = (
                     f"Exact {role} address match in source {source}: {entity_name}, labelled sanctions. "
-                    "This is a sanctions-review signal, not proof of ownership, intent, or wrongdoing."
+                    "This is a sanctions-review signal, not proof of ownership or wrongdoing; "
+                    "transaction intent still requires independent investigation."
                 )
                 score = 100
             else:

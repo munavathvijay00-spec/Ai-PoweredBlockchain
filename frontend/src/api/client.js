@@ -26,6 +26,8 @@ async function request(path, timeoutMs = 12000) {
 export const api = {
   getStats: () => request('/stats'),
   getCoverage: () => request('/coverage'),
+  getAIStatus: () => request('/ai/status'),
+  getExternalEvaluation: () => request('/evaluation/external', 20000),
   getTransactions: (limit = 50) => request(`/transactions?limit=${limit}`),
   getFlagged: (limit = 50, minScore = 20) => request(`/flagged?min_score=${minScore}&limit=${limit}`),
   getTransaction: (hash) => request(`/transactions/${hash}`),

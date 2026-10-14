@@ -2,7 +2,7 @@
 
 The endpoint is intentionally separate from ingestion so RPC/indexing throughput
 never depends on an external LLM. Every accepted AI sentence is bounded by the
-stored transaction facts and [E#] evidence references.
+stored transaction facts and [E#] evidence references, and every attempt is audited.
 """
 import hmac
 import json
@@ -10,6 +10,7 @@ import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 
+from src.agents.ai_audit import record_ai_run
 from src.agents.explainer import get_explainer, evidence_explanation
 from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
@@ -45,7 +46,11 @@ def _citations(tx_hash: str, factors: list[dict]) -> list[dict]:
             "reason": factor.get("reason") or "Recorded scoring signal",
             "points": factor.get("points"),
             "source": factor.get("source") or "chainscope-risk-engine",
-            "evidence_url": factor.get("evidence_url") or f"https://etherscan.io/tx/{tx_hash}",
+            "evidence_url": (
+                factor.get("source_url")
+                or factor.get("evidence_url")
+                or f"https://etherscan.io/tx/{tx_hash}"
+            ),
         })
     return citations
 
@@ -72,44 +77,45 @@ async def explain_transaction(
         "risk_score": row.get("risk_score", 0),
     }
     baseline = evidence_explanation(tx, factors)
-    settings = get_settings()
-    provider = (settings.llm_provider or "disabled").lower()
+    audit = await get_explainer().explain_with_audit(tx, factors)
+    provider = str(audit.get("provider") or "disabled")
+    status = str(audit.get("status") or "unknown")
+    result = str(audit.get("explanation") or baseline)
+    grounded_ai = bool(audit.get("ai_used") and audit.get("grounded"))
 
-    # No evidence -> no AI call. This is an explicit abstention, not a benign verdict.
-    if not factors:
-        ai_explanations_total.labels(provider=provider, status="abstained_no_evidence").inc()
-        return {
-            "transaction_hash": row["hash"],
-            "status": "deterministic",
-            "provider": provider,
-            "explanation": baseline,
-            "citations": [],
-            "grounded": True,
-            "ai_used": False,
-            "warning": "No supporting risk factor is stored, so ChainScope did not ask an LLM to infer one.",
-        }
+    # Persist proof of whether the model actually ran and why a fallback happened.
+    await record_ai_run(repo.db, tx_hash=row["hash"], baseline=baseline, audit=audit)
 
-    result = await get_explainer().explain(tx, factors)
-    grounded_ai = result.startswith("Grounded AI explanation:")
     if grounded_ai:
         ai_explanations_total.labels(provider=provider, status="grounded").inc()
         await repo.update_explanation(row["hash"], result)
     else:
-        # explain() returns the deterministic baseline whenever provider access fails
-        # or grounding validation rejects the model output.
-        ai_explanations_total.labels(provider=provider, status="deterministic_fallback").inc()
-        if provider in {"groq", "ollama"}:
+        ai_explanations_total.labels(provider=provider, status=status).inc()
+        if status == "grounding_rejected":
             ai_grounding_rejections_total.labels(provider=provider).inc()
+
+    warning = "Risk evidence is a review signal, not a fraud verdict."
+    if status == "abstained_no_evidence":
+        warning = "No supporting risk factor is stored, so ChainScope did not ask an LLM to infer one."
+    elif status == "provider_not_configured":
+        warning = "A real LLM provider is not configured; deterministic evidence was returned."
+    elif status == "provider_no_output":
+        warning = "The configured LLM did not return usable output; deterministic evidence was returned."
+    elif status == "grounding_rejected":
+        warning = "The LLM output failed grounding checks and was withheld; deterministic evidence was returned."
 
     return {
         "transaction_hash": row["hash"],
         "status": "grounded_ai" if grounded_ai else "deterministic",
+        "ai_status": status,
         "provider": provider,
-        "model": settings.llm_model if grounded_ai else None,
+        "model": audit.get("model") if grounded_ai else None,
         "explanation": result,
         "citations": _citations(row["hash"], factors),
         "grounded": True,
         "ai_used": grounded_ai,
+        "latency_ms": audit.get("latency_ms"),
+        "grounding_report": audit.get("grounding_report"),
         "source_of_truth": "stored transaction facts + stored risk factors",
-        "warning": "Risk evidence is a review signal, not a fraud verdict.",
+        "warning": warning,
     }

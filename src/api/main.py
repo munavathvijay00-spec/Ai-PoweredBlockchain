@@ -16,12 +16,15 @@ from src.api.graph_routes import router as graph_router
 from src.api.indexed_transfer_routes import router as indexed_transfer_router
 from src.api.observability_routes import router as observability_router
 from src.api.explanation_routes import router as explanation_router
+from src.api.ai_routes import router as ai_router
 from src.api.historical_routes import router as historical_router
 from src.api.entity_routes import router as entity_router
 from src.api.evaluation_routes import router as evaluation_router
 from src.api.models import HealthResponse
+from src.agents.ai_audit import ensure_ai_audit_schema
 from src.database.connection import get_db, close_db
 from src.metrics import api_requests_total, api_request_duration_seconds, db_health_up
+from src.risk.external_benchmark import external_benchmark_summary, sync_external_benchmark
 from src.risk.ofac_intelligence import refresh_ofac
 from src.risk.official_entities import sync_official_entities
 from src.utils.config import get_settings
@@ -56,22 +59,61 @@ async def _refresh_verified_intelligence(db):
         )
 
 
+async def _prepare_ai_and_benchmark(db):
+    """Create additive audit storage and seed an external independent smoke benchmark."""
+    try:
+        await ensure_ai_audit_schema(db)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("AI audit schema unavailable: {}", type(exc).__name__)
+
+    try:
+        summary = await external_benchmark_summary(db)
+        if summary.get("sample_size", 0) < 100:
+            result = await asyncio.wait_for(sync_external_benchmark(db, per_class=100), timeout=45)
+            logger.info(
+                "External detection benchmark refreshed: {} rows from {}",
+                result.get("rows_fetched", 0),
+                result.get("source"),
+            )
+        else:
+            logger.info(
+                "External detection benchmark already present: {} cases",
+                summary.get("sample_size"),
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "External benchmark background sync unavailable; API remains operational: {}",
+            type(exc).__name__,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Blockchain Intelligence API")
     db = await get_db()
     db_health_up.set(1)
-    intelligence_task = asyncio.create_task(_refresh_verified_intelligence(db))
+    background_tasks = [
+        asyncio.create_task(_refresh_verified_intelligence(db)),
+        asyncio.create_task(_prepare_ai_and_benchmark(db)),
+    ]
     logger.success("API ready")
     try:
         yield
     finally:
         logger.info("Shutting down")
-        if not intelligence_task.done():
-            intelligence_task.cancel()
+        for task in background_tasks:
+            if not task.done():
+                task.cancel()
+        for task in background_tasks:
             try:
-                await intelligence_task
+                await task
             except asyncio.CancelledError:
+                pass
+            except Exception:
                 pass
         await close_db()
 
@@ -79,7 +121,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.2.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
 
@@ -117,6 +159,7 @@ app.include_router(graph_router)
 app.include_router(indexed_transfer_router)
 app.include_router(observability_router)
 app.include_router(explanation_router)
+app.include_router(ai_router)
 app.include_router(historical_router)
 app.include_router(entity_router)
 app.include_router(evaluation_router)
@@ -128,7 +171,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.2.0",
+        version="1.3.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

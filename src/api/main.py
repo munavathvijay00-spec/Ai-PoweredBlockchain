@@ -69,7 +69,10 @@ async def _prepare_ai_and_benchmark(db):
     try:
         summary = await external_benchmark_summary(db)
         if summary.get("sample_size", 0) < TARGET_EXTERNAL_BENCHMARK:
-            result = await asyncio.wait_for(sync_external_benchmark(db, per_class=TARGET_EXTERNAL_BENCHMARK // 2), timeout=90)
+            result = await asyncio.wait_for(
+                sync_external_benchmark(db, per_class=TARGET_EXTERNAL_BENCHMARK // 2),
+                timeout=90,
+            )
             logger.info(
                 "External detection benchmark refreshed: {} rows from {} (target={})",
                 result.get("rows_fetched", 0), result.get("source"), TARGET_EXTERNAL_BENCHMARK,
@@ -83,10 +86,9 @@ async def _prepare_ai_and_benchmark(db):
 
 
 async def _prepare_independent_ml():
-    """Train or refresh a provenance-gated shadow model after benchmark growth."""
+    """Train/refresh a provenance-gated, runtime-compatible shadow model."""
     try:
         db = await get_db()
-        # Benchmark sync runs concurrently. Poll briefly for corpus growth without delaying API readiness.
         benchmark = await external_benchmark_summary(db)
         for _ in range(10):
             if benchmark.get("sample_size", 0) >= TARGET_EXTERNAL_BENCHMARK:
@@ -97,26 +99,36 @@ async def _prepare_independent_ml():
         status = await independent_ml_status()
         model_rows = int(status.get("dataset_rows") or 0) if status.get("available") else 0
         benchmark_rows = int(benchmark.get("sample_size") or 0)
+        runtime_compatible = bool(status.get("runtime_compatible"))
 
-        if status.get("available") and model_rows >= benchmark_rows:
+        if status.get("available") and runtime_compatible and model_rows >= benchmark_rows:
             logger.info(
-                "Independent ML model current: mode={} rows={} gate={}",
-                status.get("deployment_mode"), model_rows, status.get("production_quality_gate_passed"),
+                "Independent ML model current: family={} mode={} rows={} gate={}",
+                status.get("model_family"), status.get("deployment_mode"), model_rows,
+                status.get("production_quality_gate_passed"),
             )
             return
+
+        if status.get("available") and not runtime_compatible:
+            logger.info(
+                "Independent ML model migration required: stored_family={} expected_family={}",
+                status.get("model_family"), status.get("expected_model_family"),
+            )
 
         if benchmark_rows < 100:
             logger.warning("Independent ML bootstrap deferred: only {} external cases available", benchmark_rows)
             return
 
-        metadata = await asyncio.wait_for(train_and_register(limit=max(benchmark_rows, 500)), timeout=120)
+        metadata = await asyncio.wait_for(
+            train_and_register(limit=max(benchmark_rows, 500)),
+            timeout=120,
+        )
         logger.info(
-            "Independent ML model registered/refreshed: rows={} AUC={} F1={} mode={} gate={}",
-            metadata.get("dataset_rows"),
+            "Independent ML model registered/refreshed: family={} rows={} AUC={} F1={} mode={} gate={}",
+            metadata.get("model_family"), metadata.get("dataset_rows"),
             (metadata.get("test_metrics") or {}).get("roc_auc"),
             (metadata.get("test_metrics") or {}).get("f1"),
-            metadata.get("deployment_mode"),
-            metadata.get("production_quality_gate_passed"),
+            metadata.get("deployment_mode"), metadata.get("production_quality_gate_passed"),
         )
     except asyncio.CancelledError:
         raise

@@ -7,7 +7,7 @@ from loguru import logger
 
 
 async def prune_addresses(db, *, enabled=False, batch_size=250, minutes=30):
-    if type(batch_size) is not int or type(minutes) is not int or not 1 <= batch_size <= 1000 or minutes < 30:
+    if type(batch_size) is not int or type(minutes) is not int or not 1 <= batch_size <= 1000 or minutes < 1:
         raise ValueError("Invalid retention limits")
     # A production database may have additional FK relationships not in init.sql.
     # Never delete if an unrecognized table references addresses.

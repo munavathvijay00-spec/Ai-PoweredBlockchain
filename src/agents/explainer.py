@@ -29,7 +29,6 @@ _SENSITIVE_CLAIM_TERMS = (
 
 
 def _normalized_numbers(text: str) -> set[str]:
-    """Extract claimed numbers while ignoring hexadecimal hashes/addresses and evidence IDs."""
     without_hex = re.sub(r"0x[a-fA-F0-9]+", "", text or "")
     without_refs = re.sub(r"\[E\d+\]", "", without_hex)
     values = re.findall(r"(?<![A-Za-z])\d[\d,]*(?:\.\d+)?", without_refs)
@@ -50,7 +49,6 @@ def _short_identifier(value: object, head: int = 10, tail: int = 8) -> str:
 
 
 def _eth_value_text(tx: Dict) -> Optional[str]:
-    """Return a stable transaction-specific ETH amount without floating-point rounding drift."""
     raw = tx.get("value_wei", tx.get("value"))
     if raw is not None:
         try:
@@ -72,7 +70,6 @@ def _eth_value_text(tx: Dict) -> Optional[str]:
 
 
 def _transaction_context(tx: Dict) -> str:
-    """Build concise, factual context so explanations are specific to one transaction."""
     pieces: List[str] = []
     tx_hash = tx.get("hash")
     if tx_hash:
@@ -96,7 +93,6 @@ def _transaction_context(tx: Dict) -> str:
 
 
 def _specificity_tokens(tx: Optional[Dict]) -> list[str]:
-    """Return stable factual tokens a rewrite can preserve to prove it is transaction-specific."""
     if not tx:
         return []
     tokens: list[str] = []
@@ -119,7 +115,6 @@ def _specificity_tokens(tx: Optional[Dict]) -> list[str]:
 
 
 def grounding_report(candidate: str, baseline: str, tx: Optional[Dict] = None) -> Dict:
-    """Return machine-readable grounding checks for one candidate rewrite."""
     reasons: list[str] = []
     checks = {
         "candidate_shape": False,
@@ -194,12 +189,10 @@ def grounding_report(candidate: str, baseline: str, tx: Optional[Dict] = None) -
 
 
 def explanation_is_grounded(candidate: str, baseline: str, tx: Optional[Dict] = None) -> bool:
-    """Reject LLM wording that adds facts or loses required transaction-specific context."""
     return bool(grounding_report(candidate, baseline, tx).get("grounded"))
 
 
 def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
-    """Deterministic explanation assembled only from transaction facts and stored scoring evidence."""
     score = max(0, min(100, int(tx.get("risk_score") or 0)))
     context = _transaction_context(tx)
     reasons: List[str] = []
@@ -235,8 +228,6 @@ def evidence_explanation(tx: Dict, factors: List[Dict]) -> str:
 
 
 class TransactionExplainer:
-    """Optionally rewrites a deterministic evidence explanation without adding facts."""
-
     def __init__(self):
         self.settings = get_settings()
         self.provider = str(self.settings.llm_provider or "disabled").lower()
@@ -282,13 +273,13 @@ Return only the explanation text."""
             response.raise_for_status()
             return response.json().get("response", "").strip()
 
-    async def _call_groq(self, prompt: str) -> Optional[str]:
+    async def _call_groq(self, prompt: str, *, json_mode: bool = False) -> Optional[str]:
         from src.agents.providers.groq import get_groq_provider
         settings = getattr(self, "settings", None)
         api_key = getattr(settings, "groq_api_key", "not-set")
         model = getattr(self, "model", None) or getattr(settings, "groq_model", "openai/gpt-oss-20b")
         provider = get_groq_provider(api_key=api_key, model=model)
-        return await provider.generate(prompt)
+        return await provider.generate(prompt, json_mode=json_mode)
 
     def _provider_configured(self) -> bool:
         provider = str(getattr(self, "provider", "disabled") or "disabled").lower()
@@ -301,7 +292,6 @@ Return only the explanation text."""
         return False
 
     async def explain_with_audit(self, tx: Dict, factors: List[Dict]) -> Dict:
-        """Return explanation plus proof of whether a real model produced accepted wording."""
         baseline = evidence_explanation(tx, factors)
         provider = str(getattr(self, "provider", "disabled") or "disabled").lower()
         model = getattr(self, "model", None)
@@ -387,11 +377,6 @@ Return only the explanation text."""
             "latency_ms": elapsed,
             "grounding_report": report,
         }
-
-    async def explain(self, tx: Dict, factors: List[Dict]) -> str:
-        """Backward-compatible string result for ingestion and existing callers."""
-        result = await self.explain_with_audit(tx, factors)
-        return str(result["explanation"])
 
 
 _explainer: Optional[TransactionExplainer] = None

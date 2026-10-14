@@ -24,6 +24,10 @@ class TransactionResponse(BaseModel):
     )
     risk_factors: List[Dict] = Field(default_factory=list, description="Recorded scoring evidence")
     evidence_assessment: Dict = Field(default_factory=dict, description="Versioned, non-calibrated evidence classification")
+    entity_context: Dict = Field(
+        default_factory=dict,
+        description="Current source-attributed exact-address matches for sender and recipient",
+    )
 
     class Config:
         json_schema_extra = {
@@ -36,8 +40,9 @@ class TransactionResponse(BaseModel):
                 "block_number": 26056394,
                 "timestamp": "2026-09-26T00:26:31",
                 "risk_score": 20,
-                "ai_explanation": "Rule-based risk assessment: this transaction scored 20/100.",
+                "ai_explanation": "Evidence-based transaction review: recorded evidence is available.",
                 "explanation_status": "deterministic",
+                "entity_context": {"sender": [], "recipient": []},
             }
         }
 

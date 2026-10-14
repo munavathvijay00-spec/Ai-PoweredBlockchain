@@ -23,22 +23,35 @@ from src.api.models import HealthResponse
 from src.database.connection import get_db, close_db
 from src.metrics import api_requests_total, api_request_duration_seconds, db_health_up
 from src.risk.ofac_intelligence import refresh_ofac
+from src.risk.official_entities import sync_official_entities
 from src.utils.config import get_settings
 
 
 async def _refresh_verified_intelligence(db):
     """Best-effort official-source refresh that never blocks API readiness."""
     try:
-        count = await asyncio.wait_for(refresh_ofac(db), timeout=45)
-        if count:
-            logger.info("Verified intelligence refresh completed: {} OFAC Ethereum addresses", count)
-        else:
-            logger.warning("Verified intelligence refresh returned no new rows; last-known-good snapshot preserved")
+        official_count = await sync_official_entities(db)
+        if official_count:
+            logger.info("Verified entity refresh completed: {} first-party protocol addresses", official_count)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         logger.warning(
-            "Verified intelligence background refresh unavailable; preserving last-known-good snapshot: {}",
+            "First-party entity registry refresh unavailable; preserving stored rows: {}",
+            type(exc).__name__,
+        )
+
+    try:
+        count = await asyncio.wait_for(refresh_ofac(db), timeout=45)
+        if count:
+            logger.info("Verified intelligence refresh completed: {} OFAC Ethereum addresses", count)
+        else:
+            logger.warning("Verified intelligence refresh returned no new OFAC rows; last-known-good snapshot preserved")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Verified OFAC background refresh unavailable; preserving last-known-good snapshot: {}",
             type(exc).__name__,
         )
 
@@ -66,7 +79,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -115,7 +128,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.1.0",
+        version="1.2.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

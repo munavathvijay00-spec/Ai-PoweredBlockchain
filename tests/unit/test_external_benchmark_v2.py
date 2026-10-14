@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.api.evaluation_routes import _case_has_source_leakage, _publication_gate
+import src.risk.external_benchmark as benchmark
 from src.risk.external_benchmark import evaluate_external_benchmark
 
 
@@ -46,6 +47,57 @@ def test_independent_source_does_not_trigger_leakage():
     }]
 
     assert _case_has_source_leakage(label_rows, factors) is False
+
+
+@pytest.mark.asyncio
+async def test_balanced_fetch_falls_back_to_public_rows_endpoint(monkeypatch):
+    async def broken_filter(label, length):
+        raise ValueError("filter unavailable")
+
+    negative = {
+        "source_row_idx": 0,
+        "tx_hash": "0x" + "1" * 64,
+        "label": 0,
+        "from_address": "0x" + "a" * 40,
+        "to_address": "0x" + "b" * 40,
+        "value_wei_text": "1",
+        "gas": 21000,
+        "gas_price_text": "1",
+        "block_timestamp_text": "2017-01-01",
+        "block_number": 1,
+        "category": "none",
+    }
+    positive = {
+        "source_row_idx": 199,
+        "tx_hash": "0x" + "2" * 64,
+        "label": 1,
+        "from_address": "0x" + "c" * 40,
+        "to_address": "0x" + "d" * 40,
+        "value_wei_text": "2",
+        "gas": 21000,
+        "gas_price_text": "1",
+        "block_timestamp_text": "2018-01-01",
+        "block_number": 2,
+        "category": "scam",
+    }
+
+    async def rows_page(offset, length=100):
+        if offset == 0:
+            return [negative], 200
+        if offset == 100:
+            return [positive], 200
+        return [], 200
+
+    monkeypatch.setattr(benchmark, "_fetch_filtered_label", broken_filter)
+    monkeypatch.setattr(benchmark, "_fetch_rows_page", rows_page)
+
+    buckets, meta = await benchmark._fetch_balanced_rows(1)
+
+    assert [row["label"] for row in buckets[0]] == [0]
+    assert [row["label"] for row in buckets[1]] == [1]
+    assert meta["mode"] == "rows_fallback"
+    assert meta["pages_scanned"] == 2
+    assert len(meta["filter_errors"]) == 2
 
 
 @pytest.mark.asyncio

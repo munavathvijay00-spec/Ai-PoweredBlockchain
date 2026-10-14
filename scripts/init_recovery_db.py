@@ -1,5 +1,10 @@
 import asyncio
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import asyncpg
 
@@ -10,7 +15,7 @@ async def main():
     settings = get_settings()
     conn = await asyncpg.connect(settings.database_url)
     try:
-        schema = Path('/app/scripts/init.sql').read_text(encoding='utf-8')
+        schema = Path(__file__).with_name('init.sql').read_text(encoding='utf-8')
         async with conn.transaction():
             await conn.execute(schema)
         required = {

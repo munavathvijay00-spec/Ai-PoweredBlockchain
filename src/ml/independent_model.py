@@ -1,12 +1,13 @@
 """Independently supervised transaction-risk model.
 
-Training labels come only from an external labelled dataset. ChainScope risk scores,
-detector outputs, entity intelligence, blacklist state, and AI output are prohibited from
-both labels and features.
+Training labels come only from external labelled data. ChainScope risk scores, detector
+outputs, entity intelligence, blacklist state, and AI output are prohibited from both
+labels and features.
 
-Evaluation uses address-connected-component isolation: if two benchmark transactions
-share an endpoint directly or transitively, they are assigned to the same partition.
-This prevents related-wallet activity from leaking between train, validation, and test.
+Evaluation isolates address-connected components across train/validation/test. A model
+may pass the internal benchmark quality gate, but production promotion additionally
+requires label-source diversity. A single-source benchmark remains a shadow signal even
+when its measured holdout metrics are excellent.
 """
 from __future__ import annotations
 
@@ -28,9 +29,10 @@ from src.database.connection import get_db
 MODEL_PATH = Path("models/independent_risk_model.pkl")
 METADATA_PATH = Path("models/independent_risk_model.metadata.json")
 MODEL_FAMILY = "sklearn_hist_gradient_boosting"
-MODEL_SCHEMA_VERSION = 3
+MODEL_SCHEMA_VERSION = 4
 SPLIT_STRATEGY = "address_connected_components_sha256_70_15_15"
 SOURCE_PREFIX = "huggingface:"
+MIN_PRODUCTION_LABEL_SOURCES = 2
 FEATURE_COLUMNS = (
     "value_log_eth",
     "gas_log",
@@ -65,6 +67,7 @@ def _timestamp_parts(value: Any) -> tuple[int, int]:
 
 
 def build_features(row: Dict[str, Any]) -> Dict[str, float]:
+    """Build only features available independently of ChainScope's risk engine."""
     raw_value = row.get("value_wei_text", row.get("value", 0))
     raw_gas_price = row.get("gas_price_text", row.get("gas_price", 0))
     value_eth = max(0.0, _safe_float(raw_value) / 1e18)
@@ -116,13 +119,17 @@ def _partition_rows(rows: list[Dict[str, Any]]) -> Dict[str, list[Dict[str, Any]
         ra, rb = find(a), find(b)
         if ra == rb:
             return
-        # Lexical root selection makes component IDs deterministic across row order.
         small, large = sorted((ra, rb))
         parent[large] = small
 
     row_nodes: list[list[str]] = []
     for row in rows:
-        nodes = [node for node in (_valid_address(row.get("from_address")), _valid_address(row.get("to_address"))) if node]
+        nodes = [
+            node for node in (
+                _valid_address(row.get("from_address")),
+                _valid_address(row.get("to_address")),
+            ) if node
+        ]
         if not nodes:
             nodes = [f"tx:{str(row['tx_hash']).lower()}"]
         for node in nodes:
@@ -131,7 +138,6 @@ def _partition_rows(rows: list[Dict[str, Any]]) -> Dict[str, list[Dict[str, Any]
             union(nodes[0], node)
         row_nodes.append(nodes)
 
-    # Compress after all unions, then use the lexically smallest member as component key.
     members: Dict[str, list[str]] = {}
     for node in list(parent):
         members.setdefault(find(node), []).append(node)
@@ -139,8 +145,7 @@ def _partition_rows(rows: list[Dict[str, Any]]) -> Dict[str, list[Dict[str, Any]
 
     groups: Dict[str, list[Dict[str, Any]]] = {"train": [], "validation": [], "test": []}
     for row, nodes in zip(rows, row_nodes):
-        component_key = canonical[find(nodes[0])]
-        groups[_bucket(component_key)].append(row)
+        groups[_bucket(canonical[find(nodes[0])])].append(row)
     return groups
 
 
@@ -230,6 +235,7 @@ async def train_independent_model(limit: int = 5000) -> Dict[str, Any]:
     if min(labels.count(0), labels.count(1)) < 30:
         raise ValueError("Need at least 30 independently labelled examples in each class")
 
+    label_sources = sorted({str(row.get("source") or "") for row in rows if row.get("source")})
     groups = _partition_rows(rows)
     overlaps = _address_overlap(groups)
     if any(overlaps.values()):
@@ -275,18 +281,31 @@ async def train_independent_model(limit: int = 5000) -> Dict[str, Any]:
     val_metrics = _metrics(y_val, val_prob, threshold)
 
     sample_tier = "production_candidate" if len(rows) >= 500 else "research_shadow"
-    quality_pass = bool(
+    benchmark_quality_pass = bool(
         sample_tier == "production_candidate"
         and not any(overlaps.values())
         and test_metrics["roc_auc"] >= 0.70
         and test_metrics["f1"] >= 0.60
     )
+    source_diversity_pass = len(label_sources) >= MIN_PRODUCTION_LABEL_SOURCES
+    production_quality_pass = bool(benchmark_quality_pass and source_diversity_pass)
+
+    if production_quality_pass:
+        deployment_mode = "eligible_for_production_review"
+    elif benchmark_quality_pass:
+        deployment_mode = "shadow_single_source"
+    else:
+        deployment_mode = "shadow"
+
     metadata = {
         "schema_version": MODEL_SCHEMA_VERSION,
         "model_family": MODEL_FAMILY,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "supervision": "independent_external_labels",
         "label_source_prefix": SOURCE_PREFIX,
+        "label_sources": label_sources,
+        "label_source_count": len(label_sources),
+        "minimum_production_label_sources": MIN_PRODUCTION_LABEL_SOURCES,
         "dataset_rows": len(rows),
         "dataset_fingerprint_sha256": _dataset_fingerprint(rows),
         "split_strategy": SPLIT_STRATEGY,
@@ -298,14 +317,23 @@ async def train_independent_model(limit: int = 5000) -> Dict[str, Any]:
         "validation_metrics": val_metrics,
         "test_metrics": test_metrics,
         "sample_tier": sample_tier,
-        "production_quality_gate_passed": quality_pass,
-        "deployment_mode": "shadow" if not quality_pass else "eligible_for_review",
+        "benchmark_quality_gate_passed": benchmark_quality_pass,
+        "source_diversity_gate_passed": source_diversity_pass,
+        "production_quality_gate_passed": production_quality_pass,
+        "deployment_mode": deployment_mode,
+        "promotion_blockers": [] if production_quality_pass else [
+            reason for condition, reason in (
+                (benchmark_quality_pass, "benchmark_quality_gate_not_passed"),
+                (source_diversity_pass, "requires_independent_second_label_source"),
+            ) if not condition
+        ],
         "limitations": [
-            "External benchmark is a balanced single-source sample and is not current Ethereum prevalence.",
+            "External benchmark is balanced and is not a prevalence estimate for current Ethereum traffic.",
+            "Current benchmark source diversity is explicitly tracked; a single-source model cannot be promoted into production scoring.",
             "Model score is a calibrated classification score, not probability of criminality.",
             "No ChainScope heuristic risk score, detector output, entity label, blacklist state, or AI output is used as a feature or label.",
             "Address-connected components are isolated across train/validation/test to reduce related-wallet leakage.",
-            "Passing this quality gate does not automatically alter the production rule score.",
+            "Production rule scoring remains unchanged unless a separately reviewed promotion gate is satisfied.",
         ],
     }
 
@@ -345,6 +373,7 @@ def predict_independent(row: Dict[str, Any]) -> Dict[str, Any]:
         "sample_tier": metadata.get("sample_tier"),
         "model_family": metadata.get("model_family"),
         "dataset_fingerprint_sha256": metadata.get("dataset_fingerprint_sha256"),
+        "benchmark_quality_gate_passed": bool(metadata.get("benchmark_quality_gate_passed")),
         "production_quality_gate_passed": bool(metadata.get("production_quality_gate_passed")),
     }
 
@@ -362,11 +391,15 @@ def model_status() -> Dict[str, Any]:
         "model_family": metadata.get("model_family"),
         "schema_version": metadata.get("schema_version"),
         "supervision": metadata.get("supervision"),
+        "label_source_count": metadata.get("label_source_count"),
         "dataset_rows": metadata.get("dataset_rows"),
         "sample_tier": metadata.get("sample_tier"),
         "split_strategy": metadata.get("split_strategy"),
         "address_overlap_counts": metadata.get("address_overlap_counts"),
+        "benchmark_quality_gate_passed": bool(metadata.get("benchmark_quality_gate_passed")),
+        "source_diversity_gate_passed": bool(metadata.get("source_diversity_gate_passed")),
         "production_quality_gate_passed": bool(metadata.get("production_quality_gate_passed")),
+        "promotion_blockers": metadata.get("promotion_blockers") or [],
         "test_metrics": metadata.get("test_metrics"),
         "trained_at": metadata.get("trained_at"),
         "dataset_fingerprint_sha256": metadata.get("dataset_fingerprint_sha256"),

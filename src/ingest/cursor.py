@@ -15,8 +15,6 @@ def validate_block_hash(block_hash: str) -> None:
         raise ValueError("Expected a 32-byte hexadecimal block hash")
 
 
-
-
 async def ensure_cursor_schema(db):
     await db.execute("""
         CREATE TABLE IF NOT EXISTS ingest_cursor (
@@ -76,6 +74,46 @@ async def save_cursor_checkpoint(db, block_number: int, block_hash: str):
         raise RuntimeError(
             "CHECKPOINT_CONFLICT: checkpoint did not advance to requested canonical block"
         )
+
+
+async def rewind_cursor_checkpoint(
+    db,
+    *,
+    expected_block: int,
+    expected_hash: str,
+    ancestor_block: int,
+    ancestor_hash: str,
+):
+    """Explicitly rewind after a verified canonical reorg.
+
+    This is the only allowed backward cursor move. It uses compare-and-swap
+    against the exact checkpoint being recovered so concurrent or stale workers
+    fail closed rather than overwriting newer progress.
+    """
+    validate_block_hash(expected_hash)
+    validate_block_hash(ancestor_hash)
+    if ancestor_block >= expected_block:
+        raise ValueError("ancestor must be below the checkpoint being rewound")
+    row = await db.fetchrow("""
+        UPDATE ingest_cursor
+        SET last_block = $4, block_hash = $5, updated_at = NOW()
+        WHERE stream = $1
+          AND last_block = $2
+          AND lower(block_hash) = lower($3)
+        RETURNING last_block, block_hash
+    """, CURSOR_KEY, expected_block, expected_hash, ancestor_block, ancestor_hash)
+    if (
+        not row
+        or int(row["last_block"]) != ancestor_block
+        or row["block_hash"].lower() != ancestor_hash.lower()
+    ):
+        raise RuntimeError("CHECKPOINT_CONFLICT: checkpoint changed during verified reorg rewind")
+    logger.warning(
+        "Verified reorg rewind: checkpoint {} -> {}",
+        expected_block,
+        ancestor_block,
+    )
+    return ancestor_block, row["block_hash"]
 
 
 async def backfill_cursor_hash(db, block_number: int, block_hash: str) -> str:

@@ -1,4 +1,5 @@
 """FastAPI application entry point."""
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response, Request
@@ -21,18 +22,45 @@ from src.api.evaluation_routes import router as evaluation_router
 from src.api.models import HealthResponse
 from src.database.connection import get_db, close_db
 from src.metrics import api_requests_total, api_request_duration_seconds, db_health_up
+from src.risk.ofac_intelligence import refresh_ofac
 from src.utils.config import get_settings
+
+
+async def _refresh_verified_intelligence(db):
+    """Best-effort official-source refresh that never blocks API readiness."""
+    try:
+        count = await asyncio.wait_for(refresh_ofac(db), timeout=45)
+        if count:
+            logger.info("Verified intelligence refresh completed: {} OFAC Ethereum addresses", count)
+        else:
+            logger.warning("Verified intelligence refresh returned no new rows; last-known-good snapshot preserved")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Verified intelligence background refresh unavailable; preserving last-known-good snapshot: {}",
+            type(exc).__name__,
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Blockchain Intelligence API")
-    await get_db()
+    db = await get_db()
     db_health_up.set(1)
+    intelligence_task = asyncio.create_task(_refresh_verified_intelligence(db))
     logger.success("API ready")
-    yield
-    logger.info("Shutting down")
-    await close_db()
+    try:
+        yield
+    finally:
+        logger.info("Shutting down")
+        if not intelligence_task.done():
+            intelligence_task.cancel()
+            try:
+                await intelligence_task
+            except asyncio.CancelledError:
+                pass
+        await close_db()
 
 
 app = FastAPI(

@@ -12,6 +12,7 @@ from src.risk.scorer import get_scorer
 from src.risk.evidence_v2 import assess_evidence
 from src.risk.behavior import analyze_block_behavior, apply_behavior_risk
 from src.risk.history_context import load_recent_activity
+from src.risk.intelligence_signals import apply_verified_intelligence
 from src.agents.explainer import get_explainer, evidence_explanation
 
 from src.metrics import (
@@ -109,6 +110,7 @@ async def process_one_block(
             ingest_transactions_total.inc(inserted)
 
         blacklist_set = await addresses.get_blacklisted_set(addresses_list)
+        verified_matches = await addresses.get_verified_matches(addresses_list)
         same_block_factors = analyze_block_behavior(normalized)
 
         recent_activity = await load_recent_activity(
@@ -132,6 +134,7 @@ async def process_one_block(
                     address_history=recent_activity.get(tx["from_address"].lower(), []),
                     is_blacklisted=is_black,
                 )
+                result = apply_verified_intelligence(result, tx, verified_matches)
                 result = apply_behavior_risk(result, tx, same_block_factors)
                 scores.append({
                     "hash": tx["hash"],

@@ -10,7 +10,6 @@ import hmac
 import json
 import re
 from datetime import datetime
-from urllib.parse import urlsplit
 
 import aiohttp
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -23,12 +22,25 @@ from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api/wallets", tags=["historical wallet evidence"])
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_INVALID_PROVIDER_KEYS = {"", "not-set", "unused", "dummy", "dummy_key_for_ci"}
 
 
 async def require_history_key(x_api_key: str | None = Header(default=None)):
     expected = get_settings().api_key
     if not expected or not x_api_key or not hmac.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Valid X-API-Key required")
+
+
+def _alchemy_rpc_url(settings) -> str | None:
+    """Build the dedicated historical-provider URL from the Alchemy key.
+
+    Historical coverage must not silently disappear when the live canonical RPC
+    is switched to another provider. The key is never returned to clients.
+    """
+    key = (settings.alchemy_api_key or "").strip()
+    if key.lower() in _INVALID_PROVIDER_KEYS:
+        return None
+    return f"https://eth-mainnet.g.alchemy.com/v2/{key}"
 
 
 def _evidence_key(transfer: dict, direction: str) -> str:
@@ -150,10 +162,12 @@ async def sync_wallet_history(
     wallet = address.lower()
     categories = _selected_categories(include_internal, include_nfts)
     settings = get_settings()
-    parsed = urlsplit(settings.ethereum_rpc_url)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or not (host == "alchemy.com" or host.endswith(".alchemy.com")):
-        raise HTTPException(status_code=503, detail="Alchemy mainnet RPC not configured")
+    provider_url = _alchemy_rpc_url(settings)
+    if not provider_url:
+        raise HTTPException(
+            status_code=503,
+            detail="Alchemy historical provider is not configured",
+        )
 
     state = await repo.db.fetchrow(
         """SELECT outgoing_page_key, incoming_page_key, outgoing_complete, incoming_complete
@@ -179,13 +193,13 @@ async def sync_wallet_history(
                 if not outgoing_complete:
                     names.append("outgoing")
                     calls.append(_transfer_page(
-                        session, settings.ethereum_rpc_url, wallet, "fromAddress",
+                        session, provider_url, wallet, "fromAddress",
                         per_direction, outgoing_key, categories,
                     ))
                 if not incoming_complete:
                     names.append("incoming")
                     calls.append(_transfer_page(
-                        session, settings.ethereum_rpc_url, wallet, "toAddress",
+                        session, provider_url, wallet, "toAddress",
                         per_direction, incoming_key, categories,
                     ))
                 results = await asyncio.gather(*calls)

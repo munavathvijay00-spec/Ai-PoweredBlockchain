@@ -23,6 +23,7 @@ from src.metrics import (
 from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api/observability", tags=["monitoring"])
+_INVALID_PROVIDER_KEYS = {"", "not-set", "unused", "dummy", "dummy_key_for_ci"}
 
 
 async def _safe_table_count(repo: TransactionRepository, table: str):
@@ -53,10 +54,14 @@ async def _live_chain_head():
             return None, "rpc_connection_failed"
         head = await asyncio.wait_for(client.get_latest_block_number(), timeout=8)
         return int(head), None
-    except (asyncio.TimeoutError, Exception) as exc:
+    except Exception as exc:
         return None, type(exc).__name__
     finally:
         await client.close()
+
+
+def _configured_secret(value: str | None) -> bool:
+    return bool(value and value.strip().lower() not in _INVALID_PROVIDER_KEYS)
 
 
 @router.get("/health")
@@ -104,9 +109,10 @@ async def operational_health(repo: TransactionRepository = Depends(get_transacti
 
     settings = get_settings()
     provider = (settings.llm_provider or "disabled").lower()
-    groq_ready = bool(settings.groq_api_key and settings.groq_api_key != "not-set")
+    groq_ready = _configured_secret(settings.groq_api_key)
     ollama_ready = provider == "ollama" and bool(settings.ollama_url)
     llm_ready = (provider == "groq" and groq_ready) or ollama_ready
+    historical_provider_ready = _configured_secret(settings.alchemy_api_key)
 
     checkpoint_age_seconds = None
     if checkpoint and checkpoint.get("updated_at"):
@@ -149,13 +155,15 @@ async def operational_health(repo: TransactionRepository = Depends(get_transacti
         "ai": {
             "configured_provider": provider,
             "provider_ready": llm_ready,
+            "groq_key_configured": groq_ready,
             "grounding_required": True,
             "citations_required": True,
             "note": "AI is an optional wording layer over stored evidence; deterministic evidence remains the source of truth.",
         },
         "coverage": {
             "live_database_is_complete_history": False,
-            "historical_wallet_provider_available": "alchemy.com" in settings.ethereum_rpc_url.lower(),
+            "historical_wallet_provider": "alchemy_getAssetTransfers",
+            "historical_wallet_provider_available": historical_provider_ready,
             "entity_attribution_is_complete": False,
             "note": "Historical completeness is reported per investigated wallet and provider category, never inferred from the live retention database.",
         },

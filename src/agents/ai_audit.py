@@ -25,17 +25,18 @@ def provider_configuration() -> Dict[str, Any]:
     """Return non-secret provider configuration and whether a real model can be attempted."""
     settings = get_settings()
     provider = str(settings.llm_provider or "disabled").strip().lower()
-    model = str(settings.llm_model or "").strip() or None
-
     if provider == "groq":
-        configured = _configured_secret(settings.groq_api_key)
-        reason = "configured" if configured else "missing_groq_api_key"
+        model = str(settings.groq_model or "").strip() or None
+        configured = _configured_secret(settings.groq_api_key) and bool(model)
+        reason = "configured" if configured else "missing_groq_api_key_or_model"
     elif provider == "ollama":
+        model = str(settings.llm_model or "").strip() or None
         # A URL means the provider is configured, but runtime success is proven only
         # by an accepted grounded run. localhost on a hosted service often has no model.
         configured = bool(str(settings.ollama_url or "").strip()) and bool(model)
         reason = "configured_unverified" if configured else "missing_ollama_configuration"
     else:
+        model = None
         configured = False
         reason = "unsupported_or_disabled_provider"
 

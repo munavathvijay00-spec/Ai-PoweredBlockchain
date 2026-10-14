@@ -3,27 +3,60 @@
 This endpoint reports measured service state only. It does not infer blockchain
 coverage, fraud accuracy, or entity completeness from service availability.
 """
+import asyncio
 import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 
 from src.api.dependencies import get_transaction_repo
+from src.blockchain.client import BlockchainClient
 from src.database.repositories import TransactionRepository
-from src.metrics import db_health_up, db_health_latency_seconds
+from src.metrics import (
+    db_health_up,
+    db_health_latency_seconds,
+    ingest_head_block,
+    ingest_checkpoint_block,
+    ingest_block_lag_blocks,
+    ingest_block_lag_seconds,
+)
 from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api/observability", tags=["monitoring"])
 
 
 async def _safe_table_count(repo: TransactionRepository, table: str):
-    allowed = {"transactions", "addresses", "verified_address_intelligence"}
+    allowed = {
+        "transactions",
+        "addresses",
+        "verified_address_intelligence",
+        "entity_attributions",
+        "wallet_transfer_evidence",
+    }
     if table not in allowed:
         raise ValueError("unsupported table")
     try:
+        exists = await repo.db.fetchval("SELECT to_regclass($1) IS NOT NULL", table)
+        if not exists:
+            return None
         return int(await repo.db.fetchval(f"SELECT COUNT(*) FROM {table}"))
     except Exception:
         return None
+
+
+async def _live_chain_head():
+    """Return measured Ethereum head or a typed unavailable state."""
+    client = BlockchainClient()
+    try:
+        connected = await asyncio.wait_for(client.connect(), timeout=8)
+        if not connected:
+            return None, "rpc_connection_failed"
+        head = await asyncio.wait_for(client.get_latest_block_number(), timeout=8)
+        return int(head), None
+    except (asyncio.TimeoutError, Exception) as exc:
+        return None, type(exc).__name__
+    finally:
+        await client.close()
 
 
 @router.get("/health")
@@ -47,13 +80,27 @@ async def operational_health(repo: TransactionRepository = Depends(get_transacti
             "SELECT last_block, block_hash, updated_at FROM ingest_cursor WHERE stream = 'ethereum_mainnet'"
         )
     except Exception:
-        # Older deployments may use a different cursor stream or be mid-migration.
         try:
             checkpoint = await repo.db.fetchrow(
                 "SELECT last_block, block_hash, updated_at FROM ingest_cursor ORDER BY updated_at DESC LIMIT 1"
             )
         except Exception:
             checkpoint = None
+
+    live_head, rpc_error = await _live_chain_head()
+    checkpoint_block = int(checkpoint["last_block"]) if checkpoint else None
+    lag_blocks = (
+        max(0, live_head - checkpoint_block)
+        if live_head is not None and checkpoint_block is not None
+        else None
+    )
+    if live_head is not None:
+        ingest_head_block.set(live_head)
+    if checkpoint_block is not None:
+        ingest_checkpoint_block.set(checkpoint_block)
+    if lag_blocks is not None:
+        ingest_block_lag_blocks.set(lag_blocks)
+        ingest_block_lag_seconds.set(lag_blocks * 12)
 
     settings = get_settings()
     provider = (settings.llm_provider or "disabled").lower()
@@ -68,6 +115,9 @@ async def operational_health(repo: TransactionRepository = Depends(get_transacti
             updated = updated.replace(tzinfo=timezone.utc)
         checkpoint_age_seconds = max(0, (datetime.now(timezone.utc) - updated).total_seconds())
 
+    legacy_verified = await _safe_table_count(repo, "verified_address_intelligence") if db_ok else None
+    generic_entities = await _safe_table_count(repo, "entity_attributions") if db_ok else None
+
     return {
         "service": "chainscope",
         "database": {
@@ -75,14 +125,26 @@ async def operational_health(repo: TransactionRepository = Depends(get_transacti
             "error_type": db_error,
             "retained_transactions": await _safe_table_count(repo, "transactions") if db_ok else None,
             "tracked_addresses": await _safe_table_count(repo, "addresses") if db_ok else None,
-            "verified_entity_rows": await _safe_table_count(repo, "verified_address_intelligence") if db_ok else None,
+            "verified_legacy_intelligence_rows": legacy_verified,
+            "entity_attribution_rows": generic_entities,
+            "historical_wallet_evidence_rows": await _safe_table_count(repo, "wallet_transfer_evidence") if db_ok else None,
         },
         "ingestion": {
-            "checkpoint_block": int(checkpoint["last_block"]) if checkpoint else None,
+            "live_head_block": live_head,
+            "rpc_error_type": rpc_error,
+            "checkpoint_block": checkpoint_block,
             "checkpoint_hash": checkpoint.get("block_hash") if checkpoint else None,
             "checkpoint_updated_at": checkpoint["updated_at"].isoformat() if checkpoint and checkpoint.get("updated_at") else None,
             "checkpoint_age_seconds": round(checkpoint_age_seconds, 2) if checkpoint_age_seconds is not None else None,
+            "lag_blocks": lag_blocks,
+            "estimated_lag_seconds": lag_blocks * 12 if lag_blocks is not None else None,
             "canonical_hash_guard": bool(checkpoint and checkpoint.get("block_hash")),
+            "status": (
+                "unknown" if lag_blocks is None
+                else "at_head" if lag_blocks <= 2
+                else "catching_up" if lag_blocks <= 100
+                else "degraded_lag"
+            ),
         },
         "ai": {
             "configured_provider": provider,
@@ -95,5 +157,6 @@ async def operational_health(repo: TransactionRepository = Depends(get_transacti
             "live_database_is_complete_history": False,
             "historical_wallet_provider_available": "alchemy.com" in settings.ethereum_rpc_url.lower(),
             "entity_attribution_is_complete": False,
+            "note": "Historical completeness is reported per investigated wallet and provider category, never inferred from the live retention database.",
         },
     }

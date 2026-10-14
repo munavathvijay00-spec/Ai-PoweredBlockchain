@@ -42,28 +42,46 @@ EVIDENCE_LEDGER_JSON:
 
 Return ONLY JSON:
 {{
-  "summary":"one concise investigation summary",
+  "summary":"one concise investigation summary with no new facts",
   "claims":[{{"text":"factual claim","evidence_ids":["agent:E1"]}}],
   "uncertainty":"one concise limitations sentence"
 }}
 
 Rules:
 - Every factual claim needs one or more exact evidence IDs from the ledger.
+- The summary may only restate facts that appear somewhere in the ledger.
 - Never infer identity, ownership, intent, illegality, fraud, sanctions, theft, hacking,
   laundering, mixer use, or maliciousness unless cited evidence explicitly states it.
-- Never introduce a number not present in the cited evidence.
+- Never introduce a number not present in the evidence.
 - Use at most 5 claims.
 - Do not state that review signals prove wrongdoing.
 - Output no markdown and no text outside JSON.
 """
 
 
+def _validate_text_against_evidence(text: str, source_text: str, prefix: str, reasons: List[str]) -> None:
+    lower = text.lower()
+    source_lower = source_text.lower()
+    if any(term in lower and term not in source_lower for term in _SENSITIVE):
+        reasons.append(f"{prefix}_unsupported_sensitive_term")
+    if any(phrase in lower for phrase in _OVERCLAIMS):
+        reasons.append(f"{prefix}_overclaim")
+    if not _numbers(text).issubset(_numbers(source_text)):
+        reasons.append(f"{prefix}_invented_number")
+
+
 def _validate(payload: Dict[str, Any], ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     evidence = {str(e.get("id")): str(e.get("claim") or "") for e in ledger if e.get("id")}
+    all_evidence = " ".join(evidence.values())
     claims = payload.get("claims")
     reasons: List[str] = []
-    if not isinstance(payload.get("summary"), str) or not isinstance(payload.get("uncertainty"), str):
+    summary = payload.get("summary")
+    uncertainty_value = payload.get("uncertainty")
+    if not isinstance(summary, str) or not isinstance(uncertainty_value, str):
         reasons.append("invalid_summary_or_uncertainty")
+    else:
+        _validate_text_against_evidence(summary.strip(), all_evidence, "summary", reasons)
+
     if not isinstance(claims, list) or len(claims) > 5:
         reasons.append("invalid_claims_shape")
         claims = []
@@ -78,16 +96,9 @@ def _validate(payload: Dict[str, Any], ledger: List[Dict[str, Any]]) -> Dict[str
             continue
         text = claim["text"].strip()
         cited = " ".join(evidence[str(ref)] for ref in refs)
-        lower = text.lower()
-        cited_lower = cited.lower()
-        if any(term in lower and term not in cited_lower for term in _SENSITIVE):
-            reasons.append(f"claim_{idx}_unsupported_sensitive_term")
-        if any(phrase in lower for phrase in _OVERCLAIMS):
-            reasons.append(f"claim_{idx}_overclaim")
-        if not _numbers(text).issubset(_numbers(cited)):
-            reasons.append(f"claim_{idx}_invented_number")
+        _validate_text_against_evidence(text, cited, f"claim_{idx}", reasons)
 
-    uncertainty = str(payload.get("uncertainty") or "").lower()
+    uncertainty = str(uncertainty_value or "").lower()
     if uncertainty and not any(term in uncertainty for term in ("not proof", "limited", "bounded", "uncertain", "coverage", "indicator")):
         reasons.append("uncertainty_missing_limitation")
     return {"grounded": not reasons, "reasons": reasons}

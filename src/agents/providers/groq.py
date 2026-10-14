@@ -29,7 +29,7 @@ class GroqProvider:
         self._request_lock = asyncio.Lock()
         logger.info(f"Groq provider initialized (model={model})")
 
-    async def generate(self, prompt: str, max_tokens: int = 250) -> str:
+    async def generate(self, prompt: str, max_tokens: int = 350, json_mode: bool = False) -> str:
         if time.monotonic() < self._cooldown_until:
             groq_requests_total.labels(status="cooldown").inc()
             return ""
@@ -39,12 +39,15 @@ class GroqProvider:
                 return ""
             started = time.monotonic()
             try:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    max_tokens=max_tokens,
-                )
+                kwargs = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0 if json_mode else 0.1,
+                    "max_tokens": max_tokens,
+                }
+                if json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
+                response = await self.client.chat.completions.create(**kwargs)
                 text = (response.choices[0].message.content or "").strip()
                 groq_requests_total.labels(status="success").inc()
                 return text

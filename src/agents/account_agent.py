@@ -19,10 +19,12 @@ class AccountAgent:
             first_seen = await tools.get_address_first_seen(address)
 
             evidence = [
-                {"id": "W1", "type": "rpc_balance", "claim": f"Current balance is {profile['balance_eth']:.6f} ETH.", "source": "ethereum_rpc"},
                 {"id": "W2", "type": "retained_activity", "claim": f"Retained data contains {profile['incoming_count']} incoming and {profile['outgoing_count']} outgoing transfers.", "source": "chainscope_db"},
                 {"id": "W3", "type": "counterparty_scope", "claim": f"Retained data contains {profile['unique_counterparties']} unique counterparties.", "source": "chainscope_db"},
             ]
+            balance = profile.get("balance_eth")
+            if balance is not None:
+                evidence.insert(0, {"id": "W1", "type": "rpc_balance", "claim": f"Current balance is {float(balance):.6f} ETH.", "source": "ethereum_rpc"})
             if first_seen:
                 evidence.append({"id": "W4", "type": "first_seen", "claim": f"Address first observed by ChainScope at {first_seen}.", "source": "chainscope_db"})
             if is_blacklisted:
@@ -31,8 +33,9 @@ class AccountAgent:
                 names = sorted({str(x.get("entity_name") or x.get("entity_id") or "attributed entity") for x in profile["entity_matches"]})
                 evidence.append({"id": "W6", "type": "verified_entity_attribution", "claim": f"Exact-address attribution match: {', '.join(names[:3])}.", "source": "source_attributed_registry"})
 
+            balance_text = f"{float(balance):.4f} ETH currently" if balance is not None else "live balance unavailable"
             summary = (
-                f"Wallet {address[:10]}… has {profile['balance_eth']:.4f} ETH currently; retained ChainScope data shows "
+                f"Wallet {address[:10]}… has {balance_text}; retained ChainScope data shows "
                 f"{profile['incoming_count']} incoming, {profile['outgoing_count']} outgoing, and "
                 f"{profile['unique_counterparties']} unique counterparties."
             )

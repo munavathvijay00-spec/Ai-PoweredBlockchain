@@ -110,11 +110,30 @@ async def record_ai_run(db, *, tx_hash: str, baseline: str, audit: Dict[str, Any
     )
 
 
-async def ai_quality_summary(db) -> Dict[str, Any]:
-    """Summarize observed model behavior; this is grounding quality, not fraud accuracy."""
+async def ai_quality_summary(
+    db,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> Dict[str, Any]:
+    """Summarize observed grounding quality, optionally for one exact provider/model.
+
+    Readiness checks pass the currently configured provider/model so a successful
+    historical run from a different model cannot make a new configuration look
+    runtime-verified.
+    """
     await ensure_ai_audit_schema(db)
+    where = ""
+    args = []
+    if provider is not None and model is not None:
+        where = "WHERE provider=$1 AND model=$2"
+        args = [str(provider), str(model)]
+    elif provider is not None:
+        where = "WHERE provider=$1"
+        args = [str(provider)]
+
     row = await db.fetchrow(
-        """
+        f"""
         SELECT
             COUNT(*) AS total_runs,
             COUNT(*) FILTER (WHERE ai_used AND grounded) AS grounded_ai_runs,
@@ -125,12 +144,16 @@ async def ai_quality_summary(db) -> Dict[str, Any]:
             MAX(created_at) FILTER (WHERE ai_used AND grounded) AS last_grounded_at,
             MAX(created_at) AS last_attempt_at
         FROM ai_explanation_runs
-        """
+        {where}
+        """,
+        *args,
     )
     total = int(row["total_runs"] or 0)
     grounded = int(row["grounded_ai_runs"] or 0)
     attempted_model_runs = grounded + int(row["grounding_rejections"] or 0) + int(row["provider_no_output"] or 0)
     return {
+        "provider_filter": provider,
+        "model_filter": model,
         "total_runs": total,
         "grounded_ai_runs": grounded,
         "grounding_rejections": int(row["grounding_rejections"] or 0),

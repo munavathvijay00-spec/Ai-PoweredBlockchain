@@ -52,6 +52,29 @@ def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list
     return list(range(last_processed + 1, min(latest, last_processed + limit) + 1))
 
 
+def catchup_batch_size(pending: int) -> int:
+    """Increase throughput only while materially behind chain head.
+
+    Blocks remain strictly sequential and individually transactional; the batch
+    size only controls how many canonical successors are attempted before the
+    next head check.
+    """
+    if pending > 100:
+        return 12
+    if pending > 20:
+        return 6
+    return 3
+
+
+def catchup_sleep_seconds(pending_after_iteration: int, normal_interval: int) -> int:
+    """Use short polling while behind, normal cadence near head."""
+    if pending_after_iteration > 100:
+        return min(normal_interval, 2)
+    if pending_after_iteration > 20:
+        return min(normal_interval, 5)
+    return normal_interval
+
+
 def is_chain_integrity_failure(error: Exception) -> bool:
     """Classify integrity errors that must not be retried without verification."""
     message = str(error)
@@ -86,7 +109,7 @@ async def ingest_loop(interval_seconds: int = 15):
     total_flagged = 0
     last_processed_block, last_block_hash = await load_cursor_checkpoint(db)
     logger.info(f'Ingestion checkpoint restored: {last_processed_block}')
-    max_blocks_per_iteration = 3
+    latest_block = last_processed_block or 0
 
     try:
         while not _shutdown_requested:
@@ -98,7 +121,6 @@ async def ingest_loop(interval_seconds: int = 15):
                 latest_block = await client.get_latest_block_number()
 
                 if last_processed_block is None:
-                    # Fresh deployment: anchor at tip-1 and process successors.
                     last_processed_block = latest_block - 1
                     tip_parent = await client.get_block(last_processed_block)
                     last_block_hash = _block_hash(tip_parent['hash'])
@@ -120,9 +142,6 @@ async def ingest_loop(interval_seconds: int = 15):
                         f'Legacy checkpoint anchored at block {last_processed_block}; earlier data is not reorg-verified'
                     )
 
-                # Verify the durable checkpoint before accepting a successor. A
-                # normal shallow fork is repaired only after finding a verified
-                # common ancestor. Unverifiable/deep forks still raise and halt.
                 if last_block_hash is not None:
                     canonical = await client.get_block(last_processed_block)
                     canonical_hash = _block_hash(canonical['hash'])
@@ -147,18 +166,20 @@ async def ingest_loop(interval_seconds: int = 15):
                         )
 
                 pending = latest_block - last_processed_block
+                batch_limit = catchup_batch_size(pending)
                 if iteration == 1 or iteration % 4 == 0:
                     log_ingestion_health(latest_block, last_processed_block)
-                if pending > max_blocks_per_iteration:
+                if pending > batch_limit:
                     logger.info(
-                        f"Block catch-up: {pending} pending; processing up to {max_blocks_per_iteration} sequentially"
+                        "Block catch-up: {} pending; processing up to {} sequentially",
+                        pending,
+                        batch_limit,
                     )
 
                 recovered_mid_iteration = False
-                for block_number in next_blocks(last_processed_block, latest_block, max_blocks_per_iteration):
+                for block_number in next_blocks(last_processed_block, latest_block, batch_limit):
                     candidate = await client.get_block(block_number, full_transactions=True)
                     if last_block_hash is not None and _block_hash(candidate['parentHash']) != last_block_hash.lower():
-                        # The head changed after the checkpoint validation above.
                         logger.warning(
                             'Successor parent mismatch at block {}; verifying bounded rewind before replay',
                             block_number,
@@ -237,8 +258,14 @@ async def ingest_loop(interval_seconds: int = 15):
                     raise
 
             if not _shutdown_requested:
-                logger.debug(f"😴 Sleeping {interval_seconds}s...")
-                await asyncio.sleep(interval_seconds)
+                remaining = max(0, latest_block - (last_processed_block or latest_block))
+                sleep_seconds = catchup_sleep_seconds(remaining, interval_seconds)
+                logger.debug(
+                    "😴 Sleeping {}s (remaining_lag={} blocks)...",
+                    sleep_seconds,
+                    remaining,
+                )
+                await asyncio.sleep(sleep_seconds)
 
     finally:
         logger.info("🔌 Closing connections...")

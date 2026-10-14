@@ -1,5 +1,5 @@
 -- ChainScope intelligence v2: sparse historical evidence, source-attributed entities,
--- independently labelled detection evaluation, and canonical block lineage.
+-- independently labelled detection evaluation, grounded-AI audit evidence, and canonical block lineage.
 -- Safe additive migration only.
 
 CREATE TABLE IF NOT EXISTS wallet_transfer_evidence (
@@ -92,6 +92,52 @@ CREATE TABLE IF NOT EXISTS detection_evaluations (
 );
 CREATE INDEX IF NOT EXISTS idx_detection_evaluations_created
     ON detection_evaluations(created_at DESC);
+
+-- Proves whether a real model was attempted and whether its wording passed the
+-- grounding contract. Candidate text is audit-only and is never treated as fact.
+CREATE TABLE IF NOT EXISTS ai_explanation_runs (
+    id BIGSERIAL PRIMARY KEY,
+    tx_hash VARCHAR(66) NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT,
+    status TEXT NOT NULL,
+    ai_used BOOLEAN NOT NULL DEFAULT FALSE,
+    grounded BOOLEAN NOT NULL DEFAULT FALSE,
+    baseline_sha256 CHAR(64) NOT NULL,
+    candidate_text TEXT,
+    final_explanation TEXT NOT NULL,
+    grounding_report JSONB NOT NULL DEFAULT '{}'::jsonb,
+    latency_ms INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_explanation_runs_tx_created
+    ON ai_explanation_runs(tx_hash, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_explanation_runs_status_created
+    ON ai_explanation_runs(status, created_at DESC);
+
+-- External benchmark labels/facts remain separate from scoring intelligence to
+-- prevent circular evaluation. The default synced sample is a smoke benchmark,
+-- not a live-network prevalence estimate.
+CREATE TABLE IF NOT EXISTS external_detection_benchmark_cases (
+    source TEXT NOT NULL,
+    source_row_idx BIGINT NOT NULL,
+    tx_hash VARCHAR(66) NOT NULL,
+    label SMALLINT NOT NULL CHECK (label IN (0,1)),
+    from_address VARCHAR(42),
+    to_address VARCHAR(42),
+    value_wei_text TEXT,
+    gas BIGINT,
+    gas_price_text TEXT,
+    block_timestamp_text TEXT,
+    block_number BIGINT,
+    category TEXT,
+    source_reference TEXT NOT NULL,
+    imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (source, source_row_idx),
+    UNIQUE (source, tx_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_external_detection_benchmark_label
+    ON external_detection_benchmark_cases(source, label);
 
 -- Every successfully committed canonical block gets one durable lineage row.
 -- This allows bounded automatic recovery from normal shallow Ethereum reorgs

@@ -1,24 +1,26 @@
 """Independently supervised transaction-risk model.
 
 This module deliberately does NOT learn from ChainScope risk_score or detector outputs.
-Training labels come from `external_detection_benchmark_cases`, which is populated from
-an external labelled dataset. The model is calibrated on a validation partition and is
-only eligible for production *shadow* inference when provenance and evaluation metadata
-pass explicit quality gates.
+Training labels come from `external_detection_benchmark_cases`, populated from an
+external labelled dataset. The model is calibrated on a validation partition and remains
+shadow-only until provenance, sample-size, and frozen-test quality gates pass.
+
+The production implementation uses scikit-learn's CPU-native histogram gradient booster
+instead of XGBoost. This avoids shipping hundreds of megabytes of GPU/NCCL libraries into
+the Railway API container while preserving nonlinear boosted-tree modelling.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import math
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
 import joblib
 import numpy as np
-import xgboost as xgb
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     brier_score_loss,
@@ -42,6 +44,7 @@ FEATURE_COLUMNS = (
     "weekday_cos",
 )
 SOURCE_PREFIX = "huggingface:"
+MODEL_FAMILY = "sklearn_hist_gradient_boosting"
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -67,10 +70,11 @@ def _timestamp_parts(value: Any) -> tuple[int, int]:
 
 
 def build_features(row: Dict[str, Any]) -> Dict[str, float]:
-    """Features available both in the independent dataset and live Ethereum transfers.
+    """Build features shared by external labels and live Ethereum transactions.
 
-    No ChainScope risk score, blacklist flag, detector output, entity attribution, or
-    post-label intelligence feature is permitted here; that prevents target leakage.
+    ChainScope risk scores, detector outputs, blacklist flags, entity labels, and AI
+    outputs are intentionally excluded so the independent model cannot learn its target
+    from the production rule engine.
     """
     raw_value = row.get("value_wei_text", row.get("value", 0))
     raw_gas_price = row.get("gas_price_text", row.get("gas_price", 0))
@@ -90,12 +94,12 @@ def build_features(row: Dict[str, Any]) -> Dict[str, float]:
 
 
 def _vector(row: Dict[str, Any]) -> list[float]:
-    f = build_features(row)
-    return [f[name] for name in FEATURE_COLUMNS]
+    features = build_features(row)
+    return [features[name] for name in FEATURE_COLUMNS]
 
 
 def _partition(tx_hash: str) -> str:
-    """Stable hash split prevents accidental train/test reshuffling between runs."""
+    """Stable hash split prevents train/test reshuffling between runs."""
     bucket = int(hashlib.sha256(tx_hash.lower().encode()).hexdigest()[:8], 16) % 100
     if bucket < 70:
         return "train"
@@ -117,19 +121,29 @@ def _metrics(y_true: np.ndarray, probability: np.ndarray, threshold: float) -> D
 
 
 def _best_threshold(y_true: np.ndarray, probability: np.ndarray) -> float:
-    best = (0.5, -1.0)
+    best_threshold, best_score = 0.5, -1.0
     for threshold in np.linspace(0.10, 0.90, 81):
         score = f1_score(y_true, probability >= threshold, zero_division=0)
-        if score > best[1]:
-            best = (float(threshold), float(score))
-    return best[0]
+        if score > best_score:
+            best_threshold, best_score = float(threshold), float(score)
+    return best_threshold
 
 
 def _dataset_fingerprint(rows: Iterable[Dict[str, Any]]) -> str:
     digest = hashlib.sha256()
-    for row in sorted(rows, key=lambda x: str(x["tx_hash"])):
+    for row in sorted(rows, key=lambda item: str(item["tx_hash"])):
         digest.update(f"{row['tx_hash']}|{int(row['label'])}|{row['source']}\n".encode())
     return digest.hexdigest()
+
+
+def _balanced_sample_weight(labels: np.ndarray) -> np.ndarray:
+    counts = np.bincount(labels, minlength=2).astype(float)
+    total = float(len(labels))
+    weights = np.ones(len(labels), dtype=float)
+    for label in (0, 1):
+        if counts[label] > 0:
+            weights[labels == label] = total / (2.0 * counts[label])
+    return weights
 
 
 async def _load_external_rows(limit: int = 5000) -> list[Dict[str, Any]]:
@@ -167,29 +181,28 @@ async def train_independent_model(limit: int = 5000) -> Dict[str, Any]:
             raise ValueError(f"{name} partition is too small or lacks both classes: {len(items)} rows")
 
     def matrix(items):
-        return np.asarray([_vector(row) for row in items], dtype=float), np.asarray([int(row["label"]) for row in items], dtype=int)
+        return (
+            np.asarray([_vector(row) for row in items], dtype=float),
+            np.asarray([int(row["label"]) for row in items], dtype=int),
+        )
 
     X_train, y_train = matrix(groups["train"])
     X_val, y_val = matrix(groups["validation"])
     X_test, y_test = matrix(groups["test"])
 
-    positives = max(1, int((y_train == 1).sum()))
-    negatives = max(1, int((y_train == 0).sum()))
-    model = xgb.XGBClassifier(
-        n_estimators=160,
-        max_depth=3,
-        learning_rate=0.04,
-        subsample=0.85,
-        colsample_bytree=0.85,
-        reg_lambda=2.0,
-        min_child_weight=2,
-        objective="binary:logistic",
-        eval_metric="logloss",
-        scale_pos_weight=negatives / positives,
+    model = HistGradientBoostingClassifier(
+        learning_rate=0.06,
+        max_iter=180,
+        max_leaf_nodes=15,
+        max_depth=4,
+        min_samples_leaf=max(8, min(20, len(X_train) // 20)),
+        l2_regularization=1.5,
+        early_stopping=True,
+        validation_fraction=0.12,
+        n_iter_no_change=20,
         random_state=42,
-        n_jobs=2,
     )
-    model.fit(X_train, y_train)
+    model.fit(X_train, y_train, sample_weight=_balanced_sample_weight(y_train))
 
     # Platt calibration is fit ONLY on validation predictions; test remains untouched.
     val_raw = model.predict_proba(X_val)[:, 1]
@@ -203,8 +216,6 @@ async def train_independent_model(limit: int = 5000) -> Dict[str, Any]:
     test_metrics = _metrics(y_test, test_prob, threshold)
     val_metrics = _metrics(y_val, val_prob, threshold)
 
-    # With the current 100-case benchmark this is a research/shadow model. Promotion
-    # requires a materially larger independent corpus and minimum discrimination.
     sample_tier = "production_candidate" if len(rows) >= 500 else "research_shadow"
     quality_pass = bool(
         sample_tier == "production_candidate"
@@ -212,7 +223,8 @@ async def train_independent_model(limit: int = 5000) -> Dict[str, Any]:
         and test_metrics["f1"] >= 0.60
     )
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "model_family": MODEL_FAMILY,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "supervision": "independent_external_labels",
         "label_source_prefix": SOURCE_PREFIX,
@@ -232,6 +244,7 @@ async def train_independent_model(limit: int = 5000) -> Dict[str, Any]:
             "External benchmark may not represent current Ethereum traffic.",
             "Model probability is a calibrated classification score, not probability of criminality.",
             "No ChainScope heuristic risk score or detector output is used as a training feature or label.",
+            "Passing the model quality gate does not automatically alter the production rule score.",
         ],
     }
 
@@ -252,6 +265,8 @@ def load_independent_bundle() -> Dict[str, Any]:
         raise ValueError("Model provenance gate failed")
     if tuple(metadata.get("features") or ()) != FEATURE_COLUMNS:
         raise ValueError("Model feature schema mismatch")
+    if metadata.get("model_family") not in (None, MODEL_FAMILY):
+        raise ValueError("Unexpected model family")
     return bundle
 
 
@@ -267,6 +282,7 @@ def predict_independent(row: Dict[str, Any]) -> Dict[str, Any]:
         "threshold": threshold,
         "mode": metadata.get("deployment_mode", "shadow"),
         "sample_tier": metadata.get("sample_tier"),
+        "model_family": metadata.get("model_family", MODEL_FAMILY),
         "dataset_fingerprint_sha256": metadata.get("dataset_fingerprint_sha256"),
         "production_quality_gate_passed": bool(metadata.get("production_quality_gate_passed")),
     }
@@ -282,6 +298,7 @@ def model_status() -> Dict[str, Any]:
     return {
         "available": True,
         "mode": metadata.get("deployment_mode"),
+        "model_family": metadata.get("model_family"),
         "supervision": metadata.get("supervision"),
         "dataset_rows": metadata.get("dataset_rows"),
         "sample_tier": metadata.get("sample_tier"),

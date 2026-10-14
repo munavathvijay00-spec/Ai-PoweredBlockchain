@@ -5,10 +5,11 @@ from typing import Optional
 from loguru import logger
 
 try:
-    from groq import AsyncGroq, RateLimitError
+    from groq import AsyncGroq, RateLimitError, BadRequestError
 except ImportError:
     AsyncGroq = None
     RateLimitError = None
+    BadRequestError = None
 
 from src.metrics import (
     groq_requests_total,
@@ -29,6 +30,18 @@ class GroqProvider:
         self._request_lock = asyncio.Lock()
         logger.info(f"Groq provider initialized (model={model})")
 
+    async def _create(self, prompt: str, max_tokens: int, *, json_mode: bool) -> str:
+        kwargs = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0 if json_mode else 0.1,
+            "max_tokens": max_tokens,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        response = await self.client.chat.completions.create(**kwargs)
+        return (response.choices[0].message.content or "").strip()
+
     async def generate(self, prompt: str, max_tokens: int = 350, json_mode: bool = False) -> str:
         if time.monotonic() < self._cooldown_until:
             groq_requests_total.labels(status="cooldown").inc()
@@ -39,18 +52,21 @@ class GroqProvider:
                 return ""
             started = time.monotonic()
             try:
-                kwargs = {
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.0 if json_mode else 0.1,
-                    "max_tokens": max_tokens,
-                }
-                if json_mode:
-                    kwargs["response_format"] = {"type": "json_object"}
-                response = await self.client.chat.completions.create(**kwargs)
-                text = (response.choices[0].message.content or "").strip()
-                groq_requests_total.labels(status="success").inc()
-                return text
+                try:
+                    text = await self._create(prompt, max_tokens, json_mode=json_mode)
+                    groq_requests_total.labels(status="success_json" if json_mode else "success").inc()
+                    return text
+                except Exception as exc:
+                    # Some Groq-hosted models reject response_format=json_object even though
+                    # they can reliably follow an explicit JSON-only prompt. Fall back once
+                    # without response_format, then let ChainScope's parser + grounding gate
+                    # decide whether the output is trustworthy.
+                    if json_mode and BadRequestError is not None and isinstance(exc, BadRequestError):
+                        logger.info("Groq model rejected JSON response_format; retrying with prompt-only JSON contract")
+                        text = await self._create(prompt, max_tokens, json_mode=False)
+                        groq_requests_total.labels(status="success_json_fallback").inc()
+                        return text
+                    raise
             except Exception as exc:
                 if RateLimitError is not None and isinstance(exc, RateLimitError):
                     self._cooldown_until = time.monotonic() + 180

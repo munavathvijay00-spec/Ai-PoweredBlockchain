@@ -9,15 +9,18 @@ function formatNumber(value) {
 
 export default function StatsBar({ stats, coverage }) {
   const [aiStatus, setAiStatus] = useState(null);
+  const [mlStatus, setMlStatus] = useState(null);
   const flaggedThreshold = Number(stats?.flagged_threshold ?? 20);
   const groundedAi = Number(stats?.ai_generated_explanations ?? 0);
   const evidenceSummaries = Number(coverage?.native_transactions?.stored_transactions ?? stats?.total_transactions ?? 0);
 
   useEffect(() => {
     let active = true;
-    api.getAIStatus()
-      .then(result => { if (active) setAiStatus(result); })
-      .catch(() => { if (active) setAiStatus(null); });
+    Promise.allSettled([api.getAIStatus(), api.getMLStatus()]).then(([ai, ml]) => {
+      if (!active) return;
+      setAiStatus(ai.status === 'fulfilled' ? ai.value : null);
+      setMlStatus(ml.status === 'fulfilled' ? ml.value : null);
+    });
     return () => { active = false; };
   }, [groundedAi]);
 
@@ -50,7 +53,7 @@ export default function StatsBar({ stats, coverage }) {
           </div>
         ))}
       </div>
-      <AIProofPanel status={aiStatus} />
+      <AIProofPanel status={aiStatus} mlStatus={mlStatus} />
     </div>
   );
 }

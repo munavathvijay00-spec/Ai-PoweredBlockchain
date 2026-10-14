@@ -153,7 +153,10 @@ async def get_stats(
                    OR ai_explanation LIKE 'Rule-based risk assessment:%'
                    OR ai_explanation LIKE 'Evidence-based assessment:%'
                    OR ai_explanation LIKE 'Evidence-based transaction review:%'
-            ) AS grounded_explanations
+            ) AS grounded_explanations,
+            COUNT(*) FILTER (
+                WHERE ai_explanation LIKE 'Grounded AI explanation:%'
+            ) AS ai_generated_explanations
         FROM transactions
     """, FLAGGED_THRESHOLD, HIGH_RISK_THRESHOLD, CRITICAL_THRESHOLD)
 
@@ -170,4 +173,5 @@ async def get_stats(
         max_risk_score=int(stats['max_score']),
         explained_transactions=int(stats['explained']),
         grounded_explanations=int(stats['grounded_explanations']),
+        ai_generated_explanations=int(stats['ai_generated_explanations']),
     )

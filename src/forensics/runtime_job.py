@@ -1,4 +1,8 @@
-"""Execute a configured flagship investigation using existing production code paths."""
+"""Execute a configured flagship investigation using existing production code paths.
+
+The case identifier is resolved from the packaged registry so the runtime and exported
+provenance remain aligned.
+"""
 from __future__ import annotations
 
 import json

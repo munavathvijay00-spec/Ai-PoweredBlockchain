@@ -64,6 +64,13 @@ def confirmed_head(latest_head: int, confirmation_depth: int) -> int:
     return max(0, latest_head - confirmation_depth)
 
 
+def bootstrap_parent_height(eligible_head: int) -> int | None:
+    """Return a valid parent anchor for first-run ingestion, if one exists."""
+    if eligible_head < 0:
+        raise ValueError("eligible_head must be non-negative")
+    return eligible_head - 1 if eligible_head >= 1 else None
+
+
 def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list[int]:
     """Return contiguous, bounded block numbers; no duplicates at a stable tip."""
     if limit < 1:
@@ -168,7 +175,17 @@ async def ingest_loop(interval_seconds: int = 15):
                 )
 
                 if last_processed_block is None:
-                    last_processed_block = latest_block - 1
+                    parent_height = bootstrap_parent_height(latest_block)
+                    if parent_height is None:
+                        logger.info(
+                            "No block is old enough to bootstrap confirmed ingestion yet "
+                            "(observed_head={} confirmation_depth={})",
+                            observed_head,
+                            confirmation_depth,
+                        )
+                        await asyncio.sleep(interval_seconds)
+                        continue
+                    last_processed_block = parent_height
                     tip_parent = await client.get_block(last_processed_block)
                     last_block_hash = _block_hash(tip_parent['hash'])
                     async with db.transaction():

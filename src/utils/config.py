@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     api_key: str
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    # Process-local capacity protection for provider-backed wallet investigations.
+    # This is not a distributed/user/IP rate limit. It bounds how many concurrent
+    # investigations one API process may send toward the upstream provider.
+    wallet_provider_max_concurrent_requests: int = Field(default=8, ge=1, le=64)
+    wallet_provider_acquire_timeout_seconds: float = Field(default=0.25, gt=0, le=5.0)
 
     # Risk scoring
     large_transaction_threshold_eth: float = 10.0
@@ -78,5 +83,6 @@ if __name__ == "__main__":
     print(f"   Groq Model: {settings.groq_model}")
     print(f"   AI enrichment batch: {settings.ai_enrichment_batch_size}")
     print(f"   Ingest confirmation depth: {settings.ingest_confirmation_depth}")
+    print(f"   Wallet provider concurrency: {settings.wallet_provider_max_concurrent_requests}")
     print(f"   Ollama URL: {settings.ollama_url}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

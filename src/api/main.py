@@ -5,7 +5,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Response, Request
+from fastapi import Depends, FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -18,6 +18,7 @@ from src.api.wallet_routes import router as wallet_router
 from src.api.coverage_routes import router as coverage_router
 from src.api.graph_routes import router as graph_router
 from src.api.indexed_transfer_routes import router as indexed_transfer_router
+from src.api.provider_capacity import require_provider_capacity
 from src.api.observability_routes import router as observability_router
 from src.api.explanation_routes import router as explanation_router
 from src.api.ai_routes import router as ai_router
@@ -294,7 +295,7 @@ app.include_router(event_router)
 app.include_router(wallet_router)
 app.include_router(coverage_router)
 app.include_router(graph_router)
-app.include_router(indexed_transfer_router)
+app.include_router(indexed_transfer_router, dependencies=[Depends(require_provider_capacity)])
 app.include_router(observability_router)
 app.include_router(explanation_router)
 app.include_router(ai_router)

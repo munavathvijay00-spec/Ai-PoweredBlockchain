@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.ingest.loop import confirmed_head, next_blocks
+from src.ingest.loop import bootstrap_parent_height, confirmed_head, next_blocks
 
 
 def test_confirmed_head_excludes_volatile_tip():
@@ -19,6 +19,11 @@ def test_worker_schedule_never_crosses_confirmed_head():
 
 def test_confirmed_head_handles_early_chain_without_negative_height():
     assert confirmed_head(5, 12) == 0
+    assert bootstrap_parent_height(0) is None
+
+
+def test_bootstrap_parent_is_previous_confirmed_block():
+    assert bootstrap_parent_height(988) == 987
 
 
 @pytest.mark.parametrize("depth", [0, 65, -1])
@@ -30,3 +35,8 @@ def test_invalid_confirmation_depth_fails_closed(depth):
 def test_negative_chain_head_is_rejected():
     with pytest.raises(ValueError):
         confirmed_head(-1, 12)
+
+
+def test_negative_bootstrap_head_is_rejected():
+    with pytest.raises(ValueError):
+        bootstrap_parent_height(-1)

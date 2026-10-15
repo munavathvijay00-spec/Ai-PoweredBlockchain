@@ -1,3 +1,3 @@
-import AccurateSuperBubbleGraph from './AccurateSuperBubbleGraph';
+import ReferenceBubbleMap from './ReferenceBubbleMap';
 
-export default AccurateSuperBubbleGraph;
+export default ReferenceBubbleMap;

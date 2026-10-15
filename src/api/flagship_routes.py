@@ -10,6 +10,7 @@ from src.agents.wallet_investigator import investigate_wallet
 from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
 from src.forensics.investigation_package import build_package
+from src.forensics.run_store import latest_package, latest_run
 from src.forensics.wallet_analysis import analyze_wallet
 from src.ml.anomaly import transaction_anomaly
 from src.ml.model_registry import model_status
@@ -57,6 +58,39 @@ async def list_flagship_cases():
             for item in payload.get("cases") or []
         ],
     }
+
+
+@router.get("/{case_id}/latest")
+async def latest_flagship_summary(
+    case_id: str,
+    repo: TransactionRepository = Depends(get_transaction_repo),
+):
+    _find_case(case_id)
+    run = await latest_run(repo.db, case_id)
+    if not run:
+        return {
+            "case_id": case_id,
+            "available": False,
+            "status": "not_run_yet",
+        }
+    return {
+        "available": True,
+        **run,
+        "package_endpoint": f"/api/flagship/{case_id}/latest-package",
+        "note": "This is a persisted run summary. Full package access requires the API key.",
+    }
+
+
+@router.get("/{case_id}/latest-package", dependencies=[Depends(require_flagship_key)])
+async def latest_flagship_package(
+    case_id: str,
+    repo: TransactionRepository = Depends(get_transaction_repo),
+):
+    _find_case(case_id)
+    package = await latest_package(repo.db, case_id)
+    if not package:
+        raise HTTPException(status_code=404, detail="No persisted flagship package is available")
+    return package
 
 
 @router.post("/{case_id}/package", dependencies=[Depends(require_flagship_key)])
@@ -134,8 +168,6 @@ async def flagship_package(
     except Exception:
         entity_intelligence = {"status": "unavailable", "matches": []}
 
-    # Transaction-level anomaly is included only when the flagship wallet has a transaction
-    # still present in the recent native transaction table.
     recent_tx = await repo.db.fetchrow(
         """SELECT t.hash
            FROM transactions t

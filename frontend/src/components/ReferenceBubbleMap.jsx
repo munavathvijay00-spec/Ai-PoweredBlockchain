@@ -120,9 +120,16 @@ function buildNetwork(transactions, root) {
   return { root: rootId, nodes: positioned, edges: [...edges.values()], adjacency };
 }
 
+function observedEth(node) {
+  return (node?.inByAsset?.ETH || 0) + (node?.outByAsset?.ETH || 0);
+}
+
 function radiusFor(node) {
-  if (node.isRoot) return 11;
-  return clamp(6 + Math.log2((node.txCount || 0) + (node.counterparties?.size || 0) + 1) * 2.5, 7, 18);
+  if (node.isRoot) return 11.5;
+  const txWeight = Math.log2((node.txCount || 0) + 1) * 2.1;
+  const counterpartyWeight = Math.log2((node.counterparties?.size || 0) + 1) * 1.15;
+  const valueWeight = Math.log10(observedEth(node) + 1) * 1.45;
+  return clamp(6.5 + txWeight + counterpartyWeight + valueWeight, 7, 19);
 }
 
 function distSeg(px, py, ax, ay, bx, by) {
@@ -165,6 +172,7 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
   const nodeById = useMemo(() => new Map(network.nodes.map(n => [n.id, n])), [network.nodes]);
   const selectedNode = selected?.kind === 'node' ? nodeById.get(selected.id) : null;
   const selectedEdge = selected?.kind === 'edge' ? network.edges.find(e => e.id === selected.id) : null;
+  const hoveredNode = hovered?.kind === 'node' ? nodeById.get(hovered.id) : null;
   const selectedNeighbors = useMemo(() => selectedNode ? new Set(network.adjacency.get(selectedNode.id) || []) : new Set(), [selectedNode, network.adjacency]);
   const selectedBalance = selectedNode ? balances[selectedNode.id] : null;
   const graphLoad = network.nodes.length + network.edges.length;
@@ -358,6 +366,23 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
           }
         }
 
+        if (isSelected) {
+          const spin = t * 0.72;
+          ctx.save();
+          ctx.strokeStyle = 'rgba(190,244,255,.88)';
+          ctx.lineWidth = 1.4;
+          ctx.shadowColor = '#52ddff';
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r + 9, spin, spin + Math.PI * 1.2);
+          ctx.stroke();
+          ctx.strokeStyle = 'rgba(82,221,255,.34)';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r + 14, -spin * 0.7, -spin * 0.7 + Math.PI * 0.92);
+          ctx.stroke();
+          ctx.restore();
+        }
+
         ctx.save();
         ctx.globalAlpha = dim ? 0.065 : activeCluster ? 0.96 : 0.64;
         if (activeCluster) {
@@ -417,9 +442,9 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
   function hitAt(event) {
     const p = localPoint(event);
     const n = [...hitRef.current.nodes].reverse().find(h => Math.hypot(p.x - h.x, p.y - h.y) <= h.r);
-    if (n) return { kind: 'node', id: n.id };
+    if (n) return { kind: 'node', id: n.id, x: p.x, y: p.y };
     const e = [...hitRef.current.edges].reverse().find(h => distSeg(p.x, p.y, h.ax, h.ay, h.bx, h.by) <= 5);
-    return e ? { kind: 'edge', id: e.id } : null;
+    return e ? { kind: 'edge', id: e.id, x: p.x, y: p.y } : null;
   }
 
   function onPointerDown(event) {
@@ -502,6 +527,16 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
         className="h-[760px] w-full touch-none cursor-grab active:cursor-grabbing"
       />
 
+      {hoveredNode && !selectedNode && hovered?.x != null && hovered?.y != null && <div className="pointer-events-none absolute z-40 min-w-[190px] rounded-xl border border-cyan-300/15 bg-[#0b111b]/95 px-3 py-2.5 shadow-xl shadow-black/40 backdrop-blur-md" style={{ left: Math.min(hovered.x + 16, 1120), top: Math.max(hovered.y - 22, 86) }}>
+        <div className="font-mono text-[11px] text-cyan-200">{short(hoveredNode.id)}</div>
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-slate-400">
+          <span>Transfers</span><span className="text-right text-slate-200">{hoveredNode.txCount}</span>
+          <span>Counterparties</span><span className="text-right text-slate-200">{hoveredNode.counterparties.size}</span>
+          <span>ETH observed</span><span className="text-right text-slate-200">{observedEth(hoveredNode).toLocaleString(undefined, { maximumFractionDigits: 5 })}</span>
+        </div>
+        <div className="mt-1.5 text-[9px] text-slate-600">Click wallet for evidence</div>
+      </div>}
+
       {selectedNode && <aside className="absolute left-0 top-[112px] z-40 w-[360px] max-w-[88vw] rounded-r-2xl border-y border-r border-white/[0.09] bg-[#181a24]/97 p-4 shadow-2xl backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3 border-b border-white/[0.08] pb-4">
           <div><p className="text-[10px] uppercase tracking-[.18em] text-slate-500">Selected wallet</p><p className="mt-1 font-mono text-sm text-white">{short(selectedNode.id)}</p><p className="mt-1 text-[10px] text-cyan-300/70">Camera focused · connected paths emphasized</p></div>
@@ -534,8 +569,8 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
 
       {showList && <aside className="absolute right-4 top-28 z-50 w-[360px] max-w-[88vw] rounded-xl border border-white/[0.09] bg-[#181a24]/98 p-4 shadow-2xl backdrop-blur-xl"><div className="flex items-center justify-between"><div><p className="text-sm font-semibold text-white">Address List</p><p className="text-xs text-slate-500">Loaded evidence</p></div><button onClick={() => setShowList(false)} className="text-2xl text-slate-500">×</button></div><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter address" className="mt-3 h-9 w-full rounded-lg border border-white/[0.08] bg-[#0e1118] px-3 font-mono text-xs text-slate-200 outline-none" /><div className="mt-3 max-h-[520px] space-y-1 overflow-auto">{list.map(node => <button key={node.id} onClick={() => { setSelected({ kind: 'node', id: node.id }); setShowList(false); }} className="w-full rounded-lg px-3 py-2 text-left hover:bg-white/[0.05]"><div className="flex items-center justify-between"><span className="font-mono text-xs text-slate-200">{short(node.id)}</span><span className="text-[10px] text-slate-500">{node.txCount} tx</span></div></button>)}</div></aside>}
 
-      <div className="pointer-events-none absolute bottom-4 left-4 rounded-lg border border-white/[0.05] bg-black/30 px-3 py-2 text-[11px] text-slate-500 backdrop-blur">Drag · wheel zoom · hover path · click wallet to focus</div>
+      <div className="pointer-events-none absolute bottom-4 left-4 rounded-lg border border-white/[0.05] bg-black/30 px-3 py-2 text-[11px] text-slate-500 backdrop-blur">Drag · wheel zoom · hover wallet for context · click wallet to focus</div>
     </div>
-    <div className="border-t border-white/[0.06] bg-[#090d16] px-4 py-3 text-[11px] text-slate-500">Loaded ChainScope evidence only. Animated particles visualize observed transfer direction; visual depth, color and proximity do not prove ownership, intent or causal attribution.</div>
+    <div className="border-t border-white/[0.06] bg-[#090d16] px-4 py-3 text-[11px] text-slate-500">Loaded ChainScope evidence only. Bubble size reflects observed activity in the currently loaded graph; animated particles visualize observed transfer direction. Visual depth, color and proximity do not prove ownership, intent or causal attribution.</div>
   </section>;
 }

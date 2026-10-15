@@ -4,6 +4,7 @@ No attribution is inferred from transfer behavior. Every returned label carries 
 source, entity identifier, confidence scope, and optional evidence URL.
 """
 import hmac
+import json
 import re
 from urllib.parse import urlsplit
 from typing import Literal
@@ -58,6 +59,87 @@ async def _require_schema(repo: TransactionRepository):
         )
 
 
+@router.get("/quality/summary")
+async def entity_quality_summary(repo: TransactionRepository = Depends(get_transaction_repo)):
+    """Report intelligence breadth/provenance without pretending absence means safety."""
+    await _require_schema(repo)
+    totals = await repo.db.fetchrow(
+        """SELECT COUNT(*) AS records,
+                  COUNT(DISTINCT address) AS unique_addresses,
+                  COUNT(DISTINCT source) AS source_count,
+                  COUNT(DISTINCT entity_type) AS type_count,
+                  AVG(confidence)::float AS average_confidence,
+                  MIN(verified_at) AS oldest_verified_at,
+                  MAX(verified_at) AS newest_verified_at,
+                  COUNT(*) FILTER (WHERE source_url IS NOT NULL) AS sourced_records,
+                  COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= NOW()) AS expired_records
+           FROM entity_attributions
+           WHERE chain_id=1"""
+    )
+    by_source = await repo.db.fetch(
+        """SELECT source,COUNT(*) AS records,COUNT(DISTINCT address) AS unique_addresses,
+                  AVG(confidence)::float AS average_confidence,MAX(verified_at) AS newest_verified_at
+           FROM entity_attributions
+           WHERE chain_id=1 AND (expires_at IS NULL OR expires_at > NOW())
+           GROUP BY source ORDER BY records DESC, source"""
+    )
+    by_type = await repo.db.fetch(
+        """SELECT entity_type,COUNT(*) AS records,COUNT(DISTINCT address) AS unique_addresses
+           FROM entity_attributions
+           WHERE chain_id=1 AND (expires_at IS NULL OR expires_at > NOW())
+           GROUP BY entity_type ORDER BY records DESC, entity_type"""
+    )
+    records = int(totals["records"] or 0)
+    sourced = int(totals["sourced_records"] or 0)
+    source_count = int(totals["source_count"] or 0)
+    unique_addresses = int(totals["unique_addresses"] or 0)
+    provenance_ratio = (sourced / records) if records else 0.0
+    breadth = "broad" if unique_addresses >= 10000 and source_count >= 5 else "moderate" if unique_addresses >= 1000 and source_count >= 3 else "limited"
+    return {
+        "chain_id": 1,
+        "records": records,
+        "unique_addresses": unique_addresses,
+        "source_count": source_count,
+        "entity_type_count": int(totals["type_count"] or 0),
+        "average_confidence": totals["average_confidence"],
+        "source_url_coverage": round(provenance_ratio, 6),
+        "oldest_verified_at": totals["oldest_verified_at"],
+        "newest_verified_at": totals["newest_verified_at"],
+        "expired_records": int(totals["expired_records"] or 0),
+        "breadth": breadth,
+        "by_source": [dict(row) for row in by_source],
+        "by_type": [dict(row) for row in by_type],
+        "quality_policy": {
+            "source_attribution_required": True,
+            "address_level_only": True,
+            "no_behavioral_identity_inference": True,
+            "no_match_means_safe": False,
+        },
+        "warning": "Entity coverage is bounded by loaded sources. A no-match result is not evidence that an address is benign, anonymous, or unattributed elsewhere.",
+    }
+
+
+@router.get("")
+async def search_entities(
+    q: str = Query(..., min_length=2, max_length=100),
+    limit: int = Query(20, ge=1, le=100),
+    repo: TransactionRepository = Depends(get_transaction_repo),
+):
+    await _require_schema(repo)
+    rows = await repo.db.fetch(
+        """SELECT address, source, entity_id, entity_name, entity_type,
+                  confidence, source_url, verified_at
+           FROM entity_attributions
+           WHERE chain_id=1
+             AND (entity_name ILIKE $1 OR entity_id ILIKE $1 OR address = lower($2))
+             AND (expires_at IS NULL OR expires_at > NOW())
+           ORDER BY confidence DESC, verified_at DESC
+           LIMIT $3""",
+        f"%{q}%", q, limit,
+    )
+    return {"query": q, "results": rows, "count": len(rows)}
+
+
 @router.get("/{address}")
 async def entity_by_address(
     address: str,
@@ -91,27 +173,6 @@ async def entity_by_address(
             "Attributions identify an address-level label, not beneficial ownership or intent."
         ),
     }
-
-
-@router.get("")
-async def search_entities(
-    q: str = Query(..., min_length=2, max_length=100),
-    limit: int = Query(20, ge=1, le=100),
-    repo: TransactionRepository = Depends(get_transaction_repo),
-):
-    await _require_schema(repo)
-    rows = await repo.db.fetch(
-        """SELECT address, source, entity_id, entity_name, entity_type,
-                  confidence, source_url, verified_at
-           FROM entity_attributions
-           WHERE chain_id=1
-             AND (entity_name ILIKE $1 OR entity_id ILIKE $1 OR address = lower($2))
-             AND (expires_at IS NULL OR expires_at > NOW())
-           ORDER BY confidence DESC, verified_at DESC
-           LIMIT $3""",
-        f"%{q}%", q, limit,
-    )
-    return {"query": q, "results": rows, "count": len(rows)}
 
 
 @router.post("/import", dependencies=[Depends(require_entity_key)])
@@ -149,7 +210,7 @@ async def import_attributions(
                     verified_at=NOW()
                 """,
                 address, source, entity_id, entity_name, entity_type,
-                confidence, source_url, __import__('json').dumps(evidence),
+                confidence, source_url, json.dumps(evidence),
             )
     return {
         "imported": len(normalized),

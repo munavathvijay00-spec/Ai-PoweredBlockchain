@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api/client';
-import InvestigationGraph from './InvestigationGraph';
+import FlowGraph3D from './FlowGraph3D';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
 const short = value => value ? value.slice(0, 8) + '…' + value.slice(-6) : '—';
@@ -227,9 +227,9 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     <section className="panel p-5">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div><p className="eyebrow">Graph canvas</p><h3 className="mt-2 text-lg font-semibold text-white">{result ? 'Observed fund-flow evidence' : 'Current flagged activity'}</h3></div>
-        <p className="text-xs text-slate-500">Select an edge to inspect its transaction evidence</p>
+        <p className="text-xs text-slate-500">Rotate in 3D, inspect aggregated flows, then open underlying transaction evidence</p>
       </div>
-      <InvestigationGraph transactions={records} onSelect={selectTransaction} />
+      <FlowGraph3D transactions={records} root={result?.root} onSelect={selectTransaction} />
     </section>
   </div>;
 }

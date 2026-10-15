@@ -1,7 +1,10 @@
 """Bounded, read-only wallet investigation from observed transactions."""
 import re
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
+from web3 import Web3
 
 from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
@@ -53,32 +56,43 @@ async def wallet_profile(
 
 @router.get("/{address}/balance")
 async def wallet_live_balance(address: str):
-    """Live ETH balance at one observed block; not historical transaction coverage."""
-    from fastapi import HTTPException
+    """Live native ETH balance pinned to one Ethereum mainnet block."""
     from src.blockchain.client import BlockchainClient
 
     if not ADDRESS.fullmatch(address):
         raise HTTPException(status_code=422, detail="Invalid Ethereum address")
+
+    normalized_address = address.lower()
+    checksum_address = Web3.to_checksum_address(normalized_address)
     client = BlockchainClient()
     try:
         if not await client.connect():
             raise HTTPException(status_code=503, detail="Ethereum mainnet RPC unavailable")
-        # Pin both the balance and evidence block to one canonical block number.
+
+        # Pin the balance to an explicit block so the displayed value is reproducible.
         block_number = await client.get_latest_block_number()
-        balance_wei = await client.w3.eth.get_balance(address, block_identifier=block_number)
+        balance_wei = await client.w3.eth.get_balance(
+            checksum_address,
+            block_identifier=block_number,
+        )
         return {
-            "address": address.lower(),
+            "address": normalized_address,
             "chain_id": 1,
             "block_number": block_number,
             "balance_wei": str(balance_wei),
-            "balance_eth": str(__import__("decimal").Decimal(balance_wei) / __import__("decimal").Decimal(10**18)),
+            "balance_eth": str(Decimal(balance_wei) / Decimal(10**18)),
             "source": "configured_ethereum_mainnet_rpc",
             "historical_completeness": False,
             "note": "Point-in-time native ETH balance. Does not include ERC-20 balances or prove complete wallet transaction history.",
         }
     except HTTPException:
         raise
-    except Exception:
-        raise HTTPException(status_code=502, detail="Could not retrieve verified Ethereum balance")
+    except Exception as exc:
+        logger.warning(
+            "Wallet balance lookup failed address={} error_type={}",
+            normalized_address,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=502, detail="Could not retrieve verified Ethereum balance") from exc
     finally:
         await client.close()

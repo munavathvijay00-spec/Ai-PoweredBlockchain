@@ -334,9 +334,9 @@ async def evaluate_external_benchmark(db, scorer, threshold: int = 20) -> Dict[s
             "block_number": int(row["block_number"] or 0),
         }
         result = await scorer.score_transaction(tx, [], is_blacklisted=False, address_age_days=None)
-        evidence = assess_evidence(result.get("factors") or [])
+        evidence = assess_evidence(result.get("factors") or [], tx_hash=row["tx_hash"])
         prediction = "1" if int(result.get("score") or 0) >= threshold else "0"
-        if evidence.get("status") == "insufficient":
+        if evidence.get("assessment") == "insufficient_evidence":
             prediction = "abstain"
         evaluation_rows.append({
             "case_id": f"{SOURCE_NAME}:{row['source_row_idx']}",

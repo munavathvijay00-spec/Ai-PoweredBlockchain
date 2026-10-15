@@ -1,4 +1,4 @@
-from src.ml.independent_model import FEATURE_COLUMNS, _partition, build_features
+from src.ml.independent_model import FEATURE_COLUMNS, _bucket, build_features
 
 
 def test_feature_schema_excludes_detector_outputs_and_labels():
@@ -27,14 +27,14 @@ def test_build_features_ignores_chain_scope_risk_fields():
     assert build_features(base) == build_features(poisoned)
 
 
-def test_hash_partition_is_stable_and_disjoint():
+def test_hash_bucket_is_stable_and_uses_all_partitions():
     tx_hash = "0x" + "ab" * 32
-    first = _partition(tx_hash)
+    first = _bucket(tx_hash)
     assert first in {"train", "validation", "test"}
-    assert _partition(tx_hash) == first
+    assert _bucket(tx_hash) == first
 
     hashes = ["0x" + f"{i:064x}" for i in range(200)]
-    partitions = {_partition(h) for h in hashes}
+    partitions = {_bucket(h) for h in hashes}
     assert partitions == {"train", "validation", "test"}
 
 

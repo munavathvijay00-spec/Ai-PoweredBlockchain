@@ -17,9 +17,18 @@ async function request(path, timeoutMs = 12000) {
   } finally {
     clearTimeout(timeout);
   }
+
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
+    let detail = '';
+    try {
+      const payload = await response.json();
+      detail = typeof payload?.detail === 'string' ? payload.detail : '';
+    } catch {
+      // Keep the status fallback when an upstream proxy returns non-JSON.
+    }
+    throw new Error(detail || `API error: ${response.status} ${response.statusText}`);
   }
+
   return response.json();
 }
 
@@ -33,7 +42,7 @@ export const api = {
   getFlagged: (limit = 50, minScore = 20) => request(`/flagged?min_score=${minScore}&limit=${limit}`),
   getTransaction: (hash) => request(`/transactions/${hash}`),
   getTransactionEvents: (hash) => request(`/transactions/${encodeURIComponent(hash)}/events`),
-  getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`),
+  getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`, 15000),
   getWalletTransfers: (address, cursors = {}, directions = { outgoing: true, incoming: true }) => {
     const params = new URLSearchParams({ per_direction: '25' });
     params.set('include_outgoing', String(directions.outgoing));

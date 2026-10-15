@@ -119,17 +119,18 @@ function aggregate(transactions, root) {
     const count = Math.max(1, list.length);
     list.forEach((node, index) => {
       const row = index - (count - 1) / 2;
-      const y = row * 72;
-      const x = side * (260 + Math.abs(row) * 10);
+      const y = row * 66;
+      const x = side * (230 + Math.abs(row) * 8);
       positioned.push({ ...node, x, y, depth: 1, direction, isRoot: false });
     });
   }
+
   placeSide(left, -1, 'incoming');
   placeSide(right, 1, 'outgoing');
   both.forEach((node, index) => {
     const side = index % 2 === 0 ? -1 : 1;
     const row = Math.floor(index / 2);
-    positioned.push({ ...node, x: side * (180 + row * 38), y: -240 - row * 70, depth: 1, direction: 'both', isRoot: false });
+    positioned.push({ ...node, x: side * (170 + row * 32), y: -210 - row * 60, depth: 1, direction: 'both', isRoot: false });
   });
 
   const positionedIds = new Set(positioned.map(node => node.id));
@@ -140,7 +141,7 @@ function aggregate(transactions, root) {
     const parentNode = positioned.find(item => item.id === parentId);
     const base = parentNode || { x: 0, y: 0 };
     const angle = ((node.id.charCodeAt(node.id.length - 1) || 0) / 255) * Math.PI * 2;
-    const radius = 85 + Math.min(90, d * 28);
+    const radius = 76 + Math.min(72, d * 22);
     positioned.push({
       ...node,
       x: base.x + Math.cos(angle) * radius,
@@ -167,22 +168,21 @@ function nodeColor(node) {
 
 function sphere(ctx, x, y, radius, color, state = 'default') {
   ctx.save();
-  const glow = state === 'selected' ? 24 : state === 'hovered' ? 14 : 6;
   ctx.shadowColor = color;
-  ctx.shadowBlur = glow;
-  const gradient = ctx.createRadialGradient(x - radius * .34, y - radius * .38, radius * .08, x, y, radius);
-  gradient.addColorStop(0, '#ffffff');
-  gradient.addColorStop(.12, color);
-  gradient.addColorStop(.48, color);
-  gradient.addColorStop(1, '#07101d');
+  ctx.shadowBlur = state === 'selected' ? 10 : state === 'hovered' ? 6 : 2;
+  const gradient = ctx.createRadialGradient(x - radius * .3, y - radius * .34, radius * .1, x, y, radius);
+  gradient.addColorStop(0, '#e2e8f0');
+  gradient.addColorStop(.16, color);
+  gradient.addColorStop(.58, color);
+  gradient.addColorStop(1, '#08101d');
   ctx.fillStyle = gradient;
-  ctx.globalAlpha = state === 'dimmed' ? .14 : nodeColor ? .95 : .8;
+  ctx.globalAlpha = state === 'dimmed' ? .11 : .88;
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.strokeStyle = state === 'selected' ? '#ffffff' : color;
-  ctx.lineWidth = state === 'selected' ? 2.4 : 1.1;
+  ctx.lineWidth = state === 'selected' ? 2 : 1;
   ctx.stroke();
   ctx.restore();
 }
@@ -224,7 +224,7 @@ export default function AccurateSuperBubbleGraph({ transactions = [], root, onSe
     if (mode === 'focused' && !q) {
       edges = [...edges]
         .sort((a, b) => relevance(b, network.root, nodeById) - relevance(a, network.root, nodeById))
-        .slice(0, 70);
+        .slice(0, 42);
     }
 
     const ids = new Set();
@@ -270,7 +270,7 @@ export default function AccurateSuperBubbleGraph({ transactions = [], root, onSe
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = '#060913';
+      ctx.fillStyle = '#070b12';
       ctx.fillRect(0, 0, width, height);
 
       const projected = new Map();
@@ -284,9 +284,9 @@ export default function AccurateSuperBubbleGraph({ transactions = [], root, onSe
         const active = selectedEdge?.id === edge.id || selectedNode && (edge.source === selectedNode.id || edge.target === selectedNode.id);
         const dimmed = selectedNode && !active;
         ctx.save();
-        ctx.strokeStyle = active ? '#cbd5e1' : COLORS.edge;
-        ctx.globalAlpha = active ? .8 : dimmed ? .04 : .18;
-        ctx.lineWidth = active ? 1.8 : .8;
+        ctx.strokeStyle = active ? '#94a3b8' : COLORS.edge;
+        ctx.globalAlpha = active ? .62 : dimmed ? .025 : .11;
+        ctx.lineWidth = active ? 1.5 : .7;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
@@ -302,15 +302,15 @@ export default function AccurateSuperBubbleGraph({ transactions = [], root, onSe
         const selectedNow = selectedNode?.id === node.id;
         const hoveredNow = hovered?.kind === 'node' && hovered.id === node.id;
         const dimmed = selectedNode && !selectedNow && !connected.has(node.id);
-        const base = node.isRoot ? 24 : 10 + Math.min(14, Math.log2(node.txCount + node.counterparties.size + 2) * 3.2);
-        const radius = clamp(base * Math.sqrt(zoom), node.isRoot ? 15 : 7, node.isRoot ? 38 : 28) * (selectedNow ? 1.18 : hoveredNow ? 1.07 : 1);
+        const base = node.isRoot ? 22 : 9 + Math.min(12, Math.log2(node.txCount + node.counterparties.size + 2) * 2.8);
+        const radius = clamp(base * Math.sqrt(zoom), node.isRoot ? 14 : 6, node.isRoot ? 34 : 24) * (selectedNow ? 1.12 : hoveredNow ? 1.05 : 1);
         sphere(ctx, point.x, point.y, radius, nodeColor(node), selectedNow ? 'selected' : hoveredNow ? 'hovered' : dimmed ? 'dimmed' : 'default');
         if (selectedNow || hoveredNow || node.isRoot) {
           ctx.save();
-          ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
-          ctx.fillStyle = '#e5e7eb';
-          ctx.globalAlpha = dimmed ? .2 : .9;
-          ctx.fillText(short(node.id), point.x + radius + 7, point.y + 4);
+          ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+          ctx.fillStyle = '#cbd5e1';
+          ctx.globalAlpha = dimmed ? .18 : .82;
+          ctx.fillText(short(node.id), point.x + radius + 6, point.y + 3);
           ctx.restore();
         }
         nodeHits.push({ id: node.id, x: point.x, y: point.y, r: radius + 6 });
@@ -366,50 +366,64 @@ export default function AccurateSuperBubbleGraph({ transactions = [], root, onSe
 
   function onWheel(event) {
     event.preventDefault();
-    setZoom(value => clamp(value * (event.deltaY < 0 ? 1.1 : .9), .45, 2.5));
+    setZoom(value => clamp(value * (event.deltaY < 0 ? 1.1 : .9), .48, 2.2));
+  }
+
+  function retryBalance() {
+    if (!selectedNode) return;
+    setBalanceCache(previous => {
+      const next = { ...previous };
+      delete next[selectedNode.id];
+      return next;
+    });
   }
 
   const hiddenNodes = Math.max(0, network.nodes.length - visible.nodes.length);
   const hiddenEdges = Math.max(0, network.edges.length - visible.edges.length);
+  const rows = selectedNode ? assetRows(selectedNode).slice(0, 2) : [];
 
-  return <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#060913] shadow-2xl shadow-black/30">
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] bg-[#080b14] px-4 py-3">
-      <div><p className="text-[10px] font-semibold uppercase tracking-[.24em] text-slate-500">Flow intelligence</p><h3 className="mt-1 text-sm font-semibold text-white">Focused wallet network</h3></div>
-      <div className="text-[11px] text-slate-500">Showing {visible.nodes.length}/{network.nodes.length} wallets · {visible.edges.length}/{network.edges.length} relationships</div>
+  return <section className="overflow-hidden rounded-xl border border-white/[0.07] bg-[#070b12]">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
+      <div><p className="text-[10px] uppercase tracking-[.2em] text-slate-500">Wallet flow</p><h3 className="mt-1 text-sm font-medium text-slate-100">Investigation map</h3></div>
+      <div className="text-[11px] text-slate-500">{visible.nodes.length} wallets · {visible.edges.length} links</div>
     </div>
 
-    <div className="flex flex-wrap gap-2 border-b border-white/[0.06] bg-[#0b0e17] px-3 py-3">
-      <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Address or tx hash" className="h-9 min-w-[220px] flex-1 rounded-lg border border-slate-700 bg-[#11141d] px-3 font-mono text-xs text-slate-200 outline-none" />
-      <input type="number" min="0" step="0.01" value={minValue} onChange={event => setMinValue(event.target.value)} className="h-9 w-28 rounded-lg border border-slate-700 bg-[#11141d] px-3 text-xs text-slate-200 outline-none" title="Minimum observed transfer value" />
-      <select value={maxDepth} onChange={event => setMaxDepth(Number(event.target.value))} className="h-9 rounded-lg border border-slate-700 bg-[#11141d] px-3 text-xs text-slate-200"><option value={1}>1 hop</option><option value={2}>2 hops</option><option value={3}>3 hops</option><option value={9}>All hops</option></select>
-      <button type="button" onClick={() => setMode(value => value === 'focused' ? 'all' : 'focused')} className="h-9 rounded-lg border border-slate-700 bg-[#151821] px-3 text-xs text-slate-300">{mode === 'focused' ? 'Show all loaded' : 'Focused view'}</button>
-      <button type="button" onClick={() => { setZoom(.92); setPan({ x: 0, y: 0 }); setSelected(null); }} className="h-9 rounded-lg border border-slate-700 bg-[#151821] px-3 text-xs text-slate-300">Reset</button>
+    <div className="flex flex-wrap gap-2 border-b border-white/[0.05] px-3 py-2">
+      <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Address or tx hash" className="h-8 min-w-[210px] flex-1 rounded-md border border-slate-800 bg-[#0d121b] px-3 font-mono text-[11px] text-slate-200 outline-none" />
+      <input type="number" min="0" step="0.01" value={minValue} onChange={event => setMinValue(event.target.value)} className="h-8 w-24 rounded-md border border-slate-800 bg-[#0d121b] px-2 text-[11px] text-slate-200 outline-none" title="Minimum observed transfer value" />
+      <select value={maxDepth} onChange={event => setMaxDepth(Number(event.target.value))} className="h-8 rounded-md border border-slate-800 bg-[#0d121b] px-2 text-[11px] text-slate-200"><option value={1}>1 hop</option><option value={2}>2 hops</option><option value={3}>3 hops</option><option value={9}>All hops</option></select>
+      <button type="button" onClick={() => setMode(value => value === 'focused' ? 'all' : 'focused')} className="h-8 rounded-md border border-slate-800 bg-[#101620] px-3 text-[11px] text-slate-300">{mode === 'focused' ? 'Show all' : 'Focus'}</button>
+      <button type="button" onClick={() => { setZoom(.92); setPan({ x: 0, y: 0 }); setSelected(null); }} className="h-8 rounded-md border border-slate-800 bg-[#101620] px-3 text-[11px] text-slate-300">Reset</button>
     </div>
 
     <div className="relative">
-      <canvas ref={canvasRef} className="h-[650px] w-full touch-none cursor-grab active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={() => setHovered(null)} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }} onWheel={onWheel} />
+      <canvas ref={canvasRef} className="h-[560px] w-full touch-none cursor-grab active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={() => setHovered(null)} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }} onWheel={onWheel} />
 
-      {selectedNode && <div className="absolute left-4 top-4 z-20 w-[330px] max-w-[calc(100%-32px)] rounded-xl border border-white/[0.09] bg-[#11131a]/95 p-4 shadow-2xl backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[.22em] text-slate-500">Wallet</p><p className="mt-1 break-all font-mono text-xs text-slate-100">{selectedNode.id}</p></div><button type="button" onClick={() => setSelected(null)} className="text-slate-500 hover:text-white">×</button></div>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-center"><div className="rounded-lg bg-[#0b0e17] p-2"><p className="text-lg font-semibold text-white">{selectedNode.txCount}</p><p className="text-[10px] text-slate-500">Transfers</p></div><div className="rounded-lg bg-[#0b0e17] p-2"><p className="text-lg font-semibold text-white">{selectedNode.counterparties.size}</p><p className="text-[10px] text-slate-500">Addresses</p></div><div className="rounded-lg bg-[#0b0e17] p-2"><p className="text-lg font-semibold text-white">{selectedNode.depth}</p><p className="text-[10px] text-slate-500">Hop</p></div></div>
-
-        <div className="mt-3 rounded-lg border border-cyan-400/10 bg-cyan-400/[0.035] p-3">
-          <div className="flex items-center justify-between"><span className="text-[10px] uppercase tracking-wider text-slate-500">Live ETH balance</span>{balance?.status === 'ready' && <span className="text-[10px] text-emerald-300">RPC verified</span>}</div>
-          {balanceLoading && !balance && <p className="mt-2 text-sm text-slate-400">Loading balance…</p>}
-          {balance?.status === 'ready' && <><p className="mt-1 text-2xl font-semibold text-white">{Number(balance.balance_eth).toLocaleString(undefined, { maximumFractionDigits: 8 })} ETH</p><p className="mt-1 text-[10px] text-slate-500">Ethereum mainnet · block {Number(balance.block_number).toLocaleString()}</p></>}
-          {balance?.status === 'error' && <p className="mt-2 text-xs text-rose-300">Live balance unavailable. {balance.message}</p>}
+      {selectedNode && <div className="absolute left-3 top-3 z-20 w-[290px] max-w-[calc(100%-24px)] rounded-lg border border-white/[0.08] bg-[#0d121b]/97 p-3 shadow-xl backdrop-blur">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0"><p className="text-[9px] uppercase tracking-[.18em] text-slate-500">Wallet</p><p className="mt-1 truncate font-mono text-[11px] text-slate-200" title={selectedNode.id}>{selectedNode.id}</p></div>
+          <button type="button" onClick={() => setSelected(null)} className="text-slate-500 hover:text-white">×</button>
         </div>
 
-        <div className="mt-3 space-y-2">{assetRows(selectedNode).slice(0, 4).map(row => <div key={row.asset} className="rounded-lg border border-white/[0.05] bg-[#0b0e17] px-3 py-2"><div className="flex items-center justify-between text-xs"><span className="font-medium text-slate-200">{row.asset}</span><span className="text-slate-500">loaded flow</span></div><div className="mt-1 flex justify-between text-[11px] text-slate-400"><span>IN {row.incoming.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span><span>OUT {row.outgoing.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span></div></div>)}</div>
-        <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Highest loaded risk</span><span className="text-slate-200">{selectedNode.maxRisk == null ? 'Not assessed' : selectedNode.maxRisk}</span></div>
-        <a href={`https://etherscan.io/address/${selectedNode.id}`} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded-lg border border-cyan-400/20 bg-cyan-400/[0.05] px-3 py-2 text-xs text-cyan-300">View address evidence ↗</a>
+        <div className="mt-3 border-y border-white/[0.06] py-3">
+          <div className="flex items-center justify-between gap-3"><span className="text-[10px] uppercase tracking-wider text-slate-500">ETH balance</span>{balance?.status === 'ready' && <span className="text-[9px] text-emerald-300">mainnet · verified</span>}</div>
+          {balanceLoading && !balance && <p className="mt-2 text-sm text-slate-400">Loading…</p>}
+          {balance?.status === 'ready' && <><p className="mt-1 text-2xl font-semibold tracking-tight text-white">{Number(balance.balance_eth).toLocaleString(undefined, { maximumFractionDigits: 8 })} ETH</p><p className="mt-1 text-[9px] text-slate-600">Block {Number(balance.block_number).toLocaleString()}</p></>}
+          {balance?.status === 'error' && <div className="mt-2"><p className="text-[11px] text-rose-300">Balance unavailable</p><p className="mt-1 text-[9px] text-slate-600">{balance.message}</p><button type="button" onClick={retryBalance} className="mt-2 text-[10px] text-cyan-300 hover:underline">Retry</button></div>}
+        </div>
+
+        <p className="mt-3 text-[11px] text-slate-400">{selectedNode.txCount} transfers · {selectedNode.counterparties.size} counterpart{selectedNode.counterparties.size === 1 ? 'y' : 'ies'} · hop {selectedNode.depth}</p>
+
+        {rows.length > 0 && <div className="mt-3 space-y-1.5">{rows.map(row => <div key={row.asset} className="flex items-center justify-between gap-2 rounded-md bg-[#090e16] px-2.5 py-2 text-[10px]"><span className="font-medium text-slate-300">{row.asset}</span><span className="text-slate-500">IN {row.incoming.toLocaleString(undefined, { maximumFractionDigits: 4 })} · OUT {row.outgoing.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span></div>)}</div>}
+
+        <div className="mt-3 flex items-center justify-between"><span className="text-[10px] text-slate-600">Risk {selectedNode.maxRisk == null ? 'not assessed' : selectedNode.maxRisk}</span><a href={`https://etherscan.io/address/${selectedNode.id}`} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 hover:underline">Etherscan ↗</a></div>
       </div>}
 
-      {selectedEdge && <div className="absolute left-4 top-4 z-20 w-[330px] max-w-[calc(100%-32px)] rounded-xl border border-white/[0.09] bg-[#11131a]/95 p-4 shadow-2xl backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[.22em] text-slate-500">Relationship</p><p className="mt-1 font-mono text-xs text-slate-100">{short(selectedEdge.source)} → {short(selectedEdge.target)}</p></div><button type="button" onClick={() => setSelected(null)} className="text-slate-500 hover:text-white">×</button></div><div className="mt-4 rounded-lg bg-[#0b0e17] p-3"><p className="text-xl font-semibold text-white">{selectedEdge.totalValue.toLocaleString(undefined, { maximumFractionDigits: 8 })} {selectedEdge.asset}</p><p className="mt-1 text-[11px] text-slate-500">{selectedEdge.txCount} loaded transaction{selectedEdge.txCount === 1 ? '' : 's'}</p></div><div className="mt-3 max-h-44 space-y-1 overflow-auto">{selectedEdge.transactions.map(tx => <button key={`${tx.hash}-${tx.category}-${tx.value}`} type="button" onClick={() => onSelect?.(tx)} className="w-full rounded-lg border border-white/[0.05] bg-[#0b0e17] px-3 py-2 text-left"><span className="font-mono text-[11px] text-cyan-300">{short(tx.hash)}</span><span className="mt-1 block text-[10px] text-slate-500">{tx.value} {tx.asset || ''}</span></button>)}</div></div>}
+      {selectedEdge && <div className="absolute left-3 top-3 z-20 w-[290px] max-w-[calc(100%-24px)] rounded-lg border border-white/[0.08] bg-[#0d121b]/97 p-3 shadow-xl backdrop-blur"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] uppercase tracking-[.18em] text-slate-500">Relationship</p><p className="mt-1 font-mono text-[11px] text-slate-200">{short(selectedEdge.source)} → {short(selectedEdge.target)}</p></div><button type="button" onClick={() => setSelected(null)} className="text-slate-500 hover:text-white">×</button></div><p className="mt-3 text-xl font-semibold text-white">{selectedEdge.totalValue.toLocaleString(undefined, { maximumFractionDigits: 8 })} {selectedEdge.asset}</p><p className="mt-1 text-[10px] text-slate-600">{selectedEdge.txCount} loaded transaction{selectedEdge.txCount === 1 ? '' : 's'}</p><div className="mt-3 max-h-32 space-y-1 overflow-auto">{selectedEdge.transactions.map(tx => <button key={`${tx.hash}-${tx.category}-${tx.value}`} type="button" onClick={() => onSelect?.(tx)} className="w-full rounded-md bg-[#090e16] px-2.5 py-2 text-left"><span className="font-mono text-[10px] text-cyan-300">{short(tx.hash)}</span><span className="ml-2 text-[9px] text-slate-600">{tx.value} {tx.asset || ''}</span></button>)}</div></div>}
 
-      <div className="pointer-events-none absolute bottom-4 left-4 rounded-lg border border-white/[0.08] bg-[#0b0e17]/90 px-3 py-2 text-[11px] text-slate-500">Drag to pan · wheel to zoom · click wallet or relationship</div>
+      <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-[#0b1018]/90 px-2.5 py-1.5 text-[10px] text-slate-600">Drag · wheel zoom · click wallet</div>
     </div>
 
-    <div className="border-t border-amber-500/10 bg-amber-400/[0.025] px-4 py-3 text-[11px] leading-5 text-amber-200/75">Focused mode ranks loaded evidence for readability; {hiddenNodes} loaded wallet{hiddenNodes === 1 ? '' : 's'} and {hiddenEdges} relationship{hiddenEdges === 1 ? '' : 's'} are currently hidden. Use “Show all loaded” to inspect everything. Live ETH balance is fetched separately from Ethereum mainnet RPC.</div>
+    {(hiddenNodes > 0 || hiddenEdges > 0) && <div className="border-t border-white/[0.05] px-4 py-2 text-[10px] text-slate-600">Focused view hides {hiddenNodes} wallet{hiddenNodes === 1 ? '' : 's'} and {hiddenEdges} link{hiddenEdges === 1 ? '' : 's'} from the loaded evidence. Use “Show all” when needed.</div>}
   </section>;
 }

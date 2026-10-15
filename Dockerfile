@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY scripts/ ./scripts/
+COPY evaluation/ ./evaluation/
 COPY --from=frontend-build /frontend/dist ./frontend_dist
 
 EXPOSE 8000

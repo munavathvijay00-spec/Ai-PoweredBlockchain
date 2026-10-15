@@ -5,6 +5,7 @@ import hmac
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from src.database.connection import get_db
+from src.ml.anomaly import transaction_anomaly
 from src.ml.model_registry import model_status, predict_shadow, train_and_register
 from src.utils.config import get_settings
 
@@ -30,6 +31,15 @@ async def train_model(limit: int = Query(default=5000, ge=100, le=50000)):
         return await train_and_register(limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/anomaly/{tx_hash}")
+async def anomaly_predict(tx_hash: str, limit: int = Query(default=3000, ge=100, le=3000)):
+    """Unsupervised behavioral anomaly score over retained Ethereum activity."""
+    if not tx_hash.startswith("0x") or len(tx_hash) != 66:
+        raise HTTPException(status_code=422, detail="Invalid Ethereum transaction hash")
+    db = await get_db()
+    return {"tx_hash": tx_hash.lower(), "behavioral_ml": await transaction_anomaly(db, tx_hash.lower(), limit=limit)}
 
 
 @router.get("/shadow/{tx_hash}", dependencies=[Depends(require_ml_key)])

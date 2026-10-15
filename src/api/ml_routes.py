@@ -1,15 +1,18 @@
-"""API for independently supervised ML model lifecycle and shadow inference."""
+"""API for independently supervised ML model lifecycle and behavioral signals."""
 from __future__ import annotations
 
 import hmac
+import re
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from src.database.connection import get_db
 from src.ml.anomaly import transaction_anomaly
 from src.ml.model_registry import model_status, predict_shadow, train_and_register
+from src.ml.wallet_features import extract_wallet_features
 from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api/ml", tags=["independent ml"])
+ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
 async def require_ml_key(x_api_key: str | None = Header(default=None)):
@@ -40,6 +43,37 @@ async def anomaly_predict(tx_hash: str, limit: int = Query(default=3000, ge=100,
         raise HTTPException(status_code=422, detail="Invalid Ethereum transaction hash")
     db = await get_db()
     return {"tx_hash": tx_hash.lower(), "behavioral_ml": await transaction_anomaly(db, tx_hash.lower(), limit=limit)}
+
+
+@router.get("/wallet-features/{address}")
+async def wallet_features(address: str, limit: int = Query(default=2000, ge=50, le=5000)):
+    """Return label-independent graph/temporal features for future ML and model audits."""
+    if not ADDRESS.fullmatch(address):
+        raise HTTPException(status_code=422, detail="Invalid Ethereum address")
+    wallet = address.lower()
+    db = await get_db()
+    try:
+        rows = await db.fetch(
+            """SELECT evidence_key,tx_hash,category,direction,from_address,to_address,
+                      asset,value_text,token_id,contract_address,block_number,
+                      block_timestamp,evidence_url
+               FROM wallet_transfer_evidence
+               WHERE chain_id=1 AND (
+                   wallet_address=$1 OR from_address=$1 OR to_address=$1
+               )
+               ORDER BY block_number ASC NULLS LAST, block_timestamp ASC NULLS LAST
+               LIMIT $2""",
+            wallet, limit,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Wallet evidence cache unavailable") from exc
+    result = extract_wallet_features(wallet, [dict(row) for row in rows])
+    return {
+        **result,
+        "query_limit": limit,
+        "query_truncated": len(rows) >= limit,
+        "interpretation": "These are descriptive ML features, not a fraud score or probability of criminality.",
+    }
 
 
 @router.get("/shadow/{tx_hash}", dependencies=[Depends(require_ml_key)])

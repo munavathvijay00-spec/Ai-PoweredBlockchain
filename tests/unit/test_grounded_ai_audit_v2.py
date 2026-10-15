@@ -96,6 +96,7 @@ async def test_ai_quality_summary_does_not_call_grounding_rate_detection_accurac
         "total_runs": 10,
         "grounded_ai_runs": 6,
         "grounding_rejections": 2,
+        "structured_parse_rejections": 1,
         "provider_no_output": 2,
         "provider_not_configured": 0,
         "abstained_no_evidence": 0,
@@ -107,4 +108,5 @@ async def test_ai_quality_summary_does_not_call_grounding_rate_detection_accurac
 
     assert summary["model_attempts"] == 10
     assert summary["grounding_acceptance_rate"] == pytest.approx(0.6)
+    assert summary["structured_parse_rejections"] == 1
     assert "not transaction-detection accuracy" in summary["metric_scope"]

@@ -2,7 +2,7 @@
 Transaction normalizer.
 Converts raw Web3 data into clean Python dicts for our database.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List
 from loguru import logger
@@ -48,6 +48,23 @@ class TransactionNormalizer:
             raise ValueError(f'Invalid Ethereum address: {address!r}')
         return s
 
+    @staticmethod
+    def _utc_naive_timestamp(value) -> datetime:
+        """Return a deterministic UTC-naive datetime for a Unix timestamp.
+
+        The current PostgreSQL schema stores transaction timestamps as
+        ``timestamp without time zone``. Until that schema is deliberately
+        migrated, persist UTC wall-clock values explicitly so normalization is
+        identical regardless of the worker host timezone.
+        """
+        try:
+            unix_seconds = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid block timestamp: {value!r}") from exc
+        if unix_seconds < 0:
+            raise ValueError(f"Invalid block timestamp: {value!r}")
+        return datetime.fromtimestamp(unix_seconds, tz=timezone.utc).replace(tzinfo=None)
+
     def normalize(self, raw_tx: Dict, block: Dict) -> Dict:
         """Convert a raw Web3 transaction into our database format."""
         tx_hash = self._to_hex_string(raw_tx.get('hash'))
@@ -65,7 +82,7 @@ class TransactionNormalizer:
         gas_price = int(raw_tx.get('gasPrice', 0) or 0)
 
         block_ts = block.get('timestamp', 0)
-        timestamp = datetime.fromtimestamp(block_ts)
+        timestamp = self._utc_naive_timestamp(block_ts)
 
         return {
             'hash': tx_hash,

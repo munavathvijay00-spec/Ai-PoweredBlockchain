@@ -28,11 +28,17 @@ async def test_explainer_falls_back_on_provider_failure():
     import asyncio
     explainer._semaphore = asyncio.Semaphore(3)
     explainer.provider = "ollama"
+    explainer.model = "test-model"
     explainer._call_ollama = AsyncMock(side_effect=RuntimeError("offline"))
     explainer._build_prompt = lambda tx, factors: "prompt"
-    result = await explainer.explain({"risk_score": 30}, [{"reason": "Unusual transfer size"}])
-    assert result.startswith("Evidence-based transaction review:")
-    assert "Unusual transfer size" in result
+    result = await explainer.explain_with_audit(
+        {"risk_score": 30},
+        [{"reason": "Unusual transfer size"}],
+    )
+    assert result["status"] == "provider_no_output"
+    assert result["ai_used"] is False
+    assert result["explanation"].startswith("Evidence-based transaction review:")
+    assert "Unusual transfer size" in result["explanation"]
 
 
 @pytest.mark.asyncio
@@ -41,13 +47,20 @@ async def test_ai_explanation_used_only_when_grounded():
     import asyncio
     explainer._semaphore = asyncio.Semaphore(3)
     explainer.provider = "ollama"
+    explainer.model = "test-model"
     explainer._call_ollama = AsyncMock(return_value="This transaction scored 30/100 because an unusual transfer size was detected [E1]. This is a review indicator, not proof of wrongdoing.")
     explainer._build_prompt = lambda tx, factors: "prompt"
-    result = await explainer.explain({"risk_score": 30}, [{"reason": "Unusual transfer size"}])
-    assert result.startswith("Grounded AI explanation:")
-    assert "30/100" in result
-    assert "[E1]" in result
-    assert "Unusual transfer size".lower() in result.lower()
+    result = await explainer.explain_with_audit(
+        {"risk_score": 30},
+        [{"reason": "Unusual transfer size"}],
+    )
+    assert result["status"] == "grounded_ai"
+    assert result["ai_used"] is True
+    assert result["grounded"] is True
+    assert result["explanation"].startswith("Grounded AI explanation:")
+    assert "30/100" in result["explanation"]
+    assert "[E1]" in result["explanation"]
+    assert "Unusual transfer size".lower() in result["explanation"].lower()
 
 
 @pytest.mark.asyncio
@@ -56,9 +69,12 @@ async def test_ai_is_skipped_without_supporting_factors():
     import asyncio
     explainer._semaphore = asyncio.Semaphore(3)
     explainer.provider = "ollama"
+    explainer.model = "test-model"
     explainer._call_ollama = AsyncMock(return_value="This transaction looks suspicious.")
     explainer._build_prompt = lambda tx, factors: "prompt"
-    result = await explainer.explain({"risk_score": 30}, [])
-    assert result.startswith("Evidence-based transaction review:")
-    assert "does not include a specific supporting factor" in result
+    result = await explainer.explain_with_audit({"risk_score": 30}, [])
+    assert result["status"] == "abstained_no_evidence"
+    assert result["ai_used"] is False
+    assert result["explanation"].startswith("Evidence-based transaction review:")
+    assert "does not include a specific supporting factor" in result["explanation"]
     explainer._call_ollama.assert_not_awaited()

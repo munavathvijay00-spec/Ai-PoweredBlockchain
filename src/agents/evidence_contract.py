@@ -1,8 +1,9 @@
 """Structured evidence contract and strict validation for grounded AI outputs.
 
-The LLM is a summarizer, never a source of blockchain facts. Every factual claim must
-cite stored evidence, and sensitive/numeric claims are checked against the cited
-material before generated prose can reach an investigator.
+The LLM is a summarizer, never a source of blockchain facts. Every generated factual
+statement must cite concrete retained evidence. Transaction facts are first-class evidence
+items so a claim about an address, amount, block or risk score cannot hide behind an
+unrelated detector citation.
 """
 from __future__ import annotations
 
@@ -24,42 +25,80 @@ def _numbers(text: str) -> set[str]:
     return {value.replace(",", "") for value in NUMBER_RE.findall(without_hex)}
 
 
+def _append_evidence(evidence: list[dict[str, Any]], claim: str, source_type: str, source_ref: Any, **extra: Any) -> None:
+    clean = str(claim or "").strip().rstrip(".")
+    if not clean:
+        return
+    evidence.append({
+        "evidence_id": f"E{len(evidence) + 1}",
+        "claim": clean,
+        "source_type": source_type,
+        "source_ref": source_ref,
+        **extra,
+    })
+
+
 def build_evidence_contract(tx: dict[str, Any], factors: list[dict[str, Any]]) -> dict[str, Any]:
     evidence: list[dict[str, Any]] = []
+    tx_hash = tx.get("hash")
     tx_facts = {
-        "tx_hash": tx.get("hash"),
+        "tx_hash": tx_hash,
         "block_number": tx.get("block_number"),
         "from_address": tx.get("from_address"),
         "to_address": tx.get("to_address"),
         "value_wei": tx.get("value_wei", tx.get("value")),
         "risk_score": max(0, min(100, int(tx.get("risk_score") or 0))),
     }
-    for index, factor in enumerate(factors or [], start=1):
+
+    fact_templates = (
+        ("tx_hash", "Transaction hash is {value}"),
+        ("block_number", "Observed block number is {value}"),
+        ("from_address", "Observed sender address is {value}"),
+        ("to_address", "Observed recipient address is {value}"),
+        ("value_wei", "Observed transaction value is {value} wei"),
+        ("risk_score", "Deterministic risk score is {value} out of 100"),
+    )
+    for field, template in fact_templates:
+        value = tx_facts.get(field)
+        if value is not None and value != "":
+            _append_evidence(
+                evidence,
+                template.format(value=value),
+                "stored_transaction_fact",
+                tx_hash,
+                field=field,
+            )
+
+    for factor in factors or []:
         reason = str(factor.get("reason") or "").strip().rstrip(".")
         if not reason:
             continue
-        item = {
-            "evidence_id": f"E{index}",
-            "claim": reason,
-            "source_type": str(factor.get("source_type") or "stored_risk_factor"),
-            "source_ref": factor.get("source_ref") or tx.get("hash"),
-        }
+        extra: dict[str, Any] = {}
         if factor.get("points") is not None:
             try:
-                item["points"] = int(factor["points"])
+                extra["points"] = int(factor["points"])
             except (TypeError, ValueError, OverflowError):
                 pass
-        evidence.append(item)
+        _append_evidence(
+            evidence,
+            reason,
+            str(factor.get("source_type") or "stored_risk_factor"),
+            factor.get("source_ref") or tx_hash,
+            **extra,
+        )
+
     return {
-        "contract_version": "1.1",
+        "contract_version": "1.2",
         "transaction": tx_facts,
         "evidence": evidence,
         "policy": {
             "allow_uncited_factual_claims": False,
+            "allow_uncited_summary": False,
             "allow_identity_or_intent_inference": False,
             "allow_new_numeric_claims": False,
             "require_uncertainty_language": True,
             "require_claim_evidence_semantic_support": True,
+            "numeric_support_must_be_cited": True,
         },
     }
 
@@ -69,7 +108,6 @@ def contract_prompt_payload(contract: dict[str, Any]) -> str:
 
 
 def _extract_balanced_json_object(text: str) -> str | None:
-    """Return the first balanced JSON object outside quoted-string braces."""
     start = -1
     depth = 0
     in_string = False
@@ -98,25 +136,16 @@ def _extract_balanced_json_object(text: str) -> str | None:
 
 
 def parse_json_object(raw: str) -> dict[str, Any] | None:
-    """Parse one provider JSON object without trusting surrounding model prose.
-
-    Providers sometimes wrap valid JSON in markdown fences or a short preamble even when
-    explicitly instructed not to. ChainScope may extract that object, but the extracted
-    payload still has to pass the normal evidence-grounding validator before any AI text
-    is accepted.
-    """
     if not isinstance(raw, str) or not raw.strip():
         return None
     text = raw.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text)
-
     candidates = [text]
     extracted = _extract_balanced_json_object(text)
     if extracted and extracted != text:
         candidates.append(extracted)
-
     for candidate in candidates:
         try:
             value = json.loads(candidate)
@@ -137,17 +166,58 @@ def _support_text(contract: dict[str, Any], refs: set[str]) -> str:
     return " ".join(parts)
 
 
-def _transaction_support_text(contract: dict[str, Any]) -> str:
-    tx = contract.get("transaction") or {}
-    return " ".join(str(value) for value in tx.values() if value is not None)
+def _validate_statement(
+    text: Any,
+    refs: Any,
+    contract: dict[str, Any],
+    allowed_ids: set[str],
+    prefix: str,
+    reasons: list[str],
+) -> None:
+    if not isinstance(text, str) or not text.strip():
+        reasons.append(f"{prefix}_missing_text")
+        return
+    text = text.strip()
+    if len(text) > 350:
+        reasons.append(f"{prefix}_too_long")
+    if not isinstance(refs, list) or not refs:
+        reasons.append(f"{prefix}_uncited")
+        return
+    normalized = {str(ref).strip() for ref in refs}
+    unknown = normalized.difference(allowed_ids)
+    if unknown:
+        reasons.append(f"{prefix}_unknown_evidence:" + ",".join(sorted(unknown)))
+        return
+
+    support = _support_text(contract, normalized)
+    support_lower = support.lower()
+    statement_lower = text.lower()
+    unsupported_sensitive = [
+        term for term in SENSITIVE_TERMS
+        if term in statement_lower and term not in support_lower
+    ]
+    if unsupported_sensitive:
+        reasons.append(f"{prefix}_unsupported_sensitive:" + ",".join(sorted(unsupported_sensitive)))
+
+    # Numbers must exist in the evidence actually cited by this statement. Merely appearing
+    # elsewhere in the transaction object is no longer sufficient.
+    invented_numbers = _numbers(text).difference(_numbers(support))
+    if invented_numbers:
+        reasons.append(f"{prefix}_unsupported_numbers:" + ",".join(sorted(invented_numbers)))
+
+    if any(phrase in statement_lower for phrase in (
+        "definitely", "certainly", "confirmed fraud", "confirmed illicit",
+        "is fraudulent", "is a scam", "proves wrongdoing",
+    )):
+        reasons.append(f"{prefix}_overclaim")
 
 
 def validate_claims_payload(payload: Any, contract: dict[str, Any]) -> dict[str, Any]:
     """Validate structured LLM JSON before generated language is trusted.
 
     Expected shape:
-      {"summary": str,
-       "claims": [{"text": str, "evidence_ids": ["E1"]}],
+      {"summary": {"text": str, "evidence_ids": ["E1"]},
+       "claims": [{"text": str, "evidence_ids": ["E2"]}],
        "uncertainty": str}
     """
     reasons: list[str] = []
@@ -162,8 +232,12 @@ def validate_claims_payload(payload: Any, contract: dict[str, Any]) -> dict[str,
     summary = payload.get("summary")
     claims = payload.get("claims")
     uncertainty = payload.get("uncertainty")
-    if not isinstance(summary, str) or not summary.strip():
-        reasons.append("missing_summary")
+    if not isinstance(summary, dict):
+        reasons.append("summary_not_cited_object")
+    else:
+        _validate_statement(
+            summary.get("text"), summary.get("evidence_ids"), contract, allowed_ids, "summary", reasons
+        )
     if not isinstance(uncertainty, str) or not uncertainty.strip():
         reasons.append("missing_uncertainty")
     if not isinstance(claims, list):
@@ -172,78 +246,37 @@ def validate_claims_payload(payload: Any, contract: dict[str, Any]) -> dict[str,
     if len(claims) > 5:
         reasons.append("too_many_claims")
 
-    tx_support = _transaction_support_text(contract)
-    global_numeric_support = _numbers(tx_support)
-
     for index, claim in enumerate(claims):
         if not isinstance(claim, dict):
             reasons.append(f"claim_{index}_not_object")
             continue
-        text = claim.get("text")
-        refs = claim.get("evidence_ids")
-        if not isinstance(text, str) or not text.strip():
-            reasons.append(f"claim_{index}_missing_text")
-            continue
-        text = text.strip()
-        if len(text) > 350:
-            reasons.append(f"claim_{index}_too_long")
+        _validate_statement(
+            claim.get("text"), claim.get("evidence_ids"), contract, allowed_ids, f"claim_{index}", reasons
+        )
 
-        if not isinstance(refs, list) or not refs:
-            reasons.append(f"claim_{index}_uncited")
-            continue
-        normalized = {str(ref).strip() for ref in refs}
-        unknown = normalized.difference(allowed_ids)
-        if unknown:
-            reasons.append(f"claim_{index}_unknown_evidence:" + ",".join(sorted(unknown)))
-            continue
-
-        support = _support_text(contract, normalized)
-        support_lower = support.lower()
-        claim_lower = text.lower()
-
-        unsupported_sensitive = [
-            term for term in SENSITIVE_TERMS
-            if term in claim_lower and term not in support_lower
-        ]
-        if unsupported_sensitive:
-            reasons.append(
-                f"claim_{index}_unsupported_sensitive:" + ",".join(sorted(unsupported_sensitive))
-            )
-
-        allowed_numbers = _numbers(support).union(global_numeric_support)
-        invented_numbers = _numbers(text).difference(allowed_numbers)
-        if invented_numbers:
-            reasons.append(
-                f"claim_{index}_unsupported_numbers:" + ",".join(sorted(invented_numbers))
-            )
-
-        if any(phrase in claim_lower for phrase in (
-            "definitely", "certainly", "confirmed fraud", "confirmed illicit",
-            "is fraudulent", "is a scam", "proves wrongdoing",
-        )):
-            reasons.append(f"claim_{index}_overclaim")
-
-    if claims and not allowed_ids:
+    if (claims or isinstance(summary, dict)) and not allowed_ids:
         reasons.append("claims_present_without_source_evidence")
 
     return {
         "grounded": not reasons,
         "reasons": reasons,
         "claim_count": len(claims),
-        "allowed_evidence_ids": sorted(allowed_ids),
+        "allowed_evidence_ids": sorted(allowed_ids, key=lambda item: int(item[1:])),
     }
 
 
 def render_validated_payload(payload: dict[str, Any]) -> str:
-    """Render only already-validated structured claims into user-facing text."""
-    summary = str(payload.get("summary") or "").strip()
-    claims = payload.get("claims") or []
+    """Render only already-validated structured statements into user-facing text."""
+    summary = payload.get("summary") or {}
+    summary_text = str(summary.get("text") or "").strip().rstrip(".") if isinstance(summary, dict) else ""
+    summary_refs = [str(ref).strip() for ref in summary.get("evidence_ids") or []] if isinstance(summary, dict) else []
+    rendered_summary = f"{summary_text} [{', '.join(summary_refs)}]." if summary_text and summary_refs else ""
+
     rendered_claims: list[str] = []
-    for claim in claims:
+    for claim in payload.get("claims") or []:
         text = str(claim.get("text") or "").strip().rstrip(".")
         refs = [str(ref).strip() for ref in claim.get("evidence_ids") or []]
         if text and refs:
             rendered_claims.append(f"{text} [{', '.join(refs)}].")
     uncertainty = str(payload.get("uncertainty") or "").strip()
-    parts = [part for part in [summary, " ".join(rendered_claims), uncertainty] if part]
-    return " ".join(parts)
+    return " ".join(part for part in [rendered_summary, " ".join(rendered_claims), uncertainty] if part)

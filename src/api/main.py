@@ -22,6 +22,7 @@ from src.api.observability_routes import router as observability_router
 from src.api.explanation_routes import router as explanation_router
 from src.api.ai_routes import router as ai_router
 from src.api.historical_routes import router as historical_router
+from src.api.deep_history_routes import router as deep_history_router
 from src.api.entity_routes import router as entity_router
 from src.api.evaluation_routes import router as evaluation_router
 from src.api.ml_routes import router as ml_router
@@ -51,7 +52,6 @@ FRONTEND_DIST = Path("/app/frontend_dist")
 
 
 async def _refresh_verified_intelligence(db):
-    """Best-effort official-source refresh that never blocks API readiness."""
     try:
         official_count = await sync_official_entities(db)
         if official_count:
@@ -74,7 +74,6 @@ async def _refresh_verified_intelligence(db):
 
 
 async def _prepare_ai_and_benchmark(db):
-    """Create audit storage and grow the independent benchmark toward evaluation scale."""
     try:
         await ensure_ai_audit_schema(db)
     except asyncio.CancelledError:
@@ -102,7 +101,6 @@ async def _prepare_ai_and_benchmark(db):
 
 
 async def _verify_grounded_ai_runtime(db):
-    """Perform one evidence-backed provider verification run when none exists yet."""
     try:
         await asyncio.sleep(2)
         await ensure_ai_audit_schema(db)
@@ -171,7 +169,6 @@ async def _verify_grounded_ai_runtime(db):
 
 
 async def _prepare_independent_ml():
-    """Train/refresh a provenance-gated, runtime-compatible shadow model."""
     try:
         db = await get_db()
         benchmark = await external_benchmark_summary(db)
@@ -257,16 +254,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.7.0",
+    version="1.7.1",
     lifespan=lifespan,
 )
 
 settings = get_settings()
-allowed_origins = [
-    origin.strip()
-    for origin in settings.cors_allowed_origins.split(",")
-    if origin.strip()
-] or ["*"]
+allowed_origins = [origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -304,6 +297,7 @@ app.include_router(observability_router)
 app.include_router(explanation_router)
 app.include_router(ai_router)
 app.include_router(historical_router)
+app.include_router(deep_history_router)
 app.include_router(entity_router)
 app.include_router(evaluation_router)
 app.include_router(ml_router)
@@ -318,7 +312,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.7.0",
+        version="1.7.1",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

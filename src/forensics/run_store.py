@@ -109,3 +109,23 @@ async def latest_run(db, case_id: str) -> dict[str, Any] | None:
         case_id,
     )
     return dict(row) if row else None
+
+
+async def latest_package(db, case_id: str) -> dict[str, Any] | None:
+    await ensure_run_schema(db)
+    row = await db.fetchrow(
+        """
+        SELECT package
+        FROM investigation_runs
+        WHERE case_id=$1
+        ORDER BY created_at DESC,id DESC
+        LIMIT 1
+        """,
+        case_id,
+    )
+    if not row:
+        return None
+    payload = row["package"]
+    if isinstance(payload, str):
+        return json.loads(payload)
+    return dict(payload) if isinstance(payload, dict) else payload

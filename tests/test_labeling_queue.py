@@ -1,11 +1,11 @@
-"""Tests for building an independent manual labeling queue."""
+"""Tests that the legacy labeling entrypoint cannot leak detector output to labelers."""
 import unittest
 
 from scripts.build_labeling_queue import build_rows
 
 
 class LabelingQueueTests(unittest.TestCase):
-    def test_detector_output_is_frozen_but_ground_truth_is_blank(self):
+    def test_labeler_rows_never_include_detector_output(self):
         tx_hash = "0x" + "1" * 64
         bundle = {
             "transfers": [{
@@ -25,13 +25,12 @@ class LabelingQueueTests(unittest.TestCase):
         }
         rows = build_rows(bundle)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["predicted_flag"], "1")
-        self.assertEqual(rows[0]["detector_signals"], "repeated_pair")
-        self.assertEqual(rows[0]["actual_label"], "")
-        self.assertEqual(rows[0]["label_source"], "")
+        self.assertNotIn("predicted_flag", rows[0])
+        self.assertNotIn("detector_signals", rows[0])
+        self.assertNotIn("actual_label", rows[0])
         self.assertTrue(rows[0]["case_id"].startswith("cs-"))
 
-    def test_unflagged_transfer_is_not_automatically_labeled_benign(self):
+    def test_unflagged_transfer_is_not_presented_as_benign_ground_truth(self):
         bundle = {
             "transfers": [{
                 "hash": "0x" + "2" * 64,
@@ -44,8 +43,8 @@ class LabelingQueueTests(unittest.TestCase):
             "investigation_report": {"behavioral_signals": []},
         }
         row = build_rows(bundle)[0]
-        self.assertEqual(row["predicted_flag"], "0")
-        self.assertEqual(row["actual_label"], "")
+        self.assertNotIn("predicted_flag", row)
+        self.assertNotIn("actual_label", row)
 
     def test_duplicate_transfer_identity_is_deduplicated(self):
         transfer = {

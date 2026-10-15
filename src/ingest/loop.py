@@ -5,6 +5,10 @@ Normal shallow Ethereum reorgs are recovered only after a common ancestor is
 cryptographically/evidentially verified. Deep or unverifiable forks still halt
 fail-closed for manual review.
 
+Only sufficiently confirmed blocks are durably indexed. The observed chain head
+may move, but a block is eligible for the "confirmed" transaction table only
+when it is at least the configured confirmation depth behind that head.
+
 The live transaction table is intentionally tiny on the free-tier profile.
 Blocks already older than the live window advance canonical lineage/checkpoint
 without writing transaction rows that would immediately expire. Canonical
@@ -30,6 +34,7 @@ from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
 from src.ingest.reorg import ensure_lineage_schema, record_lineage, recover_shallow_reorg
 from src.storage_budget import LIVE_RETENTION_MINUTES, prune_lineage
+from src.utils.config import get_settings
 
 
 _shutdown_requested = False
@@ -48,6 +53,15 @@ def _handle_shutdown(signum, frame):
     global _shutdown_requested
     _shutdown_requested = True
     logger.info("🛑 Shutdown requested. Finishing current iteration...")
+
+
+def confirmed_head(latest_head: int, confirmation_depth: int) -> int:
+    """Return the highest block eligible for durable confirmed ingestion."""
+    if latest_head < 0:
+        raise ValueError("latest_head must be non-negative")
+    if confirmation_depth < 1 or confirmation_depth > 64:
+        raise ValueError("confirmation_depth must be between 1 and 64")
+    return max(0, latest_head - confirmation_depth)
 
 
 def next_blocks(last_processed: int | None, latest: int, limit: int = 3) -> list[int]:
@@ -104,10 +118,13 @@ def is_chain_integrity_failure(error: Exception) -> bool:
 
 
 async def ingest_loop(interval_seconds: int = 15):
+    settings = get_settings()
+    confirmation_depth = settings.ingest_confirmation_depth
     logger.info(
-        "🚀 Starting ingest loop (interval={}s, live_retention={}m)",
+        "🚀 Starting ingest loop (interval={}s, live_retention={}m, confirmation_depth={})",
         interval_seconds,
         LIVE_RETENTION_MINUTES,
+        confirmation_depth,
     )
 
     client = BlockchainClient()
@@ -132,6 +149,7 @@ async def ingest_loop(interval_seconds: int = 15):
     last_processed_block, last_block_hash = await load_cursor_checkpoint(db)
     logger.info(f'Ingestion checkpoint restored: {last_processed_block}')
     latest_block = last_processed_block or 0
+    observed_head = latest_block
 
     try:
         while not _shutdown_requested:
@@ -140,7 +158,14 @@ async def ingest_loop(interval_seconds: int = 15):
 
             try:
                 logger.info(f"[{now}] 🔄 Iteration {iteration} — fetching latest block...")
-                latest_block = await client.get_latest_block_number()
+                observed_head = await client.get_latest_block_number()
+                latest_block = confirmed_head(observed_head, confirmation_depth)
+                logger.debug(
+                    "Observed head={} confirmed_ingest_head={} confirmation_depth={}",
+                    observed_head,
+                    latest_block,
+                    confirmation_depth,
+                )
 
                 if last_processed_block is None:
                     last_processed_block = latest_block - 1
@@ -151,7 +176,13 @@ async def ingest_loop(interval_seconds: int = 15):
                         await save_cursor_checkpoint(db, last_processed_block, last_block_hash)
                 elif latest_block < last_processed_block:
                     log_ingestion_health(latest_block, last_processed_block)
-                    logger.warning('Chain head below saved checkpoint; waiting for recovery')
+                    logger.warning(
+                        'Confirmed ingest head below saved checkpoint; waiting for recovery '
+                        '(observed_head={} confirmed_head={} checkpoint={})',
+                        observed_head,
+                        latest_block,
+                        last_processed_block,
+                    )
                     await asyncio.sleep(interval_seconds)
                     continue
 
@@ -169,8 +200,8 @@ async def ingest_loop(interval_seconds: int = 15):
                     canonical_hash = _block_hash(canonical['hash'])
                     if canonical_hash != last_block_hash.lower():
                         logger.warning(
-                            'Checkpoint mismatch: height={} saved_hash={} rpc_hash={} head={} action=verify_bounded_rewind',
-                            last_processed_block, last_block_hash, canonical_hash, latest_block,
+                            'Checkpoint mismatch: height={} saved_hash={} rpc_hash={} confirmed_head={} observed_head={} action=verify_bounded_rewind',
+                            last_processed_block, last_block_hash, canonical_hash, latest_block, observed_head,
                         )
                         recovery = await recover_shallow_reorg(
                             db,
@@ -193,7 +224,7 @@ async def ingest_loop(interval_seconds: int = 15):
                     log_ingestion_health(latest_block, last_processed_block)
                 if pending > batch_limit:
                     logger.info(
-                        "Block catch-up: {} pending; processing up to {} sequentially",
+                        "Block catch-up: {} confirmed blocks pending; processing up to {} sequentially",
                         pending,
                         batch_limit,
                     )
@@ -266,7 +297,7 @@ async def ingest_loop(interval_seconds: int = 15):
                 if recovered_mid_iteration:
                     logger.info('Canonical head changed mid-iteration; replay deferred to next iteration')
                 elif pending == 0:
-                    logger.debug("No new blocks at chain head")
+                    logger.debug("No new sufficiently confirmed blocks")
 
                 logger.info(
                     "📊 Session totals — Inserted: {:,} | Flagged: {} | Header-only catch-up: {}",
@@ -330,9 +361,10 @@ async def ingest_loop(interval_seconds: int = 15):
                 remaining = max(0, latest_block - (last_processed_block or latest_block))
                 sleep_seconds = catchup_sleep_seconds(remaining, interval_seconds)
                 logger.debug(
-                    "😴 Sleeping {}s (remaining_lag={} blocks)...",
+                    "😴 Sleeping {}s (remaining_confirmed_lag={} blocks, observed_head={})...",
                     sleep_seconds,
                     remaining,
+                    observed_head,
                 )
                 await asyncio.sleep(sleep_seconds)
 

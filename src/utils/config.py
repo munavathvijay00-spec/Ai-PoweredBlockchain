@@ -24,15 +24,10 @@ class Settings(BaseSettings):
     # AI
     openai_api_key: str = "not-set"
     llm_provider: str = "ollama"
-    # LLM_MODEL remains the local/Ollama model for backward compatibility.
     llm_model: str = "llama3.2:1b"
     ollama_url: str = "http://localhost:11434"
     groq_api_key: str = "not-set"
-    # Keep hosted-provider model selection independent from the local Ollama name.
-    # This model is a current Groq production model as of the 2026 project build.
     groq_model: str = "openai/gpt-oss-20b"
-    # Grounded AI runs out-of-band from ingestion so chain indexing never waits on
-    # an external model. Keep the batch bounded to control provider rate limits.
     ai_enrichment_batch_size: int = 8
     ai_enrichment_min_score: int = 20
 
@@ -40,6 +35,10 @@ class Settings(BaseSettings):
     api_key: str
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    cors_allowed_origins: str = "*"
+    public_rate_limit_per_minute: int = 120
+    expensive_rate_limit_per_minute: int = 20
+    max_request_body_bytes: int = 1_000_000
 
     # Risk scoring
     large_transaction_threshold_eth: float = 10.0
@@ -73,4 +72,6 @@ if __name__ == "__main__":
     print(f"   Groq Model: {settings.groq_model}")
     print(f"   AI enrichment batch: {settings.ai_enrichment_batch_size}")
     print(f"   Ollama URL: {settings.ollama_url}")
+    print(f"   Allowed origins: {settings.cors_allowed_origins}")
+    print(f"   Public RPM: {settings.public_rate_limit_per_minute}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

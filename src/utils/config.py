@@ -2,6 +2,7 @@
 Configuration loader.
 Reads .env file and provides typed access to settings.
 """
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -12,6 +13,10 @@ class Settings(BaseSettings):
     # Blockchain
     alchemy_api_key: str
     ethereum_rpc_url: str
+    # Only blocks at least this far behind the observed chain head are eligible
+    # for durable ingestion as "confirmed" records. Keep bounded so a bad env
+    # value cannot silently stall the worker for an extreme number of blocks.
+    ingest_confirmation_depth: int = Field(default=12, ge=1, le=64)
 
     # Database
     postgres_user: str = "postgres"
@@ -72,5 +77,6 @@ if __name__ == "__main__":
     print(f"   Local LLM Model: {settings.llm_model}")
     print(f"   Groq Model: {settings.groq_model}")
     print(f"   AI enrichment batch: {settings.ai_enrichment_batch_size}")
+    print(f"   Ingest confirmation depth: {settings.ingest_confirmation_depth}")
     print(f"   Ollama URL: {settings.ollama_url}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

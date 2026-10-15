@@ -12,6 +12,7 @@ from src.storage_budget import (
     HISTORY_MAX_ROWS_PER_WALLET,
     HISTORY_MAX_ROWS_GLOBAL,
 )
+from src.utils.config import get_settings
 
 router = APIRouter(prefix="/api", tags=["data coverage"])
 WALLET_PROVIDER_CATEGORIES = ["external", "erc20", "internal", "erc721", "erc1155"]
@@ -49,6 +50,8 @@ def _json_object(value):
 
 @router.get("/coverage")
 async def get_coverage(repo: TransactionRepository = Depends(get_transaction_repo)):
+    settings = get_settings()
+    confirmation_depth = settings.ingest_confirmation_depth
     stats = await repo.db.fetchrow("""
         SELECT MIN(block_number) AS min_block, MAX(block_number) AS max_block,
                MIN(timestamp) AS oldest_observed_at, MAX(timestamp) AS newest_observed_at,
@@ -146,10 +149,13 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "updated_at": cursor["updated_at"] if cursor else None,
         "age_seconds": cursor_age,
         "freshness_status": freshness_status,
+        "confirmation_depth_blocks": confirmation_depth,
+        "confirmation_policy": "index_only_at_or_below_observed_head_minus_depth",
+        "finality_claimed": False,
         "automatic_shallow_reorg_recovery": True,
         "reorg_recovery_lineage_blocks": LINEAGE_RETENTION_BLOCKS,
         "historical_completeness": False,
-        "note": "The worker verifies checkpoint hashes and parent continuity, keeps bounded canonical lineage, and automatically rewinds only when a common ancestor is verified. Deep or unverifiable forks still halt fail-closed.",
+        "note": "The worker indexes only blocks behind the configured confirmation depth, verifies checkpoint hashes and parent continuity, keeps bounded canonical lineage, and automatically rewinds only when a common ancestor is verified. Confirmation depth reduces short-reorg exposure but is not a finality guarantee; deep or unverifiable forks halt fail-closed.",
     }
 
     production_ready_for = [
@@ -165,6 +171,7 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "api_database": "connected",
         "ingestion": freshness_status,
         "checkpoint_integrity": checkpoint["status"],
+        "confirmation_depth_blocks": confirmation_depth,
         "recent_data_available": bool(stats["stored_transactions"]),
         "retention_window_minutes": LIVE_RETENTION_MINUTES,
         "historical_archive": False,
@@ -197,6 +204,7 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "checkpoint_block": cursor["last_block"] if cursor else None,
             "checkpoint_updated_at": cursor["updated_at"] if cursor else None,
             "checkpoint_age_seconds": cursor_age,
+            "confirmation_depth_blocks": confirmation_depth,
             "newest_observed_transaction_age_seconds": newest_tx_age,
             "stored_transactions": stats["stored_transactions"],
         },
@@ -218,8 +226,9 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "blocks_with_stored_transactions": stats["blocks_with_stored_transactions"],
             "oldest_observed_at": stats["oldest_observed_at"],
             "newest_observed_at": stats["newest_observed_at"],
+            "confirmation_depth_blocks": confirmation_depth,
             "historical_completeness": False,
-            "note": f"The live native table retains about {LIVE_RETENTION_MINUTES} minutes. Older catch-up blocks preserve canonical checkpoint/lineage state without storing expired transaction rows.",
+            "note": f"The live native table retains about {LIVE_RETENTION_MINUTES} minutes and only receives blocks behind the configured {confirmation_depth}-block confirmation depth. Older catch-up blocks preserve canonical checkpoint/lineage state without storing expired transaction rows. This confirmation policy is not a finality guarantee.",
         },
         "wallet_transfer_provider": {
             "status": "on_demand_paginated_with_bounded_persistent_cache",
@@ -292,6 +301,7 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
         "product_readiness": readiness,
         "limitations": [
             "The rolling native database is deliberately not a chain-wide Ethereum archive.",
+            "Native ingestion intentionally lags the observed chain head by the configured confirmation depth; this reduces short-reorg exposure but does not guarantee finality.",
             "No guarantee that all blocks between observed minimum and maximum have retained native transaction rows; canonical checkpoint continuity is tracked separately.",
             "An empty wallet result does not imply an inactive wallet.",
             "Provider-indexed internal value transfers are not a full EVM trace tree.",

@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 import asyncio
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -41,6 +42,7 @@ from src.agents.ai_audit import (
 from src.agents.explainer import evidence_explanation
 from src.agents.structured_grounding import structured_explain_with_audit
 from src.database.connection import get_db, close_db
+from src.forensics.runtime_job import execute_case
 from src.metrics import api_requests_total, api_request_duration_seconds, db_health_up
 from src.ml.model_registry import model_status as independent_ml_status, train_and_register
 from src.risk.external_benchmark import external_benchmark_summary, sync_external_benchmark
@@ -223,6 +225,17 @@ async def _prepare_independent_ml():
         logger.warning("Independent ML bootstrap unavailable; production rule scoring remains unchanged: {}", type(exc).__name__)
 
 
+async def _run_flagship_once(db):
+    case_id = os.getenv("FLAGSHIP_CASE_ID", "fbi-stake-2023-94f1").strip()
+    try:
+        await asyncio.sleep(3)
+        await execute_case(db, case_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("Flagship startup run failed case={} error_type={}", case_id, type(exc).__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Blockchain Intelligence API")
@@ -234,6 +247,9 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_verify_grounded_ai_runtime(db)),
         asyncio.create_task(_prepare_independent_ml()),
     ]
+    if os.getenv("RUN_FLAGSHIP_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes"}:
+        background_tasks.append(asyncio.create_task(_run_flagship_once(db)))
+        logger.info("Flagship startup execution enabled")
     logger.success("API ready")
     try:
         yield
@@ -255,7 +271,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.8.0",
+    version="1.8.1",
     lifespan=lifespan,
 )
 
@@ -314,7 +330,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.8.0",
+        version="1.8.1",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

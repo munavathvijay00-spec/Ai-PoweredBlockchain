@@ -8,6 +8,7 @@ const valueOf = v => {
   const n = Number.parseFloat(String(v ?? '').replace(/,/g, ''));
   return Number.isFinite(n) ? n : 0;
 };
+const formatAmount = value => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 8 });
 
 function hash01(text) {
   let h = 2166136261;
@@ -490,8 +491,8 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
   }
 
   const list = network.nodes.filter(n => !query || n.id.includes(query.toLowerCase())).sort((a, b) => b.txCount - a.txCount);
-  const totalIn = selectedNode ? Object.values(selectedNode.inByAsset).reduce((a, b) => a + b, 0) : 0;
-  const totalOut = selectedNode ? Object.values(selectedNode.outByAsset).reduce((a, b) => a + b, 0) : 0;
+  const selectedAssets = selectedNode ? assets(selectedNode).sort((a, b) => (b.incoming + b.outgoing) - (a.incoming + a.outgoing)) : [];
+  const ethSummary = selectedAssets.find(row => row.asset === 'ETH');
 
   return <section className="relative overflow-hidden rounded-2xl border border-cyan-300/[0.09] bg-[#020611] shadow-2xl shadow-black/50">
     <div className="relative min-h-[760px] bg-[#020611]">
@@ -532,12 +533,12 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
         <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-slate-400">
           <span>Transfers</span><span className="text-right text-slate-200">{hoveredNode.txCount}</span>
           <span>Counterparties</span><span className="text-right text-slate-200">{hoveredNode.counterparties.size}</span>
-          <span>ETH observed</span><span className="text-right text-slate-200">{observedEth(hoveredNode).toLocaleString(undefined, { maximumFractionDigits: 5 })}</span>
+          <span>ETH observed</span><span className="text-right text-slate-200">{formatAmount(observedEth(hoveredNode))}</span>
         </div>
         <div className="mt-1.5 text-[9px] text-slate-600">Click wallet for evidence</div>
       </div>}
 
-      {selectedNode && <aside className="absolute left-0 top-[112px] z-40 w-[360px] max-w-[88vw] rounded-r-2xl border-y border-r border-white/[0.09] bg-[#181a24]/97 p-4 shadow-2xl backdrop-blur-xl">
+      {selectedNode && <aside className="absolute left-0 top-[112px] z-40 w-[390px] max-w-[90vw] rounded-r-2xl border-y border-r border-white/[0.09] bg-[#181a24]/97 p-4 shadow-2xl backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3 border-b border-white/[0.08] pb-4">
           <div><p className="text-[10px] uppercase tracking-[.18em] text-slate-500">Selected wallet</p><p className="mt-1 font-mono text-sm text-white">{short(selectedNode.id)}</p><p className="mt-1 text-[10px] text-cyan-300/70">Camera focused · connected paths emphasized</p></div>
           <button onClick={() => setSelected(null)} className="text-2xl leading-none text-slate-500 hover:text-white">×</button>
@@ -550,14 +551,17 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
         </div>
 
         <div className="mt-4 space-y-3 text-sm">
-          <div className="flex items-center justify-between"><span className="text-slate-400">↙ Observed IN</span><span className="text-slate-100">{totalIn.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-400">↗ Observed OUT</span><span className="text-slate-100">{totalOut.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span></div>
-          <p className="-mt-1 text-[10px] leading-4 text-slate-600">Observed totals use only transaction evidence currently loaded into this graph; they are not lifetime wallet totals.</p>
+          <div className="flex items-center justify-between"><span className="text-slate-400">↙ Observed ETH IN</span><span className="text-slate-100">{formatAmount(ethSummary?.incoming)} ETH</span></div>
+          <div className="flex items-center justify-between"><span className="text-slate-400">↗ Observed ETH OUT</span><span className="text-slate-100">{formatAmount(ethSummary?.outgoing)} ETH</span></div>
+          <p className="-mt-1 text-[10px] leading-4 text-slate-600">Observed values use only evidence loaded into this graph. Different assets are never added together.</p>
           <div className="flex items-center justify-between"><span className="text-slate-400">Transfers</span><span className="text-slate-100">{selectedNode.txCount}</span></div>
           <div className="flex items-center justify-between"><span className="text-slate-400">Counterparties</span><span className="text-slate-100">{selectedNode.counterparties.size}</span></div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">{assets(selectedNode).slice(0, 4).map(row => <span key={row.asset} className="rounded-full bg-white/[0.06] px-3 py-1 text-xs text-slate-300">{row.asset}</span>)}</div>
+        {selectedAssets.length > 0 && <div className="mt-4 rounded-xl border border-white/[0.06] bg-black/15 p-3">
+          <div className="mb-2 flex items-center justify-between"><span className="text-[10px] uppercase tracking-[.16em] text-slate-500">Observed by asset</span><span className="text-[9px] text-slate-600">loaded evidence</span></div>
+          <div className="max-h-36 space-y-2 overflow-auto">{selectedAssets.slice(0, 8).map(row => <div key={row.asset} className="grid grid-cols-[64px_1fr_1fr] items-center gap-2 text-[10px]"><span className="rounded-full bg-white/[0.06] px-2 py-1 text-center font-medium text-slate-300">{row.asset}</span><span className="truncate text-right text-slate-400">IN <b className="font-medium text-slate-200">{formatAmount(row.incoming)}</b></span><span className="truncate text-right text-slate-400">OUT <b className="font-medium text-slate-200">{formatAmount(row.outgoing)}</b></span></div>)}</div>
+        </div>}
         <a href={`https://etherscan.io/address/${selectedNode.id}`} target="_blank" rel="noreferrer" className="mt-5 inline-flex text-xs text-cyan-300 hover:underline">View address evidence ↗</a>
       </aside>}
 
@@ -571,6 +575,6 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
 
       <div className="pointer-events-none absolute bottom-4 left-4 rounded-lg border border-white/[0.05] bg-black/30 px-3 py-2 text-[11px] text-slate-500 backdrop-blur">Drag · wheel zoom · hover wallet for context · click wallet to focus</div>
     </div>
-    <div className="border-t border-white/[0.06] bg-[#090d16] px-4 py-3 text-[11px] text-slate-500">Loaded ChainScope evidence only. Bubble size reflects observed activity in the currently loaded graph; animated particles visualize observed transfer direction. Visual depth, color and proximity do not prove ownership, intent or causal attribution.</div>
+    <div className="border-t border-white/[0.06] bg-[#090d16] px-4 py-3 text-[11px] text-slate-500">Loaded ChainScope evidence only. Bubble size reflects observed activity in the currently loaded graph; animated particles visualize observed transfer direction. Asset quantities are reported separately and are never cross-summed. Visual depth, color and proximity do not prove ownership, intent or causal attribution.</div>
   </section>;
 }

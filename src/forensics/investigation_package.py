@@ -22,7 +22,8 @@ def build_package(
     evidence: list[dict[str, Any]],
     forensics: dict[str, Any],
     entity_intelligence: dict[str, Any] | None = None,
-    anomaly: dict[str, Any] | None = None,
+    wallet_behavior_features: dict[str, Any] | None = None,
+    transaction_anomaly: dict[str, Any] | None = None,
     supervised_ml: dict[str, Any] | None = None,
     ai_investigation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -32,7 +33,8 @@ def build_package(
         "evidence": evidence,
         "forensics": forensics,
         "entity_intelligence": entity_intelligence or {},
-        "behavioral_anomaly": anomaly or {},
+        "wallet_behavior_features": wallet_behavior_features or {},
+        "transaction_anomaly": transaction_anomaly or {},
         "supervised_ml": supervised_ml or {},
         "ai_investigation": ai_investigation or {},
     }
@@ -59,7 +61,9 @@ def build_package(
         "interpretation_policy": {
             "external_attribution_is_not_generated_by_chainscope": True,
             "forensic_findings_are_observations_not_verdicts": True,
-            "ml_scores_are_not_criminality_probabilities": True,
+            "wallet_behavior_features_are_descriptive_not_labels": True,
+            "transaction_anomaly_is_not_criminality_probability": True,
+            "supervised_ml_is_not_promoted_without_quality_gate": True,
             "ai_claims_must_be_grounded_in_deterministic_findings": True,
             "coverage_limits_must_remain_visible": True,
         },

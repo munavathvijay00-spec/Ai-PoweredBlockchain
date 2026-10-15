@@ -2,44 +2,68 @@
 
 ChainScope currently has **no validated fraud-detection accuracy**. The evaluation tools make that limitation measurable instead of hiding it. They do not create ground truth and they must not be used to turn ChainScope's own flags into labels.
 
-## 1. Freeze an evidence sample
+## 1. Freeze a blind evaluation package
 
-Export a wallet evidence bundle from ChainScope, then create an independent labeling queue:
+Export a ChainScope wallet evidence bundle, then build a leakage-resistant package:
 
 ```bash
-python scripts/build_labeling_queue.py chainscope-evidence.json labeling_queue.csv
+python scripts/build_blind_evaluation_set.py chainscope-evidence.json eval_package
 ```
 
-The queue freezes transaction evidence and ChainScope's current `predicted_flag`, but intentionally leaves these columns blank:
+The package deliberately separates what the human reviewer sees from what ChainScope predicted:
 
-- `actual_label`
-- `label_source`
-- `label_evidence_url`
-- `label_notes`
+- `cases.csv` — factual case material visible to labelers;
+- `labels.csv` — blank adjudication sheet with no detector prediction;
+- `predictions.csv` — frozen ChainScope predictions; keep this hidden from labelers;
+- `manifest.json` — dataset identity and SHA-256 hashes for reproducibility.
 
-A reviewer must fill those fields from evidence independent of ChainScope. An unflagged ChainScope transaction is **not** automatically a benign ground-truth case.
+Do **not** give `predictions.csv` to the person assigning ground truth. The reviewer should label from independent evidence only.
 
-## 2. Evaluation CSV schema
+The older `build_labeling_queue.py` workflow is retained only for compatibility and should not be used for final independent performance claims because it exposes detector output to the reviewer.
 
-The evaluator requires at least:
+## 2. Independent adjudication requirements
+
+For every labeled case, complete:
+
+- `actual_label` — `1` or `0` for the precisely defined target condition;
+- `label_source` — independent source or adjudication method;
+- `label_evidence_url` — source used to support the label;
+- `adjudicator_id` — reviewer identifier;
+- `adjudicated_at` — adjudication timestamp.
+
+An unflagged ChainScope transaction is **not** automatically a benign ground-truth case, and a flagged transaction is **not** automatically positive.
+
+## 3. Evaluate only after labels are frozen
+
+Keep human labels and detector predictions separate until evaluation time:
+
+```bash
+python -m unittest discover -s tests -p 'test_detection_evaluation.py' -v
+python -m unittest discover -s tests -p 'test_blind_holdout.py' -v
+python scripts/evaluate_blind_holdout.py \
+  eval_package/labels.csv \
+  eval_package/predictions.csv \
+  eval_package/manifest.json
+```
+
+The sealed evaluator:
+
+- rejects duplicate or blank `case_id` values;
+- rejects missing labels or predictions;
+- requires exact case-ID agreement between files;
+- requires independent label provenance fields;
+- verifies the frozen `predictions.csv` SHA-256 against the manifest before computing metrics;
+- never silently converts abstention into a benign result.
+
+For low-level evaluator testing, `scripts/evaluate_detection.py` still accepts a prejoined CSV with:
 
 ```csv
 case_id,actual_label,predicted_flag
 ```
 
-- `case_id`: unique, stable case identifier; use anonymized IDs when possible.
-- `actual_label`: independently adjudicated ground-truth label, `1` for the precisely defined target condition and `0` for its absence.
-- `predicted_flag`: `1`, `0`, or `abstain`. Aliases `review`, `clear`, and `insufficient_evidence` are accepted.
-- Never label a case positive simply because ChainScope flagged it.
-- Do not publish results from synthetic examples as measured real-world performance.
+Do not use a manually joined CSV for the final holdout claim when the sealed blind package is available.
 
-## 3. Run the evaluator
-
-```bash
-python -m unittest discover -s tests -p 'test_detection_evaluation.py' -v
-python -m unittest discover -s tests -p 'test_labeling_queue.py' -v
-python scripts/evaluate_detection.py path/to/labeled_cases.csv
-```
+## 4. Reported metrics
 
 The evaluator reports:
 
@@ -73,6 +97,7 @@ ChainScope can explicitly abstain when evidence is insufficient. Evaluation keep
 8. Repeat evaluation on new time periods and, where possible, independent data sources.
 9. Do not treat a transaction-level benchmark as proof of wallet-level accuracy, or vice versa.
 10. Do not describe entity-source matches as fraud-detection accuracy. Source attribution and behavior detection are separate claims.
+11. Do not publish synthetic examples as measured real-world performance.
 
 ## Operational scope
 

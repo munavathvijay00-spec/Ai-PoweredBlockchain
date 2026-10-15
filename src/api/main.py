@@ -25,6 +25,7 @@ from src.api.historical_routes import router as historical_router
 from src.api.entity_routes import router as entity_router
 from src.api.evaluation_routes import router as evaluation_router
 from src.api.ml_routes import router as ml_router
+from src.api.readiness_routes import router as readiness_router
 from src.api.models import HealthResponse
 from src.agents.ai_audit import (
     ai_quality_summary,
@@ -302,6 +303,7 @@ app.include_router(historical_router)
 app.include_router(entity_router)
 app.include_router(evaluation_router)
 app.include_router(ml_router)
+app.include_router(readiness_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])

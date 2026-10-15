@@ -26,6 +26,7 @@ from src.api.entity_routes import router as entity_router
 from src.api.evaluation_routes import router as evaluation_router
 from src.api.ml_routes import router as ml_router
 from src.api.readiness_routes import router as readiness_router
+from src.api.forensic_routes import router as forensic_router
 from src.api.models import HealthResponse
 from src.agents.ai_audit import (
     ai_quality_summary,
@@ -99,13 +100,7 @@ async def _prepare_ai_and_benchmark(db):
 
 
 async def _verify_grounded_ai_runtime(db):
-    """Perform one evidence-backed provider verification run when none exists yet.
-
-    This never invents a synthetic transaction and never weakens the grounding gate. It
-    selects one retained transaction with stored risk evidence, asks the configured model
-    for a structured explanation, then records the exact accepted/rejected result in the
-    normal audit table. A successful run makes /api/ai/status runtime-verifiable.
-    """
+    """Perform one evidence-backed provider verification run when none exists yet."""
     try:
         await asyncio.sleep(2)
         await ensure_ai_audit_schema(db)
@@ -260,16 +255,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.5.0",
+    version="1.6.0",
     lifespan=lifespan,
 )
 
+settings = get_settings()
+allowed_origins = [
+    origin.strip()
+    for origin in getattr(settings, "cors_allowed_origins", "*").split(",")
+    if origin.strip()
+] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "Authorization"],
 )
 
 
@@ -304,6 +305,7 @@ app.include_router(entity_router)
 app.include_router(evaluation_router)
 app.include_router(ml_router)
 app.include_router(readiness_router)
+app.include_router(forensic_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])
@@ -312,7 +314,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.5.0",
+        version="1.6.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

@@ -27,6 +27,8 @@ from src.api.evaluation_routes import router as evaluation_router
 from src.api.ml_routes import router as ml_router
 from src.api.readiness_routes import router as readiness_router
 from src.api.forensic_routes import router as forensic_router
+from src.api.investigator_routes import router as investigator_router
+from src.api.security import AbuseProtectionMiddleware
 from src.api.models import HealthResponse
 from src.agents.ai_audit import (
     ai_quality_summary,
@@ -255,14 +257,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.6.0",
+    version="1.7.0",
     lifespan=lifespan,
 )
 
 settings = get_settings()
 allowed_origins = [
     origin.strip()
-    for origin in getattr(settings, "cors_allowed_origins", "*").split(",")
+    for origin in settings.cors_allowed_origins.split(",")
     if origin.strip()
 ] or ["*"]
 app.add_middleware(
@@ -272,6 +274,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key", "Authorization"],
 )
+app.add_middleware(AbuseProtectionMiddleware)
 
 
 @app.middleware("http")
@@ -306,6 +309,7 @@ app.include_router(evaluation_router)
 app.include_router(ml_router)
 app.include_router(readiness_router)
 app.include_router(forensic_router)
+app.include_router(investigator_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])
@@ -314,7 +318,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.6.0",
+        version="1.7.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

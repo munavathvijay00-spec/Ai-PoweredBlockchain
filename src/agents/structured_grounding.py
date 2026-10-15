@@ -1,8 +1,8 @@
 """Structured, fail-closed AI reasoning over retained blockchain evidence.
 
-The provider must return JSON claims. Claims are validated against the evidence contract
-before rendering. Any parse, citation, semantic-support, numeric, or overclaim failure
-returns the deterministic explanation instead.
+The provider must return JSON statements. Summary and claims are validated against the
+evidence contract before rendering. Any parse, citation, semantic-support, numeric, or
+overclaim failure returns the deterministic explanation instead.
 """
 from __future__ import annotations
 
@@ -30,22 +30,24 @@ EVIDENCE_CONTRACT_JSON:
 
 Return ONLY valid JSON with exactly this shape:
 {{
-  "summary": "one short non-technical sentence",
+  "summary": {{"text": "one short evidence-backed sentence", "evidence_ids": ["E1"]}},
   "claims": [
-    {{"text": "one factual claim", "evidence_ids": ["E1"]}}
+    {{"text": "one factual claim", "evidence_ids": ["E2"]}}
   ],
   "uncertainty": "one short sentence explaining that indicators are not proof of wrongdoing"
 }}
 
 Hard rules:
-- Every factual claim MUST cite one or more evidence_ids present in the contract.
+- The summary and EVERY factual claim MUST cite one or more evidence_ids present in the contract.
+- Cite the specific transaction-fact evidence item when mentioning a block, address, value,
+  transaction hash, or risk score. An unrelated risk-factor citation is not sufficient.
 - Do not create or infer wallet identity, ownership, intent, fraud, sanctions, scams, hacks,
   theft, laundering, exchange use, mixer use, historical behavior, or counterparties unless
   the cited evidence explicitly states it.
-- Do not introduce a number unless it appears in the transaction object or cited evidence.
+- Do not introduce a number unless that exact number appears in the evidence cited by that statement.
 - Do not convert values to fiat or add market prices.
 - Use at most 3 claims.
-- If the evidence is insufficient for a factual claim, omit that claim.
+- If the evidence is insufficient for a factual statement, omit the claim and keep the summary narrow.
 - Never output markdown or prose outside the JSON object.
 """
 
@@ -122,7 +124,7 @@ async def structured_explain_with_audit(tx: dict[str, Any], factors: list[dict[s
 
     validation = validate_claims_payload(parsed, contract)
     if not validation.get("grounded"):
-        logger.warning("Rejected structured AI claims that failed evidence validation")
+        logger.warning("Rejected structured AI statements that failed evidence validation")
         return {
             **base,
             "status": "grounding_rejected",

@@ -1,6 +1,7 @@
 # 🚀 Blockchain Intelligence Platform
 
-**Live Demo:** [frontend-mu-woad-t9a0714g2q.vercel.app](https://frontend-mu-woad-t9a0714g2q.vercel.app)  
+**Live Demo (current bundled frontend):** [ai-poweredblockchain-production.up.railway.app/app/](https://ai-poweredblockchain-production.up.railway.app/app/)  
+**Legacy Vercel frontend:** [frontend-mu-woad-t9a0714g2q.vercel.app](https://frontend-mu-woad-t9a0714g2q.vercel.app)  
 **API Docs:** [ai-poweredblockchain-production.up.railway.app/docs](https://ai-poweredblockchain-production.up.railway.app/docs)  
 **Backend API:** [ai-poweredblockchain-production.up.railway.app](https://ai-poweredblockchain-production.up.railway.app)
 
@@ -13,7 +14,7 @@ Ethereum wallet investigation dashboard with observed transfers, counterparty an
 - **Queries Ethereum transfers** — Requests bounded mainnet transfer pages from the configured provider; indexed ingestion is currently interrupted by a checkpoint mismatch
 - **Shows review signals** — Displays rule-based signals and transaction evidence; scores are not calibrated fraud probabilities
 - **Generates investigation summaries** — Presents the API's evidence-linked wallet report, coverage and limitations
-- **Provides an investigation dashboard** — React wallet lookup, direction filters, counterparties, graph, and CSV/JSON exports
+- **Provides an investigation dashboard** — React wallet lookup, direction filters, counterparties, 3D fund-flow graph, and CSV/JSON exports
 - **Exposes a documented REST API** — See the deployed OpenAPI docs for current routes and schemas
 
 ---
@@ -22,8 +23,9 @@ Ethereum wallet investigation dashboard with observed transfers, counterparty an
 
 - Indexed external ETH and ERC-20 transfers only; internal calls, NFTs, and complete historical coverage are not established.
 - The production ingestion worker is blocked by a canonical-chain checkpoint mismatch. Indexed dashboard data may be stale.
-- Behavioral review signals are not fraud verdicts. Detection precision, recall, and false-positive rates have not been measured against labeled ground truth.
+- Behavioral review signals are not fraud verdicts. Detection precision, recall, and false-positive rates have not been measured against a sufficiently large independently labeled holdout yet.
 - Transfer counterparties are observed addresses, not proof of common ownership.
+- The Vercel URL is retained only as a legacy deployment; use the Railway `/app/` URL to inspect the frontend bundled from the current repository deployment.
 
 ## 🏗️ Architecture
 
@@ -37,8 +39,8 @@ Ethereum wallet investigation dashboard with observed transfers, counterparty an
 | **Backend** | Python 3.12 + FastAPI + asyncpg |
 | **Database** | PostgreSQL |
 | **AI** | Ollama + llama3.2:1b (local LLM) |
-| **Frontend** | React + Vite + TailwindCSS + Recharts |
-| **Infra** | Docker + Railway + Vercel |
+| **Frontend** | React + Vite + TailwindCSS + Recharts + custom canvas 3D fund-flow renderer |
+| **Infra** | Docker + Railway + Vercel (legacy frontend) |
 
 ---
 

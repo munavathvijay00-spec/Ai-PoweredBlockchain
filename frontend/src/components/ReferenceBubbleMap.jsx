@@ -222,9 +222,9 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
 
       ctx.save();
       ctx.translate(centerX + parallaxX * 0.2, centerY + parallaxY * 0.2);
-      ctx.strokeStyle = 'rgba(20, 174, 229, 0.095)';
+      ctx.strokeStyle = 'rgba(20, 174, 229, 0.055)';
       ctx.lineWidth = 1;
-      const orbitCount = quality === 'low' ? 2 : 4;
+      const orbitCount = quality === 'low' ? 2 : 3;
       for (let i = 0; i < orbitCount; i += 1) {
         const wobble = Math.sin(t * 0.22 + i) * 4;
         ctx.beginPath();
@@ -233,14 +233,14 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
       }
       ctx.restore();
 
-      const starCount = quality === 'low' ? 18 : quality === 'medium' ? 32 : 56;
+      const starCount = quality === 'low' ? 12 : quality === 'medium' ? 24 : 34;
       for (let i = 0; i < starCount; i += 1) {
         const sx = (hash01(`star-x-${i}`) * width + t * (2 + hash01(`star-v-${i}`) * 5)) % width;
         const sy = hash01(`star-y-${i}`) * height;
         const twinkle = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(t * (0.7 + hash01(`star-s-${i}`)) + i));
-        ctx.fillStyle = `rgba(71, 213, 255, ${twinkle * 0.45})`;
+        ctx.fillStyle = `rgba(71, 213, 255, ${twinkle * 0.26})`;
         ctx.beginPath();
-        ctx.arc(sx, sy, 0.55 + hash01(`star-r-${i}`) * 1.35, 0, Math.PI * 2);
+        ctx.arc(sx, sy, 0.5 + hash01(`star-r-${i}`) * 1.1, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -262,7 +262,7 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
       });
 
       const edgeHits = [];
-      const particleCap = quality === 'low' ? 1 : quality === 'medium' ? 2 : 3;
+      const particleCap = quality === 'low' ? 1 : quality === 'medium' ? 1 : 2;
       for (const edge of network.edges) {
         const a = projected.get(edge.source);
         const b = projected.get(edge.target);
@@ -276,10 +276,10 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
 
         ctx.save();
         ctx.strokeStyle = active ? '#67e8f9' : cyan ? '#25c9fb' : '#29435c';
-        ctx.globalAlpha = (active ? 0.96 : hoveredEdge ? 0.78 : dim ? 0.025 : rootEdge ? 0.5 : 0.28) * depthAlpha;
-        ctx.lineWidth = active ? 2.05 : hoveredEdge ? 1.6 : rootEdge ? 1.05 : 0.72;
-        ctx.shadowColor = cyan ? 'rgba(37,201,251,.82)' : 'transparent';
-        ctx.shadowBlur = active ? 14 : hoveredEdge ? 9 : rootEdge ? 5 : 0;
+        ctx.globalAlpha = (active ? 0.96 : hoveredEdge ? 0.66 : dim ? 0.02 : rootEdge ? 0.34 : 0.16) * depthAlpha;
+        ctx.lineWidth = active ? 2.05 : hoveredEdge ? 1.5 : rootEdge ? 0.9 : 0.58;
+        ctx.shadowColor = cyan ? 'rgba(37,201,251,.72)' : 'transparent';
+        ctx.shadowBlur = active ? 14 : hoveredEdge ? 8 : rootEdge ? 3 : 0;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
@@ -296,7 +296,7 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
         const ty = b.y - uy * (targetRadius + 4);
         ctx.save();
         ctx.fillStyle = cyan ? '#70e4ff' : '#506783';
-        ctx.globalAlpha = active ? 1 : dim ? 0.04 : 0.48;
+        ctx.globalAlpha = active ? 1 : dim ? 0.025 : rootEdge ? 0.38 : 0.26;
         ctx.beginPath();
         ctx.moveTo(tx, ty);
         ctx.lineTo(tx - ux * 6 - uy * 3, ty - uy * 6 + ux * 3);
@@ -313,12 +313,12 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
             const p = (phase + t * speed) % 1;
             const px = a.x + dx * p;
             const py = a.y + dy * p;
-            const pr = active ? 2.8 : rootEdge ? 2 : 1.45;
+            const pr = active ? 2.8 : rootEdge ? 1.7 : 1.15;
             ctx.save();
-            ctx.globalAlpha = active ? 1 : rootEdge ? 0.82 : 0.48;
+            ctx.globalAlpha = active ? 1 : rootEdge ? 0.6 : 0.24;
             ctx.fillStyle = active ? '#d8fbff' : '#7be7ff';
             ctx.shadowColor = '#17c9ff';
-            ctx.shadowBlur = active ? 15 : 7;
+            ctx.shadowBlur = active ? 15 : 4;
             ctx.beginPath();
             ctx.arc(px, py, pr, 0, Math.PI * 2);
             ctx.fill();
@@ -340,29 +340,29 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
         const dim = selectedNode && !isSelected && !connected;
         const activeCluster = node.isRoot || node.depth <= 1 || connected || isSelected;
         const theme = nodeTheme(node, activeCluster);
-        const breathe = node.isRoot ? 1 + Math.sin(t * 2.15) * 0.05 : 1 + Math.sin(t * 0.8 + hash01(node.id) * 8) * (quality === 'low' ? 0.009 : 0.018);
+        const breathe = node.isRoot ? 1 + Math.sin(t * 2.15) * 0.04 : 1 + Math.sin(t * 0.8 + hash01(node.id) * 8) * (quality === 'low' ? 0.008 : 0.014);
         const r = radiusFor(node) * Math.sqrt(effectiveZoom) * p.scale * breathe * (isSelected ? 1.28 : isHovered ? 1.14 : 1);
 
         if (node.isRoot) {
-          for (let ring = 0; ring < (quality === 'low' ? 2 : 3); ring += 1) {
-            const phase = (t * 0.32 + ring / 3) % 1;
+          for (let ring = 0; ring < 2; ring += 1) {
+            const phase = (t * 0.3 + ring / 2) % 1;
             ctx.save();
-            ctx.strokeStyle = `rgba(41, 211, 255, ${0.3 * (1 - phase)})`;
-            ctx.lineWidth = 1.2;
+            ctx.strokeStyle = `rgba(41, 211, 255, ${0.18 * (1 - phase)})`;
+            ctx.lineWidth = 1;
             ctx.shadowColor = '#1bd4ff';
-            ctx.shadowBlur = quality === 'low' ? 5 : 10;
+            ctx.shadowBlur = quality === 'low' ? 3 : 6;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, r + 8 + phase * 30, 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, r + 8 + phase * 26, 0, Math.PI * 2);
             ctx.stroke();
             ctx.restore();
           }
         }
 
         ctx.save();
-        ctx.globalAlpha = dim ? 0.075 : activeCluster ? 0.98 : 0.68;
+        ctx.globalAlpha = dim ? 0.065 : activeCluster ? 0.96 : 0.64;
         if (activeCluster) {
-          ctx.shadowColor = node.isRoot ? 'rgba(26, 212, 255, .95)' : theme.glow;
-          ctx.shadowBlur = node.isRoot ? 28 : isHovered || isSelected ? 22 : 9;
+          ctx.shadowColor = node.isRoot ? 'rgba(26, 212, 255, .82)' : theme.glow;
+          ctx.shadowBlur = node.isRoot ? 20 : isHovered || isSelected ? 20 : 7;
         }
 
         const g = ctx.createRadialGradient(p.x - r * 0.38, p.y - r * 0.42, r * 0.04, p.x, p.y, r * 1.12);
@@ -373,7 +373,7 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
         g.addColorStop(1, '#020711');
         ctx.fillStyle = g;
         ctx.strokeStyle = isSelected ? '#ffffff' : theme.rim;
-        ctx.lineWidth = isSelected ? 2.8 : isHovered ? 2.25 : 1.55;
+        ctx.lineWidth = isSelected ? 2.8 : isHovered ? 2.25 : 1.45;
         ctx.beginPath();
         ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx.fill();
@@ -381,8 +381,8 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
 
         if (!dim && quality !== 'low') {
           const sheen = ctx.createLinearGradient(p.x - r, p.y - r, p.x + r, p.y + r);
-          sheen.addColorStop(0, 'rgba(255,255,255,.42)');
-          sheen.addColorStop(0.22, 'rgba(255,255,255,.08)');
+          sheen.addColorStop(0, 'rgba(255,255,255,.34)');
+          sheen.addColorStop(0.22, 'rgba(255,255,255,.06)');
           sheen.addColorStop(0.52, 'rgba(255,255,255,0)');
           ctx.fillStyle = sheen;
           ctx.beginPath();
@@ -391,10 +391,10 @@ export default function ReferenceBubbleMap({ transactions = [], root, onSelect }
           ctx.closePath();
           ctx.fill();
 
-          ctx.fillStyle = 'rgba(255,255,255,.78)';
-          ctx.globalAlpha *= 0.72;
+          ctx.fillStyle = 'rgba(255,255,255,.7)';
+          ctx.globalAlpha *= 0.66;
           ctx.beginPath();
-          ctx.arc(p.x - r * 0.34, p.y - r * 0.38, Math.max(1, r * 0.11), 0, Math.PI * 2);
+          ctx.arc(p.x - r * 0.34, p.y - r * 0.38, Math.max(1, r * 0.1), 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.restore();

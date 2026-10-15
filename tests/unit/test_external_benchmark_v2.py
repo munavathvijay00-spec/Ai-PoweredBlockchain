@@ -153,11 +153,10 @@ async def test_external_benchmark_keeps_amount_only_cases_as_product_abstentions
 
     result = await evaluate_external_benchmark(db, scorer, threshold=20)
 
-    assert result["measured"] is True
     assert result["sample_size"] == 2
-    assert result["policy_metrics"]["abstentions"] == 2
-    assert result["policy_metrics"]["decision_coverage"] == 0
-    assert result["raw_numeric_score_metrics"]["confusion_matrix"]["tp"] == 1
-    assert result["raw_numeric_score_metrics"]["confusion_matrix"]["tn"] == 1
+    assert result["abstentions"] == 2
+    assert result["decision_coverage"] == 0
+    assert result["confusion_matrix"]["abstain_positive"] == 1
+    assert result["confusion_matrix"]["abstain_negative"] == 1
     assert result["representative"] is False
-    assert "transaction-native fields only" in result["evaluation_scope"]
+    assert "Transaction-native rule evidence only" in result["scope"]

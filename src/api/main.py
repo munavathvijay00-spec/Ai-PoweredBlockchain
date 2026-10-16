@@ -198,12 +198,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Blockchain Intelligence API")
     db = await get_db()
     db_health_up.set(1)
+    current_settings = get_settings()
     background_tasks = [
         asyncio.create_task(_refresh_verified_intelligence(db)),
         asyncio.create_task(_prepare_ai_and_benchmark(db)),
         asyncio.create_task(_verify_grounded_ai_runtime(db)),
-        asyncio.create_task(_prepare_independent_ml()),
     ]
+    if current_settings.run_ml_training_on_startup:
+        background_tasks.append(asyncio.create_task(_prepare_independent_ml()))
+        logger.info("Independent ML startup training enabled")
+    else:
+        logger.info("Independent ML startup training disabled; serving process will use existing registered model only")
     if os.getenv("RUN_FLAGSHIP_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes"}:
         background_tasks.append(asyncio.create_task(_run_flagship_once(db)))
         logger.info("Flagship startup execution enabled")

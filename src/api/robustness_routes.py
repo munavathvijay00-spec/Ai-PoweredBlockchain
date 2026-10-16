@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from datetime import datetime, timezone
 
@@ -15,6 +14,7 @@ from src.api.auth import (
     authenticate,
     issue_viewer_session,
     require_viewer,
+    viewer_session_configured,
 )
 from src.api.dependencies import get_transaction_repo
 from src.api.analyst_routes import _ensure_schema
@@ -37,7 +37,7 @@ def _secure_cookie(request: Request) -> bool:
 @router.post("/session/viewer")
 async def create_viewer_session(request: Request, response: Response):
     """Issue or refresh a short-lived HttpOnly read-only browser session."""
-    if not os.getenv("VIEWER_SESSION_SIGNING_KEY", "").strip():
+    if not viewer_session_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Viewer sessions are not configured",

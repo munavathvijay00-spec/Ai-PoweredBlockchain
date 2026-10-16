@@ -31,14 +31,24 @@ class Settings(BaseSettings):
     ai_enrichment_batch_size: int = 8
     ai_enrichment_min_score: int = 20
 
-    # API
+    # API / security
     api_key: str
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_allowed_origins: str = "*"
+    # Fail closed: cross-origin browser access is disabled unless production
+    # explicitly supplies one or more comma-separated trusted origins.
+    cors_allowed_origins: str = ""
     public_rate_limit_per_minute: int = 120
+    authenticated_rate_limit_per_minute: int = 240
     expensive_rate_limit_per_minute: int = 20
+    expensive_max_concurrency: int = 12
+    expensive_queue_timeout_seconds: float = 2.0
     max_request_body_bytes: int = 1_000_000
+
+    # Evidence integrity. Keep separate from auth/API credentials.
+    # When empty, reports remain hash-addressed but explicitly unsigned.
+    evidence_signing_key: str = ""
+    evidence_signer_id: str = "chainscope-production"
 
     # Risk scoring
     large_transaction_threshold_eth: float = 10.0
@@ -64,7 +74,7 @@ def get_settings() -> Settings:
 
 if __name__ == "__main__":
     settings = get_settings()
-    print("✅ Settings loaded successfully!")
+    print("Settings loaded successfully")
     print(f"   Database: {settings.postgres_db}")
     print(f"   API Port: {settings.api_port}")
     print(f"   LLM Provider: {settings.llm_provider}")
@@ -72,6 +82,8 @@ if __name__ == "__main__":
     print(f"   Groq Model: {settings.groq_model}")
     print(f"   AI enrichment batch: {settings.ai_enrichment_batch_size}")
     print(f"   Ollama URL: {settings.ollama_url}")
-    print(f"   Allowed origins: {settings.cors_allowed_origins}")
+    print(f"   Allowed origins: {settings.cors_allowed_origins or '(same-origin only)'}")
     print(f"   Public RPM: {settings.public_rate_limit_per_minute}")
+    print(f"   Authenticated RPM: {settings.authenticated_rate_limit_per_minute}")
+    print(f"   Expensive max concurrency: {settings.expensive_max_concurrency}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

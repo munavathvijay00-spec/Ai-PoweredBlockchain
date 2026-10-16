@@ -20,7 +20,6 @@ from src.utils.config import get_settings
 
 VIEWER_SESSION_COOKIE = "chainscope_viewer_session"
 ANALYST_SESSION_COOKIE = "chainscope_analyst_session"
-# Backward-compatible alias used by the existing viewer-session route.
 SESSION_COOKIE = VIEWER_SESSION_COOKIE
 
 
@@ -36,11 +35,19 @@ def _configured_credentials() -> list[tuple[str, str, str]]:
         ("viewer", "viewer", os.getenv("VIEWER_API_KEY", "").strip()),
         ("analyst", "analyst", os.getenv("ANALYST_API_KEY", "").strip()),
         ("admin", "admin", os.getenv("ADMIN_API_KEY", "").strip()),
-        # Existing deployments already have API_KEY. It remains an admin-grade
-        # bootstrap credential and can exchange into a least-privilege analyst session.
         ("legacy-admin", "admin", settings.api_key.strip()),
     ]
     return [(subject, role, secret) for subject, role, secret in candidates if secret]
+
+
+def authenticate_credential(value: str) -> Principal:
+    presented = str(value or "").strip()
+    if not presented:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credential required")
+    for subject, role, secret in _configured_credentials():
+        if hmac.compare_digest(presented, secret):
+            return Principal(subject=subject, role=role)
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
 
 def _extract_credential(request: Request) -> str | None:
@@ -54,21 +61,14 @@ def _extract_credential(request: Request) -> str | None:
 
 
 def _session_secret(purpose: str) -> str:
-    explicit_name = (
-        "ANALYST_SESSION_SIGNING_KEY" if purpose == "analyst" else "VIEWER_SESSION_SIGNING_KEY"
-    )
+    explicit_name = "ANALYST_SESSION_SIGNING_KEY" if purpose == "analyst" else "VIEWER_SESSION_SIGNING_KEY"
     explicit = os.getenv(explicit_name, "").strip()
     if explicit:
         return explicit
-
     source = os.getenv("EVIDENCE_SIGNING_KEY", "").strip() or get_settings().api_key.strip()
     if not source:
         return ""
-    return hmac.new(
-        source.encode("utf-8"),
-        f"chainscope/{purpose}-session/v1".encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    return hmac.new(source.encode("utf-8"), f"chainscope/{purpose}-session/v1".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def viewer_session_configured() -> bool:
@@ -94,14 +94,7 @@ def _issue_session(*, role: str, subject: str, purpose: str, ttl_seconds: int) -
         raise RuntimeError(f"{purpose.title()} session signing key is not configured")
     now = int(time.time())
     exp = now + max(60, min(int(ttl_seconds), 86400))
-    payload = {
-        "sub": subject[:128],
-        "role": role,
-        "iat": now,
-        "exp": exp,
-        "v": 1,
-        "purpose": purpose,
-    }
+    payload = {"sub": subject[:128], "role": role, "iat": now, "exp": exp, "v": 1, "purpose": purpose}
     encoded = _b64encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     signature = hmac.new(secret.encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).digest()
     return f"{encoded}.{_b64encode(signature)}", exp
@@ -138,55 +131,29 @@ def _principal_from_cookie(request: Request, *, cookie_name: str, role: str, pur
 
 
 def _principal_from_session(request: Request) -> Principal | None:
-    # Prefer the stronger role when both cookies are present.
-    analyst = _principal_from_cookie(
-        request,
-        cookie_name=ANALYST_SESSION_COOKIE,
-        role="analyst",
-        purpose="analyst",
-    )
+    analyst = _principal_from_cookie(request, cookie_name=ANALYST_SESSION_COOKIE, role="analyst", purpose="analyst")
     if analyst:
         return analyst
-    return _principal_from_cookie(
-        request,
-        cookie_name=VIEWER_SESSION_COOKIE,
-        role="viewer",
-        purpose="viewer",
-    )
+    return _principal_from_cookie(request, cookie_name=VIEWER_SESSION_COOKIE, role="viewer", purpose="viewer")
 
 
 def authenticate(request: Request) -> Principal:
     presented = _extract_credential(request)
     if presented:
-        for subject, role, secret in _configured_credentials():
-            if hmac.compare_digest(presented, secret):
-                return Principal(subject=subject, role=role)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
+        return authenticate_credential(presented)
     session_principal = _principal_from_session(request)
     if session_principal:
         return session_principal
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required", headers={"WWW-Authenticate": "Bearer"})
 
 
 def require_roles(*roles: str):
     allowed = frozenset(roles)
-
     def dependency(request: Request) -> Principal:
         principal = authenticate(request)
         if principal.role not in allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
         return principal
-
     return dependency
 
 

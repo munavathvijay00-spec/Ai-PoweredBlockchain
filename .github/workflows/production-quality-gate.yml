@@ -3,6 +3,8 @@ name: Production quality gate
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -38,12 +40,33 @@ jobs:
         run: node tests/browser-smoke.mjs
 
   production-load-smoke:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Wait for hardened production deployment
+        run: |
+          for i in {1..60}; do
+            code=$(curl -sS -o /tmp/queue.json -w "%{http_code}" "https://ai-poweredblockchain-production.up.railway.app/api/transaction-browser?limit=10&clustered=true" || true)
+            if [ "$code" = "200" ]; then
+              python - <<'PY'
+          import json
+          with open('/tmp/queue.json') as handle:
+              payload = json.load(handle)
+          assert payload.get('clustered') is True
+          assert isinstance(payload.get('transactions'), list)
+          print('Hardened clustered queue is live.')
+          PY
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Production never exposed a healthy clustered queue after deployment."
+          cat /tmp/queue.json || true
+          exit 1
       - name: Clustered queue load smoke
         run: >-
           python scripts/review_queue_load_test.py

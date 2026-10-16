@@ -169,7 +169,10 @@ def _decorate_row(row: dict, matches, clustered: bool):
         "self_transfer": str(row.get("from_address") or "").lower() == str(row.get("to_address") or "").lower(),
         "same_pair_count": count,
     }
-    item = _format_tx(row, matches)
+    formatted = _format_tx(row, matches)
+    # _format_tx intentionally returns a validated Pydantic response model. Convert it
+    # at this boundary before adding browse-only cluster metadata.
+    item = formatted.model_dump(mode="json") if hasattr(formatted, "model_dump") else dict(formatted)
     if clustered:
         item["cluster"] = {
             "kind": "address_pair",
@@ -264,40 +267,27 @@ async def transaction_export(
         min_value_eth=min_value_eth, max_value_eth=max_value_eth,
         limit=5000, offset=0, sort=sort,
     )
-    data = [{
-        "hash": row["hash"],
-        "from_address": row["from_address"],
-        "to_address": row["to_address"],
-        "value_wei": str(row["value"]),
-        "block_number": row["block_number"],
-        "timestamp_utc": row["timestamp"].isoformat() if row.get("timestamp") else None,
-        "risk_score": row.get("risk_score", 0),
-        "risk_factors": row.get("risk_factors") or [],
-        "same_pair_count": int(row.get("same_pair_count") or 1),
-        "self_transfer": str(row.get("from_address") or "").lower() == str(row.get("to_address") or "").lower(),
-    } for row in rows]
-    matching_rows = int(aggregate.get("total") or 0)
-    headers = {
-        "X-ChainScope-Matching-Rows": str(matching_rows),
-        "X-ChainScope-Exported-Rows": str(len(data)),
-        "X-ChainScope-Export-Limit": "5000",
-    }
-
+    matches = await _load_entity_matches(repo, rows)
+    items = [_decorate_row(row, matches, False) for row in rows]
     if format == "json":
-        return Response(
-            content=json.dumps({"rows": data, "matching_rows": matching_rows, "export_limit": 5000}, default=str),
-            media_type="application/json",
-            headers=headers,
-        )
+        return {
+            "transactions": items,
+            "count": len(items),
+            "matching_transactions": int(aggregate.get("total") or 0),
+            "truncated": int(aggregate.get("total") or 0) > len(items),
+        }
 
-    out = io.StringIO()
-    fields = ["hash", "from_address", "to_address", "value_wei", "block_number", "timestamp_utc",
-              "risk_score", "risk_factors", "same_pair_count", "self_transfer"]
-    writer = csv.DictWriter(out, fieldnames=fields)
-    writer.writeheader()
-    for item in data:
-        serializable = dict(item)
-        serializable["risk_factors"] = json.dumps(serializable["risk_factors"], default=str)
-        writer.writerow(serializable)
-    headers["Content-Disposition"] = 'attachment; filename="chainscope-transactions.csv"'
-    return Response(content=out.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["hash", "from_address", "to_address", "value_wei", "value_eth", "block_number", "timestamp", "risk_score", "explanation_status"])
+    for item in items:
+        writer.writerow([
+            item.get("hash"), item.get("from_address"), item.get("to_address"),
+            item.get("value_wei"), item.get("value_eth"), item.get("block_number"),
+            item.get("timestamp"), item.get("risk_score"), item.get("explanation_status"),
+        ])
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=chainscope-transactions.csv"},
+    )

@@ -1,10 +1,8 @@
-"""Authentication and RBAC for privileged analyst operations.
+"""Authentication and RBAC for ChainScope privileged operations.
 
-Supports two server-side credential boundaries:
-1. Explicit API credentials for analyst/admin automation.
-2. Short-lived signed viewer sessions for read-only product experiences such as Grounded AI.
-
-Callers cannot self-assign roles through request payloads or headers.
+Supports explicit API credentials for automation plus short-lived, HttpOnly,
+server-signed browser sessions for viewer and analyst product experiences.
+Roles are always assigned by the server; callers cannot self-assign them.
 """
 from __future__ import annotations
 
@@ -20,7 +18,10 @@ from fastapi import HTTPException, Request, status
 
 from src.utils.config import get_settings
 
-SESSION_COOKIE = "chainscope_viewer_session"
+VIEWER_SESSION_COOKIE = "chainscope_viewer_session"
+ANALYST_SESSION_COOKIE = "chainscope_analyst_session"
+# Backward-compatible alias used by the existing viewer-session route.
+SESSION_COOKIE = VIEWER_SESSION_COOKIE
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ def _configured_credentials() -> list[tuple[str, str, str]]:
         ("viewer", "viewer", os.getenv("VIEWER_API_KEY", "").strip()),
         ("analyst", "analyst", os.getenv("ANALYST_API_KEY", "").strip()),
         ("admin", "admin", os.getenv("ADMIN_API_KEY", "").strip()),
+        # Existing deployments already have API_KEY. It remains an admin-grade
+        # bootstrap credential and can exchange into a least-privilege analyst session.
         ("legacy-admin", "admin", settings.api_key.strip()),
     ]
     return [(subject, role, secret) for subject, role, secret in candidates if secret]
@@ -50,25 +53,30 @@ def _extract_credential(request: Request) -> str | None:
     return value or None
 
 
-def _session_secret() -> str:
-    explicit = os.getenv("VIEWER_SESSION_SIGNING_KEY", "").strip()
+def _session_secret(purpose: str) -> str:
+    explicit_name = (
+        "ANALYST_SESSION_SIGNING_KEY" if purpose == "analyst" else "VIEWER_SESSION_SIGNING_KEY"
+    )
+    explicit = os.getenv(explicit_name, "").strip()
     if explicit:
         return explicit
 
-    # Derive a purpose-specific key from signing material already held only by the server.
-    # This avoids browser secrets and avoids directly reusing the underlying credential.
     source = os.getenv("EVIDENCE_SIGNING_KEY", "").strip() or get_settings().api_key.strip()
     if not source:
         return ""
     return hmac.new(
         source.encode("utf-8"),
-        b"chainscope/viewer-session/v1",
+        f"chainscope/{purpose}-session/v1".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
 
 
 def viewer_session_configured() -> bool:
-    return bool(_session_secret())
+    return bool(_session_secret("viewer"))
+
+
+def analyst_session_configured() -> bool:
+    return bool(_session_secret("analyst"))
 
 
 def _b64encode(raw: bytes) -> str:
@@ -80,28 +88,36 @@ def _b64decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(f"{value}{padding}")
 
 
-def issue_viewer_session(subject: str = "web-viewer", ttl_seconds: int = 1800) -> tuple[str, int]:
-    """Create a short-lived HMAC-signed read-only viewer session token."""
-    secret = _session_secret()
+def _issue_session(*, role: str, subject: str, purpose: str, ttl_seconds: int) -> tuple[str, int]:
+    secret = _session_secret(purpose)
     if not secret:
-        raise RuntimeError("Viewer session signing key is not configured")
+        raise RuntimeError(f"{purpose.title()} session signing key is not configured")
     now = int(time.time())
     exp = now + max(60, min(int(ttl_seconds), 86400))
     payload = {
-        "sub": subject,
-        "role": "viewer",
+        "sub": subject[:128],
+        "role": role,
         "iat": now,
         "exp": exp,
         "v": 1,
+        "purpose": purpose,
     }
     encoded = _b64encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     signature = hmac.new(secret.encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).digest()
     return f"{encoded}.{_b64encode(signature)}", exp
 
 
-def _principal_from_session(request: Request) -> Principal | None:
-    token = request.cookies.get(SESSION_COOKIE, "").strip()
-    secret = _session_secret()
+def issue_viewer_session(subject: str = "web-viewer", ttl_seconds: int = 1800) -> tuple[str, int]:
+    return _issue_session(role="viewer", subject=subject, purpose="viewer", ttl_seconds=ttl_seconds)
+
+
+def issue_analyst_session(subject: str = "web-analyst", ttl_seconds: int = 3600) -> tuple[str, int]:
+    return _issue_session(role="analyst", subject=subject, purpose="analyst", ttl_seconds=ttl_seconds)
+
+
+def _principal_from_cookie(request: Request, *, cookie_name: str, role: str, purpose: str) -> Principal | None:
+    token = request.cookies.get(cookie_name, "").strip()
+    secret = _session_secret(purpose)
     if not token or not secret or "." not in token:
         return None
     encoded, provided_signature = token.rsplit(".", 1)
@@ -113,10 +129,30 @@ def _principal_from_session(request: Request) -> Principal | None:
         payload = json.loads(_b64decode(encoded))
     except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return None
-    if payload.get("role") != "viewer" or int(payload.get("exp") or 0) <= int(time.time()):
+    if payload.get("role") != role or payload.get("purpose") != purpose:
         return None
-    subject = str(payload.get("sub") or "web-viewer")[:128]
-    return Principal(subject=subject, role="viewer")
+    if int(payload.get("exp") or 0) <= int(time.time()):
+        return None
+    subject = str(payload.get("sub") or f"web-{role}")[:128]
+    return Principal(subject=subject, role=role)
+
+
+def _principal_from_session(request: Request) -> Principal | None:
+    # Prefer the stronger role when both cookies are present.
+    analyst = _principal_from_cookie(
+        request,
+        cookie_name=ANALYST_SESSION_COOKIE,
+        role="analyst",
+        purpose="analyst",
+    )
+    if analyst:
+        return analyst
+    return _principal_from_cookie(
+        request,
+        cookie_name=VIEWER_SESSION_COOKIE,
+        role="viewer",
+        purpose="viewer",
+    )
 
 
 def authenticate(request: Request) -> Principal:

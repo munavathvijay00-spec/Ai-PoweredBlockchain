@@ -37,8 +37,8 @@ async function request(path, timeoutMs = 12000, options = {}) {
     try {
       const payload = await response.json();
       detail = typeof payload?.detail === 'string' ? payload.detail : '';
-    } catch {
-      detail = '';
+    } catch (parseError) {
+      void parseError;
     }
     const error = new Error(detail || `API error: ${response.status} ${response.statusText}`);
     error.status = response.status;

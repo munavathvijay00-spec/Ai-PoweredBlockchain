@@ -72,6 +72,8 @@ jobs:
           python scripts/review_queue_load_test.py
           https://ai-poweredblockchain-production.up.railway.app/api
           --requests 120 --concurrency 12 --max-p95-ms 3000 --min-success-rate 0.98
+      - name: Reset public rate-limit window
+        run: sleep 65
       - name: Client-abort chaos smoke
         run: >-
           python scripts/review_queue_load_test.py

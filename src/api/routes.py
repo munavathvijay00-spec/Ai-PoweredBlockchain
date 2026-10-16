@@ -128,6 +128,7 @@ def _format_tx(row: dict, entity_matches: dict | None = None) -> TransactionResp
     entity_matches = entity_matches or {}
     sender = str(row['from_address']).lower()
     recipient = str(row['to_address']).lower()
+    relationship_context = row.get("relationship_context") if isinstance(row.get("relationship_context"), dict) else {}
 
     return TransactionResponse(
         hash=row['hash'],
@@ -148,6 +149,7 @@ def _format_tx(row: dict, entity_matches: dict | None = None) -> TransactionResp
             "status": "source_attributed_matches" if entity_matches.get(sender) or entity_matches.get(recipient) else "no_local_match",
             "warning": "No local match is not evidence that an address is benign, anonymous, or unattributed elsewhere.",
         },
+        relationship_context=relationship_context,
     )
 
 
@@ -157,25 +159,16 @@ async def list_transactions(
     offset: int = Query(0, ge=0, description="Pagination offset"),
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    """List recent transactions with pagination and batched entity context."""
     rows = await repo.list_recent(limit=limit, offset=offset)
     entity_matches = await _load_entity_matches(repo, rows)
     total = await repo.count()
-
     return TransactionListResponse(
-        transactions=[_format_tx(r, entity_matches) for r in rows],
-        total=total,
-        limit=limit,
-        offset=offset,
+        transactions=[_format_tx(r, entity_matches) for r in rows], total=total, limit=limit, offset=offset,
     )
 
 
 @router.get("/transactions/{tx_hash}", response_model=TransactionResponse)
-async def get_transaction(
-    tx_hash: str,
-    repo: TransactionRepository = Depends(get_transaction_repo),
-):
-    """Get a single transaction by hash with current source-attributed entity context."""
+async def get_transaction(tx_hash: str, repo: TransactionRepository = Depends(get_transaction_repo)):
     row = await repo.get_by_hash(tx_hash)
     if not row:
         raise HTTPException(status_code=404, detail=f"Transaction {tx_hash} not found")
@@ -189,14 +182,11 @@ async def list_flagged(
     limit: int = Query(50, ge=1, le=200),
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    """List transactions at or above the requested review threshold."""
     rows = await repo.list_flagged(min_score=min_score, limit=limit)
     entity_matches = await _load_entity_matches(repo, rows)
     return TransactionListResponse(
         transactions=[_format_tx(r, entity_matches) for r in rows],
-        total=await repo.count_flagged(min_score=min_score),
-        limit=limit,
-        offset=0,
+        total=await repo.count_flagged(min_score=min_score), limit=limit, offset=0,
     )
 
 
@@ -205,10 +195,8 @@ async def get_stats(
     tx_repo: TransactionRepository = Depends(get_transaction_repo),
     addr_repo: AddressRepository = Depends(get_address_repo),
 ):
-    """Get retained-window statistics from one internally consistent threshold policy."""
     total_txs = await tx_repo.count()
     total_addrs = await addr_repo.count()
-
     stats = await tx_repo.db.fetchrow("""
         SELECT
             COALESCE(AVG(risk_score), 0) AS avg_score,
@@ -223,9 +211,7 @@ async def get_stats(
                    OR ai_explanation LIKE 'Evidence-based assessment:%'
                    OR ai_explanation LIKE 'Evidence-based transaction review:%'
             ) AS grounded_explanations,
-            COUNT(*) FILTER (
-                WHERE ai_explanation LIKE 'Grounded AI explanation:%'
-            ) AS ai_generated_explanations
+            COUNT(*) FILTER (WHERE ai_explanation LIKE 'Grounded AI explanation:%') AS ai_generated_explanations
         FROM transactions
     """, FLAGGED_THRESHOLD, HIGH_RISK_THRESHOLD, CRITICAL_THRESHOLD)
 

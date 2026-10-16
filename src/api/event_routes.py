@@ -39,14 +39,17 @@ async def _receipt_from_rpc(tx_hash: str):
         w3 = AsyncWeb3(provider)
         try:
             receipt = await asyncio.wait_for(w3.eth.get_transaction_receipt(tx_hash), timeout=10)
-            return receipt, w3, provider
+            return receipt, w3
         except TransactionNotFound as exc:
             saw_not_found = True
             last_error = exc
-        except (asyncio.TimeoutError, Exception) as exc:
+        except Exception as exc:
             last_error = exc
             logger.warning("Receipt RPC candidate failed for tx={} error_type={}", tx_hash, type(exc).__name__)
-        await provider.disconnect()
+        # web3==6.15 AsyncHTTPProvider has no public disconnect()/close() method.
+        # Its async session manager owns provider session lifecycle, so do not call a
+        # non-existent cleanup method here. This previously converted successful RPC
+        # receipt lookups into HTTP 500 responses during route finalization.
     if saw_not_found and isinstance(last_error, TransactionNotFound):
         raise last_error
     if isinstance(last_error, asyncio.TimeoutError):
@@ -60,10 +63,9 @@ async def transaction_events(tx_hash: str):
     if not HASH.fullmatch(tx_hash):
         raise HTTPException(status_code=422, detail="Expected a 0x-prefixed 32-byte transaction hash")
 
-    provider = None
     try:
         async with _slots:
-            receipt, w3, provider = await _receipt_from_rpc(tx_hash)
+            receipt, w3 = await _receipt_from_rpc(tx_hash)
             decoded = decode_receipt(dict(receipt))
             contracts = list(dict.fromkeys(
                 event["contract"]
@@ -97,9 +99,8 @@ async def transaction_events(tx_hash: str):
         raise HTTPException(status_code=404, detail="Transaction receipt not found")
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Ethereum RPC timed out")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("Transaction event lookup failed tx={} error_type={}", tx_hash, type(exc).__name__)
         raise HTTPException(status_code=502, detail="Ethereum RPC receipt lookup failed")
-    finally:
-        if provider is not None:
-            await provider.disconnect()

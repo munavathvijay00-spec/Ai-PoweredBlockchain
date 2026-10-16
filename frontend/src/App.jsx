@@ -183,6 +183,8 @@ function App() {
   const status = statusMeta(freshness);
   const checkpointAge = coverage?.ingestion_health?.checkpoint_age_seconds;
   const latestIndexedBlock = coverage?.ingestion_health?.checkpoint_block || browser?.newest_block || null;
+  const flaggedCount = Number(stats?.flagged_transactions || 0);
+  const highReviewCount = Number(stats?.high_risk_transactions || 0);
 
   return (
     <div className="min-h-screen bg-[#0d1628] text-slate-100">
@@ -204,7 +206,22 @@ function App() {
         {globalError && <div className="mb-5 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-sm text-amber-200" role="status">{globalError}</div>}
 
         {view === 'transactions' && <div className="space-y-6">
-          <div className="rounded-xl border border-amber-300/25 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100" role="note" aria-label="Risk score disclaimer"><strong>Review signals are not fraud verdicts.</strong> Scores prioritize transactions for human review and do not establish criminality, ownership, intent, sanctions status, or malicious behavior.</div>
+          <section className="overflow-hidden rounded-xl border border-sky-400/15 bg-gradient-to-r from-sky-400/[0.07] via-[#172338] to-violet-400/[0.06]" aria-label="Investigation pulse">
+            <div className="flex flex-col gap-4 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${status.dot}`} /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">Investigation Pulse</span></div>
+                <p className="mt-2 text-sm text-slate-400">Ethereum evidence stream · live review workspace</p>
+              </div>
+              <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
+                <div><p className="text-[10px] uppercase tracking-wider text-slate-500">Latest block</p><p className="mt-1 font-mono text-sm font-semibold text-white">{latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</p></div>
+                <div><p className="text-[10px] uppercase tracking-wider text-slate-500">Filtered population</p><p className="mt-1 text-sm font-semibold text-sky-300">{Number(browser.total || 0).toLocaleString()}</p></div>
+                <div><p className="text-[10px] uppercase tracking-wider text-slate-500">Review queue</p><p className="mt-1 text-sm font-semibold text-amber-300">{flaggedCount.toLocaleString()}</p></div>
+                <div><p className="text-[10px] uppercase tracking-wider text-slate-500">High review</p><p className="mt-1 text-sm font-semibold text-orange-300">{highReviewCount.toLocaleString()}</p></div>
+              </div>
+              <div className="shrink-0 text-left xl:text-right"><p className={`text-sm font-semibold ${status.text}`}>{status.label}</p><p className="mt-1 text-xs text-slate-500">checkpoint {ageLabel(checkpointAge)}</p></div>
+            </div>
+          </section>
+
           <StatsBar stats={stats} coverage={coverage} />
           <TransactionBrowserControls
             search={search} setSearch={v => updateFilter(setSearch, v)}

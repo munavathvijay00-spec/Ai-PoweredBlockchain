@@ -1,8 +1,7 @@
-"""Lightweight process-local API abuse protection.
+"""API abuse protection and browser-facing security controls.
 
-This is intentionally conservative and dependency-free. It limits request bodies and
-per-client request rate for public and expensive investigation routes. In multi-replica
-production, use a shared gateway/Redis limiter; this middleware remains a local safety net.
+Process-local rate limiting remains a last-line safety net. Multi-replica production must
+use a shared gateway/Redis limiter so quotas cannot be bypassed by replica hopping.
 """
 from __future__ import annotations
 
@@ -10,10 +9,11 @@ import time
 from collections import defaultdict, deque
 from typing import Deque
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from src.api.auth import authenticate
 from src.utils.config import get_settings
 
 _EXPENSIVE_PREFIXES = (
@@ -21,7 +21,9 @@ _EXPENSIVE_PREFIXES = (
     "/api/ml/",
     "/api/evaluation/",
     "/api/entities",
+    "/api/analyst/",
 )
+_INTERNAL_PATHS = {"/metrics", "/docs", "/redoc", "/openapi.json"}
 
 
 class AbuseProtectionMiddleware(BaseHTTPMiddleware):
@@ -61,7 +63,30 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
         queue.append(now)
         return True, 0
 
+    def _secure(self, response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; "
+            "img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; "
+            "script-src 'self'; connect-src 'self' https: wss:; form-action 'self'",
+        )
+        return response
+
     async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        if path in _INTERNAL_PATHS:
+            try:
+                principal = authenticate(request)
+            except HTTPException:
+                return self._secure(JSONResponse(status_code=404, content={"detail": "Not found"}))
+            if principal.role != "admin":
+                return self._secure(JSONResponse(status_code=403, content={"detail": "Admin role required"}))
+
         if request.method in {"POST", "PUT", "PATCH"}:
             content_length = request.headers.get("content-length")
             try:
@@ -69,25 +94,20 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 length = 0
             if length > int(self.settings.max_request_body_bytes):
-                return JSONResponse(
+                return self._secure(JSONResponse(
                     status_code=413,
                     content={"detail": "Request body too large"},
-                )
+                ))
 
-        path = request.url.path
-        if path not in {"/", "/metrics"} and not path.startswith("/app"):
+        if path != "/" and not path.startswith("/app") and path not in _INTERNAL_PATHS:
             bucket = self._bucket_name(path)
             allowed, retry_after = self._allowed(self._client_key(request), bucket, time.monotonic())
             if not allowed:
-                return JSONResponse(
+                return self._secure(JSONResponse(
                     status_code=429,
                     headers={"Retry-After": str(retry_after)},
                     content={"detail": "Rate limit exceeded", "bucket": bucket},
-                )
+                ))
 
         response = await call_next(request)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        return response
+        return self._secure(response)

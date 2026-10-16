@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './api/client';
 import StatsBar from './components/StatsBar';
 import TransactionList from './components/TransactionList';
 import TransactionModal from './components/TransactionModal';
-import SearchBar from './components/SearchBar';
-import FilterTabs from './components/FilterTabs';
 import RiskChart from './components/RiskChart';
+import TransactionBrowserControls from './components/TransactionBrowserControls';
 import WalletGraphWorkspace from './components/WalletGraphWorkspace';
 import WalletInvestigator from './components/WalletInvestigator';
 
@@ -41,64 +40,33 @@ function SectionHeading({ view, freshness }) {
   const status = statusMeta(freshness);
   return (
     <div className="section-heading">
-      <div>
-        <h1>{title}</h1>
-        <p>{subtitle}</p>
-      </div>
-      <span className={`inline-flex items-center gap-2 text-sm font-medium ${status.text}`}>
-        <span className={`h-2 w-2 rounded-full ${status.dot}`} />
-        {status.label}
-      </span>
+      <div><h1>{title}</h1><p>{subtitle}</p></div>
+      <span className={`inline-flex items-center gap-2 text-sm font-medium ${status.text}`}><span className={`h-2 w-2 rounded-full ${status.dot}`} />{status.label}</span>
     </div>
   );
 }
 
 function SystemCoverage({ coverage }) {
   if (!coverage) return <div className="platform-card p-8 text-sm text-slate-400">Coverage data is not available yet.</div>;
-
   const health = coverage.ingestion_health || {};
   const readiness = coverage.product_readiness || {};
   const native = coverage.native_transactions || {};
   const checkpoint = coverage.reorg_verification || {};
   const entityIntel = coverage.verified_entity_intelligence || {};
   const detection = coverage.detection_quality || {};
-
-  const detectionValue = detection.status === 'evaluated'
-    ? `${Math.round(Number(detection.precision || 0) * 100)}% precision`
-    : 'Not measured';
-
+  const detectionValue = detection.status === 'evaluated' ? `${Math.round(Number(detection.precision || 0) * 100)}% precision` : 'Not measured';
   const cards = [
     ['Indexer', health.status || 'unknown', `Checkpoint updated ${ageLabel(health.checkpoint_age_seconds)}`],
     ['Checkpoint block', health.checkpoint_block ? Number(health.checkpoint_block).toLocaleString() : '—', checkpoint.status === 'checkpoint_hash_recorded' ? 'Canonical hash recorded' : 'Canonical hash not verified'],
     ['Retained records', Number(native.stored_transactions || 0).toLocaleString(), `Rolling ${readiness.retention_window_minutes || 5} minute native window`],
     ['Detection quality', detectionValue, detection.status === 'evaluated' ? 'Independent holdout evaluation' : 'Independent labels required before accuracy claims'],
   ];
-
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value, note]) => (
-          <div key={label} className="platform-card p-5">
-            <p className="metric-label">{label}</p>
-            <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
-            <p className="mt-2 text-xs text-slate-500">{note}</p>
-          </div>
-        ))}
-      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value, note]) => <div key={label} className="platform-card p-5"><p className="metric-label">{label}</p><p className="mt-3 text-2xl font-semibold text-white">{value}</p><p className="mt-2 text-xs text-slate-500">{note}</p></div>)}</div>
       <div className="grid gap-5 lg:grid-cols-2">
-        <section className="platform-card p-5">
-          <p className="metric-label">Supported today</p>
-          <div className="mt-4 space-y-3">
-            {(readiness.production_ready_for || []).map(item => <div key={item} className="coverage-row"><span className="text-emerald-400">✓</span><span>{item}</span></div>)}
-            {entityIntel.records > 0 && <div className="coverage-row"><span className="text-emerald-400">✓</span><span>{Number(entityIntel.records).toLocaleString()} source-attributed entity records loaded</span></div>}
-          </div>
-        </section>
-        <section className="platform-card p-5">
-          <p className="metric-label">Known limits</p>
-          <div className="mt-4 space-y-3">
-            {(readiness.not_ready_for || coverage.limitations || []).map(item => <div key={item} className="coverage-row"><span className="text-amber-300">!</span><span>{item}</span></div>)}
-          </div>
-        </section>
+        <section className="platform-card p-5"><p className="metric-label">Supported today</p><div className="mt-4 space-y-3">{(readiness.production_ready_for || []).map(item => <div key={item} className="coverage-row"><span className="text-emerald-400">✓</span><span>{item}</span></div>)}{entityIntel.records > 0 && <div className="coverage-row"><span className="text-emerald-400">✓</span><span>{Number(entityIntel.records).toLocaleString()} source-attributed entity records loaded</span></div>}</div></section>
+        <section className="platform-card p-5"><p className="metric-label">Known limits</p><div className="mt-4 space-y-3">{(readiness.not_ready_for || coverage.limitations || []).map(item => <div key={item} className="coverage-row"><span className="text-amber-300">!</span><span>{item}</span></div>)}</div></section>
       </div>
     </div>
   );
@@ -107,77 +75,99 @@ function SystemCoverage({ coverage }) {
 function App() {
   const [stats, setStats] = useState(null);
   const [coverage, setCoverage] = useState(null);
-  const [transactions, setTransactions] = useState([]);
   const [flagged, setFlagged] = useState([]);
-  const [flaggedTotal, setFlaggedTotal] = useState(0);
-  const [transactionTotal, setTransactionTotal] = useState(0);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [globalError, setGlobalError] = useState(null);
   const [selectedTx, setSelectedTx] = useState(null);
   const [view, setView] = useState('transactions');
+
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [minRisk, setMinRisk] = useState('');
+  const [maxRisk, setMaxRisk] = useState('');
+  const [minValue, setMinValue] = useState('');
+  const [maxValue, setMaxValue] = useState('');
+  const [sort, setSort] = useState('newest');
+  const [pageSize, setPageSizeState] = useState(50);
+  const [page, setPage] = useState(1);
+  const [browser, setBrowser] = useState({ transactions: [], total: 0, distribution: null });
+  const [browserLoading, setBrowserLoading] = useState(true);
+  const [browserError, setBrowserError] = useState(null);
+  const [browserRefresh, setBrowserRefresh] = useState(0);
 
   useEffect(() => {
     let active = true;
     let busy = false;
-    async function loadData() {
+    async function loadSystem() {
       if (busy || document.visibilityState === 'hidden') return;
       busy = true;
-      try {
-        const results = await Promise.allSettled([
-          api.getStats(), api.getCoverage(), api.getTransactions(50), api.getFlagged(50),
-        ]);
-        if (!active) return;
-        const [statsResult, coverageResult, txsResult, flaggedResult] = results;
-        if (statsResult.status === 'fulfilled') setStats(statsResult.value);
-        if (coverageResult.status === 'fulfilled') setCoverage(coverageResult.value);
-        if (txsResult.status === 'fulfilled') {
-          setTransactions(txsResult.value.transactions ?? []);
-          setTransactionTotal(Number(txsResult.value.total || 0));
-        }
-        if (flaggedResult.status === 'fulfilled') {
-          setFlagged(flaggedResult.value.transactions ?? []);
-          setFlaggedTotal(Number(flaggedResult.value.total || 0));
-        }
-        const failures = results.filter(result => result.status === 'rejected');
-        setError(failures.length ? 'Some intelligence services are temporarily unavailable. Latest successful results remain visible.' : null);
-        if (failures.length !== results.length) setLastUpdate(new Date());
-      } catch {
-        if (active) setError('Unable to refresh blockchain intelligence. Retrying automatically.');
-      } finally {
-        busy = false;
-        if (active) setLoading(false);
-      }
+      const results = await Promise.allSettled([api.getStats(), api.getCoverage(), api.getFlagged(50)]);
+      if (!active) return;
+      const [statsResult, coverageResult, flaggedResult] = results;
+      if (statsResult.status === 'fulfilled') setStats(statsResult.value);
+      if (coverageResult.status === 'fulfilled') setCoverage(coverageResult.value);
+      if (flaggedResult.status === 'fulfilled') setFlagged(flaggedResult.value.transactions ?? []);
+      const failures = results.filter(result => result.status === 'rejected');
+      setGlobalError(failures.length ? 'Some services are temporarily unavailable. Last successful data remains visible.' : null);
+      if (failures.length !== results.length) setLastUpdate(new Date());
+      busy = false;
     }
-    loadData();
-    const interval = setInterval(loadData, 15000);
-    const onVisible = () => { if (document.visibilityState === 'visible') loadData(); };
+    loadSystem();
+    const interval = setInterval(loadSystem, 15000);
+    const onVisible = () => { if (document.visibilityState === 'visible') loadSystem(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { active = false; clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
-  const highThreshold = Number(stats?.high_risk_threshold ?? 40);
-  const counts = useMemo(() => ({
-    all: Number(stats?.total_transactions ?? transactionTotal ?? transactions.length),
-    flagged: Number(stats?.flagged_transactions ?? flaggedTotal ?? flagged.length),
-    high: Number(stats?.high_risk_transactions ?? flagged.filter(tx => Number(tx.risk_score) >= highThreshold).length),
-  }), [stats, transactionTotal, transactions.length, flaggedTotal, flagged, highThreshold]);
+  useEffect(() => {
+    let active = true;
+    const timer = setTimeout(async () => {
+      setBrowserLoading(true);
+      setBrowserError(null);
+      try {
+        const data = await api.getTransactionBrowser({
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+          search,
+          min_risk: minRisk,
+          max_risk: maxRisk,
+          min_value_eth: minValue,
+          max_value_eth: maxValue,
+          sort,
+        });
+        if (active) {
+          setBrowser(data);
+          setLastUpdate(new Date());
+        }
+      } catch (error) {
+        if (active) setBrowserError(error?.message || 'Unable to load transactions.');
+      } finally {
+        if (active) setBrowserLoading(false);
+      }
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
+  }, [page, pageSize, search, minRisk, maxRisk, minValue, maxValue, sort, browserRefresh]);
 
-  const filtered = useMemo(() => {
-    let list = filter === 'flagged' ? flagged : filter === 'high' ? flagged.filter(tx => Number(tx.risk_score) >= highThreshold) : transactions;
-    if (!search.trim()) return list;
-    const q = search.trim().toLowerCase();
-    return list.filter(tx => [tx.hash, tx.from_address, tx.to_address].some(value => (value || '').toLowerCase().includes(q)));
-  }, [transactions, flagged, filter, search, highThreshold]);
+  const totalPages = Math.max(1, Math.ceil(Number(browser.total || 0) / pageSize));
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
-  const listScope = useMemo(() => {
-    if (search.trim()) return { total: filtered.length, label: 'matches in loaded rows', searchActive: true };
-    if (filter === 'flagged') return { total: counts.flagged, label: `flagged at ≥${Number(stats?.flagged_threshold ?? 20)}`, searchActive: false };
-    if (filter === 'high') return { total: counts.high, label: `high-review at ≥${highThreshold}`, searchActive: false };
-    return { total: counts.all, label: 'retained transactions', searchActive: false };
-  }, [search, filtered.length, filter, counts, stats, highThreshold]);
+  function resetFilters() {
+    setSearch(''); setMinRisk(''); setMaxRisk(''); setMinValue(''); setMaxValue(''); setSort('newest'); setPage(1);
+  }
+
+  function setPageSize(value) { setPageSizeState(value); setPage(1); }
+  function updateFilter(setter, value) { setter(value); setPage(1); }
+
+  function exportCurrent(format) {
+    const url = api.getTransactionExportUrl(format, {
+      search, min_risk: minRisk, max_risk: maxRisk, min_value_eth: minValue, max_value_eth: maxValue, sort,
+    });
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `chainscope-transactions.${format}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
 
   async function inspectTransaction(tx) {
     setSelectedTx(tx);
@@ -185,65 +175,56 @@ function App() {
       const details = await api.getTransaction(tx.hash);
       setSelectedTx(current => current?.hash === tx.hash ? details : current);
     } catch {
-      // Keep the retained row visible if its detailed record expires during inspection.
+      // Keep the page row visible if its detail record becomes unavailable.
     }
   }
 
   const freshness = coverage?.ingestion_health?.status || 'unknown';
   const status = statusMeta(freshness);
-  const latestIndexedBlock = coverage?.ingestion_health?.checkpoint_block || (transactions.length ? Math.max(...transactions.map(tx => Number(tx.block_number) || 0)) : null);
+  const checkpointAge = coverage?.ingestion_health?.checkpoint_age_seconds;
+  const latestIndexedBlock = coverage?.ingestion_health?.checkpoint_block || browser?.newest_block || null;
 
   return (
     <div className="min-h-screen bg-[#0d1628] text-slate-100">
       <header className="platform-header">
         <div className="platform-header-inner">
-          <button onClick={() => setView('transactions')} className="flex items-center gap-4 text-left">
+          <button onClick={() => setView('transactions')} className="flex items-center gap-4 text-left" aria-label="Open live monitor">
             <span className="chain-mark" aria-hidden="true"><span /><span /></span>
-            <span>
-              <span className="block text-[21px] font-semibold tracking-tight text-white sm:text-[25px]">Blockchain Intelligence Platform</span>
-              <span className="mt-1 block text-sm text-slate-400 sm:text-base">AI-powered Ethereum transaction analysis</span>
-            </span>
+            <span><span className="block text-[21px] font-semibold tracking-tight text-white sm:text-[25px]">Blockchain Intelligence Platform</span><span className="mt-1 block text-sm text-slate-400 sm:text-base">AI-powered Ethereum transaction analysis</span></span>
           </button>
           <div className="flex items-center gap-6">
-            <nav className="hidden xl:flex items-center gap-1" aria-label="Workspace navigation">
-              {NAV.map(item => (
-                <button key={item.id} onClick={() => setView(item.id)} className={`top-nav-button ${view === item.id ? 'top-nav-button-active' : ''}`}>{item.label}</button>
-              ))}
-            </nav>
-            <div className="min-w-[118px] text-right">
-              <div className={`flex items-center justify-end gap-2 text-sm font-medium ${status.text}`}><span className={`h-2 w-2 rounded-full ${status.dot}`} />{status.label}</div>
-              <div className="mt-1 text-xs text-slate-500">Updated: {lastUpdate ? lastUpdate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '—'}</div>
-            </div>
+            <nav className="hidden xl:flex items-center gap-1" aria-label="Workspace navigation">{NAV.map(item => <button key={item.id} onClick={() => setView(item.id)} className={`top-nav-button ${view === item.id ? 'top-nav-button-active' : ''}`}>{item.label}</button>)}</nav>
+            <div className="min-w-[130px] text-right" aria-live="polite"><div className={`flex items-center justify-end gap-2 text-sm font-medium ${status.text}`}><span className={`h-2 w-2 rounded-full ${status.dot}`} />{status.label}</div><div className="mt-1 text-xs text-slate-500">Checkpoint {ageLabel(checkpointAge)}</div><div className="mt-0.5 text-[10px] text-slate-600">UI refreshed {lastUpdate ? lastUpdate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '—'}</div></div>
           </div>
         </div>
       </header>
 
       <main className="platform-shell">
-        <div className="mb-5 flex gap-2 overflow-x-auto xl:hidden">
-          {NAV.map(item => <button key={item.id} onClick={() => setView(item.id)} className={`workspace-chip ${view === item.id ? 'workspace-chip-active' : ''}`}>{item.label}</button>)}
-        </div>
+        <div className="mb-5 flex gap-2 overflow-x-auto xl:hidden">{NAV.map(item => <button key={item.id} onClick={() => setView(item.id)} className={`workspace-chip ${view === item.id ? 'workspace-chip-active' : ''}`}>{item.label}</button>)}</div>
+        {globalError && <div className="mb-5 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-sm text-amber-200" role="status">{globalError}</div>}
 
-        {error && <div className="mb-5 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-sm text-amber-200">{error}</div>}
-        {loading && <p role="status" className="mb-4 text-sm text-slate-500">Connecting to intelligence services…</p>}
-
-        {view === 'transactions' && (
-          <div className="space-y-6">
-            <StatsBar stats={stats} coverage={coverage} />
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
-              <div className="space-y-4">
-                <SearchBar value={search} onChange={setSearch} />
-                <FilterTabs active={filter} onChange={setFilter} counts={counts} />
-                <p className="px-1 text-xs text-slate-500">Tab counts cover the retained database window. The table loads a bounded page and states exactly how many rows are shown.</p>
-              </div>
-              <RiskChart transactions={transactions} retainedFlagged={counts.flagged} flaggedThreshold={Number(stats?.flagged_threshold ?? 20)} />
+        {view === 'transactions' && <div className="space-y-6">
+          <div className="rounded-xl border border-amber-300/25 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100" role="note" aria-label="Risk score disclaimer"><strong>Review signals are not fraud verdicts.</strong> Scores prioritize transactions for human review and do not establish criminality, ownership, intent, sanctions status, or malicious behavior.</div>
+          <StatsBar stats={stats} coverage={coverage} />
+          <TransactionBrowserControls
+            search={search} setSearch={v => updateFilter(setSearch, v)}
+            minRisk={minRisk} setMinRisk={v => updateFilter(setMinRisk, v)} maxRisk={maxRisk} setMaxRisk={v => updateFilter(setMaxRisk, v)}
+            minValue={minValue} setMinValue={v => updateFilter(setMinValue, v)} maxValue={maxValue} setMaxValue={v => updateFilter(setMaxValue, v)}
+            sort={sort} setSort={v => updateFilter(setSort, v)} pageSize={pageSize} setPageSize={setPageSize}
+            page={page} totalPages={totalPages} onPage={setPage} onReset={resetFilters} onExport={exportCurrent}
+          />
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
+            <div className="platform-card p-5">
+              <p className="metric-label">Current population</p>
+              <p className="mt-2 text-3xl font-semibold text-white">{Number(browser.total || 0).toLocaleString()}</p>
+              <p className="mt-2 text-sm text-slate-400">Retained transactions matching the active filters. Page {page} shows at most {pageSize} rows.</p>
+              <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-2"><span>Newest matching block: {browser.newest_block ? Number(browser.newest_block).toLocaleString() : '—'}</span><span>Data freshness: {status.label} · checkpoint {ageLabel(checkpointAge)}</span></div>
             </div>
-            <TransactionList transactions={filtered} onSelect={inspectTransaction} totalMatches={listScope.total} scopeLabel={listScope.label} searchActive={listScope.searchActive} />
-            <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-600">
-              <span>Ethereum mainnet · Block {latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</span>
-              <span>Risk scores are review signals, not fraud verdicts.</span>
-            </div>
+            <RiskChart distribution={browser.distribution} />
           </div>
-        )}
+          <TransactionList transactions={browser.transactions || []} onSelect={inspectTransaction} totalMatches={browser.total} loading={browserLoading} error={browserError} onRetry={() => setBrowserRefresh(value => value + 1)} />
+          <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-500"><span>Ethereum mainnet · Latest indexed block {latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</span><span>Exports are bounded to 5,000 matching rows and preserve current filters.</span></div>
+        </div>}
 
         {view !== 'transactions' && <SectionHeading view={view} freshness={freshness} />}
         {view === 'wallet' && <WalletInvestigator />}

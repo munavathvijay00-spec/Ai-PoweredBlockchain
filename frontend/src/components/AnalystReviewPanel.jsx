@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { api, hasAnalystCredential, setAnalystCredential } from '../api/client';
 
 const ACTIONS = [
   ['needs_review', 'Needs review'],
@@ -10,7 +10,8 @@ const ACTIONS = [
 
 export default function AnalystReviewPanel({ txHash }) {
   const [status, setStatus] = useState('unreviewed');
-  const [actor, setActor] = useState(() => localStorage.getItem('chainscope_analyst') || 'Analyst');
+  const [credential, setCredential] = useState('');
+  const [authenticated, setAuthenticated] = useState(() => hasAnalystCredential());
   const [assignee, setAssignee] = useState('');
   const [note, setNote] = useState('');
   const [audit, setAudit] = useState([]);
@@ -34,12 +35,30 @@ export default function AnalystReviewPanel({ txHash }) {
     return () => { active = false; };
   }, [txHash]);
 
-  function updateActor(value) {
-    setActor(value);
-    localStorage.setItem('chainscope_analyst', value.trim() || 'Analyst');
+  function unlock() {
+    const token = credential.trim();
+    if (!token) {
+      setMessage('Enter an analyst or admin access key.');
+      return;
+    }
+    setAnalystCredential(token);
+    setCredential('');
+    setAuthenticated(true);
+    setMessage('Analyst write access enabled for this browser tab.');
+  }
+
+  function lock() {
+    setAnalystCredential('');
+    setAuthenticated(false);
+    setCredential('');
+    setMessage('Analyst write access cleared from this browser tab.');
   }
 
   async function save(nextStatus = status) {
+    if (!authenticated) {
+      setMessage('Authenticate before changing analyst state.');
+      return;
+    }
     const why = note.trim();
     if (!why) { setMessage('Add a case note explaining why before saving.'); return; }
     if (nextStatus === 'escalated' && !assignee.trim()) { setMessage('Escalation requires an assignee.'); return; }
@@ -48,16 +67,20 @@ export default function AnalystReviewPanel({ txHash }) {
     try {
       const result = await api.saveAnalystReview(txHash, {
         status: nextStatus,
-        actor: actor.trim() || 'Analyst',
         assignee: assignee.trim() || null,
         note: why,
       });
       setStatus(result.status || nextStatus);
-      setMessage('Review saved and audit event recorded.');
+      setMessage(`Review saved by authenticated ${result.actor_role || 'analyst'} identity.`);
       const history = await api.getAnalystAudit(txHash, 30);
       setAudit(history.events || []);
     } catch (error) {
-      setMessage(error?.message || 'Unable to save review.');
+      if (error?.status === 401 || error?.status === 403) {
+        lock();
+        setMessage('Credential rejected or role is insufficient.');
+      } else {
+        setMessage(error?.message || 'Unable to save review.');
+      }
     } finally {
       setSaving(false);
     }
@@ -65,17 +88,28 @@ export default function AnalystReviewPanel({ txHash }) {
 
   return <section className="rounded-lg border border-sky-400/25 bg-sky-400/[0.05] p-4" aria-labelledby="analyst-actions-title">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 id="analyst-actions-title" className="text-sm font-semibold uppercase tracking-wider text-sky-200">Analyst Actions</h3><p className="mt-1 text-xs text-slate-400">Every decision is appended to the audit trail separately from automated signals.</p></div>
+      <div><h3 id="analyst-actions-title" className="text-sm font-semibold uppercase tracking-wider text-sky-200">Analyst Actions</h3><p className="mt-1 text-xs text-slate-400">Writes require authenticated analyst/admin access. Identity and role are assigned by the server, not this form.</p></div>
       <span className="rounded-full border border-slate-500 bg-slate-800 px-2 py-1 text-[10px] uppercase tracking-wide text-slate-200">{loading ? 'loading' : status.replaceAll('_', ' ')}</span>
     </div>
 
-    <div className="mt-4 grid gap-3 md:grid-cols-[220px_220px_1fr]">
-      <label className="text-xs text-slate-300">Analyst identity<input value={actor} onChange={event => updateActor(event.target.value)} className="mt-1 w-full rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
+    <div className="mt-4 rounded-lg border border-slate-600/80 bg-slate-950/30 p-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-[240px] flex-1 text-xs text-slate-300">Analyst access key
+          <input type="password" autoComplete="off" value={credential} disabled={authenticated} onChange={event => setCredential(event.target.value)} placeholder={authenticated ? 'Authenticated for this tab' : 'Analyst / admin key'} className="mt-1 w-full rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300 disabled:opacity-60" />
+        </label>
+        {authenticated
+          ? <button type="button" onClick={lock} className="rounded-lg border border-slate-500 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-300">Lock writes</button>
+          : <button type="button" onClick={unlock} className="rounded-lg border border-sky-300/50 bg-sky-400/15 px-3 py-2 text-xs font-semibold text-sky-100 focus:outline-none focus:ring-2 focus:ring-sky-300">Unlock writes</button>}
+      </div>
+      <p className="mt-2 text-[11px] text-slate-500">Credential is kept in session storage only and is cleared when the browser tab session ends.</p>
+    </div>
+
+    <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">
       <label className="text-xs text-slate-300">Assignee<input value={assignee} onChange={event => setAssignee(event.target.value)} placeholder="Analyst / team" className="mt-1 w-full rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
       <label className="text-xs text-slate-300">Decision reason / case note<textarea value={note} onChange={event => setNote(event.target.value)} rows="2" placeholder="Required: evidence checked, reason for disposition, next step…" className="mt-1 w-full resize-y rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
     </div>
 
-    <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{ACTIONS.map(([value, label]) => <button key={value} type="button" disabled={saving || loading} onClick={() => save(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:opacity-50 ${status === value ? 'border-sky-300/60 bg-sky-400/20 text-white' : 'border-[#56657a] bg-[#111b2d] text-slate-200 hover:border-sky-300/50'}`}>{label}</button>)}</div>
+    <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{ACTIONS.map(([value, label]) => <button key={value} type="button" disabled={saving || loading || !authenticated} onClick={() => save(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:opacity-50 ${status === value ? 'border-sky-300/60 bg-sky-400/20 text-white' : 'border-[#56657a] bg-[#111b2d] text-slate-200 hover:border-sky-300/50'}`}>{label}</button>)}</div>
     {message && <p className="mt-3 text-xs text-slate-300" role="status" aria-live="polite">{message}</p>}
 
     <details className="mt-4 rounded-lg border border-slate-600/80 bg-slate-900/30 p-3">

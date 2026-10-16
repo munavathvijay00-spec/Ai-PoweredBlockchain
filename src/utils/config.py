@@ -35,8 +35,6 @@ class Settings(BaseSettings):
     api_key: str
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    # Fail closed: cross-origin browser access is disabled unless production
-    # explicitly supplies one or more comma-separated trusted origins.
     cors_allowed_origins: str = ""
     public_rate_limit_per_minute: int = 120
     authenticated_rate_limit_per_minute: int = 240
@@ -45,8 +43,11 @@ class Settings(BaseSettings):
     expensive_queue_timeout_seconds: float = 2.0
     max_request_body_bytes: int = 1_000_000
 
+    # Runtime resource protection. Model training is intentionally off in the
+    # request-serving process; use an explicit worker/job when retraining is desired.
+    run_ml_training_on_startup: bool = False
+
     # Evidence integrity. Keep separate from auth/API credentials.
-    # When empty, reports remain hash-addressed but explicitly unsigned.
     evidence_signing_key: str = ""
     evidence_signer_id: str = "chainscope-production"
 
@@ -86,4 +87,5 @@ if __name__ == "__main__":
     print(f"   Public RPM: {settings.public_rate_limit_per_minute}")
     print(f"   Authenticated RPM: {settings.authenticated_rate_limit_per_minute}")
     print(f"   Expensive max concurrency: {settings.expensive_max_concurrency}")
+    print(f"   ML training on API startup: {settings.run_ml_training_on_startup}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

@@ -15,6 +15,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
   const [expansions, setExpansions] = useState({});
   const [expanding, setExpanding] = useState('');
   const [expansionAddress, setExpansionAddress] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   async function investigate(event) {
     event.preventDefault();
@@ -29,6 +30,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     setLoadedPages(1);
     setExpansions({});
     setExpansionAddress('');
+    setShowAdvanced(false);
     try {
       const response = await api.getWalletGraph(wallet);
       setResult(response);
@@ -84,7 +86,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
 
   async function expandCounterparty() {
     const wallet = expansionAddress.trim().toLowerCase();
-    if (!result || !VALID.test(wallet)) { setError('Enter a valid counterparty address.'); return; }
+    if (!result || !VALID.test(wallet)) { setError('Choose a valid observed counterparty address.'); return; }
     const known = new Set((result.edges || []).flatMap(edge => [edge.source?.toLowerCase(), edge.target?.toLowerCase()]));
     if (!known.has(wallet)) { setError('Choose an address already observed in this network.'); return; }
     if (wallet === result.root?.toLowerCase()) { setError('The root wallet is already loaded.'); return; }
@@ -136,6 +138,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
   const verifiedNodes = result ? (result.nodes || []).filter(node => Array.isArray(node.verified_entities) && node.verified_entities.length > 0) : [];
   const expansionCount = Object.keys(expansions).length;
   const observedWallets = result ? [...new Set((result.edges || []).flatMap(edge => [edge.source?.toLowerCase(), edge.target?.toLowerCase()]))].filter(Boolean) : [];
+  const expandableWallets = observedWallets.filter(wallet => wallet !== result?.root?.toLowerCase() && !expansions[wallet]).sort();
 
   function selectTransaction(tx) {
     if (result) {
@@ -153,7 +156,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
           <div>
             <p className="eyebrow">Evidence network</p>
             <h2 className="mt-2 text-xl font-semibold text-white">Build a bounded fund-flow workspace</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Start with a one-hop Ethereum transfer graph, then explicitly expand up to five observed counterparties for bounded second-hop context. Every displayed edge remains tied to transaction evidence.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Build an evidence-linked Ethereum transfer graph, load older transfer pages when available, and inspect the underlying transactions directly.</p>
           </div>
           <span className="status-pill border-violet-400/20 bg-violet-400/[0.07] text-violet-300">Read-only graph</span>
         </div>
@@ -170,8 +173,8 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="panel p-4"><p className="eyebrow">Observed edges</p><p className="mt-3 text-2xl font-semibold text-white">{records.length}</p><p className="mt-2 text-[11px] text-slate-600">Evidence-linked transfers</p></div>
         <div className="panel p-4"><p className="eyebrow">Observed wallets</p><p className="mt-3 text-2xl font-semibold text-cyan-300">{observedWallets.length}</p><p className="mt-2 text-[11px] text-slate-600">Loaded graph only</p></div>
-        <div className="panel p-4"><p className="eyebrow">Verified entity matches</p><p className={`mt-3 text-2xl font-semibold ${verifiedNodes.length ? 'text-emerald-300' : 'text-slate-400'}`}>{verifiedNodes.length}</p><p className="mt-2 text-[11px] text-slate-600">Source-attributed local records</p></div>
-        <div className="panel p-4"><p className="eyebrow">Second-hop expansions</p><p className="mt-3 text-2xl font-semibold text-violet-300">{expansionCount}/5</p><p className="mt-2 text-[11px] text-slate-600">Explicit analyst-controlled expansion</p></div>
+        <div className="panel p-4"><p className="eyebrow">Verified entity matches</p><p className={`mt-3 text-2xl font-semibold ${verifiedNodes.length ? 'text-emerald-300' : 'text-slate-500'}`}>{verifiedNodes.length}</p><p className="mt-2 text-[11px] text-slate-600">Shown only when matched</p></div>
+        <div className="panel p-4"><p className="eyebrow">Expanded counterparties</p><p className="mt-3 text-2xl font-semibold text-violet-300">{expansionCount}</p><p className="mt-2 text-[11px] text-slate-600">Optional deeper graph context</p></div>
       </section>
 
       <section className="panel p-5">
@@ -187,41 +190,36 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
             <span className="status-pill border-slate-700 bg-slate-950/50 text-slate-400">Incoming more {result.next_page_keys?.incoming ? 'yes' : 'no'}</span>
           </div>
         </div>
-        {(result.next_page_keys?.outgoing || result.next_page_keys?.incoming) && <button onClick={loadMore} disabled={loadingMore} className="secondary-button mt-4">{loadingMore ? 'Loading older evidence…' : 'Load older transfers into graph'}</button>}
-      </section>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {(result.next_page_keys?.outgoing || result.next_page_keys?.incoming) && <button onClick={loadMore} disabled={loadingMore} className="secondary-button">{loadingMore ? 'Loading older evidence…' : 'Load older transfers'}</button>}
+          {expandableWallets.length > 0 && <button type="button" onClick={() => setShowAdvanced(value => !value)} className="secondary-button">{showAdvanced ? 'Hide advanced expansion' : 'Advanced graph expansion'}</button>}
+        </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <section className="panel p-5">
-          <p className="eyebrow">Second-hop tracing</p>
-          <h3 className="mt-2 text-lg font-semibold text-white">Expand an observed counterparty</h3>
-          <p className="mt-2 text-xs leading-5 text-slate-500">Each expansion fetches one bounded first page for a wallet already present in this graph. This is exploratory context, not a guaranteed provenance chain or final-destination trace.</p>
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+        {showAdvanced && expandableWallets.length > 0 && <div className="mt-4 rounded-xl border border-violet-400/15 bg-violet-400/[0.035] p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-violet-200">Expand one observed counterparty</p>
+              <p className="mt-1 text-xs text-slate-500">Useful only when you need one additional hop of evidence around a specific wallet. Maximum five expansions.</p>
+            </div>
             <select aria-label="Counterparty to expand" value={expansionAddress} onChange={event => setExpansionAddress(event.target.value)} className="soft-input min-w-0 flex-1 font-mono text-xs">
               <option value="">Choose observed counterparty…</option>
-              {observedWallets.filter(wallet => wallet !== result.root?.toLowerCase() && !expansions[wallet]).sort().map(wallet => <option key={wallet} value={wallet}>{wallet}</option>)}
+              {expandableWallets.map(wallet => <option key={wallet} value={wallet}>{wallet}</option>)}
             </select>
-            <button type="button" onClick={expandCounterparty} disabled={Boolean(expanding) || !expansionAddress || expansionCount >= 5} className="primary-button">{expanding ? 'Expanding…' : 'Expand wallet'}</button>
+            <button type="button" onClick={expandCounterparty} disabled={Boolean(expanding) || !expansionAddress || expansionCount >= 5} className="primary-button">{expanding ? 'Expanding…' : 'Expand'}</button>
           </div>
-          {expansionCount > 0 && <div className="mt-4 space-y-2">
-            {Object.entries(expansions).map(([wallet, info]) => <div key={wallet} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3 text-xs text-slate-400">
-              <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-slate-300">{short(wallet)}</span><span>{info.edges} edges</span></div>
-              <p className="mt-1">More pages {info.moreOutgoing || info.moreIncoming ? 'available but not fetched' : 'not indicated'} · verified matches {info.verifiedEntityMatches || 0}</p>
-            </div>)}
-          </div>}
-        </section>
+          {expansionCount > 0 && <p className="mt-3 text-xs text-slate-500">Expanded {expansionCount}/5 counterparties. Added edges are merged directly into the graph below.</p>}
+        </div>}
+      </section>
 
-        <section className="panel p-5">
-          <p className="eyebrow">Verified entity context</p>
-          <h3 className="mt-2 text-lg font-semibold text-white">Source-attributed local matches</h3>
-          {verifiedNodes.length ? <div className="mt-4 space-y-3">
-            {verifiedNodes.slice(0, 8).map(node => <div key={node.id} className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.035] p-3">
-              <a href={'https://etherscan.io/address/' + node.id} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-cyan-300 hover:underline">{short(node.id)} ↗</a>
-              <div className="mt-2 flex flex-wrap gap-2">{node.verified_entities.map((entity, index) => <span key={`${entity.source}-${entity.entity_id}-${index}`} className="rounded-full border border-emerald-400/15 bg-slate-950/50 px-2.5 py-1 text-[11px] text-emerald-200">{entity.entity_name} · {entity.source}</span>)}</div>
-            </div>)}
-          </div> : <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/45 p-4 text-sm leading-6 text-slate-400">No source-attributed local entity match is present for the currently loaded nodes. This does not mean external attribution does not exist.</div>}
-          <p className="mt-3 text-xs text-slate-600">{result.entity_context_note || 'Entity context is enrichment only and must not be interpreted as a compliance verdict.'}</p>
-        </section>
-      </div>
+      {verifiedNodes.length > 0 && <section className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.035] p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Verified entity matches</span>
+          {verifiedNodes.slice(0, 8).flatMap(node => node.verified_entities.map((entity, index) => (
+            <a key={`${node.id}-${entity.source}-${entity.entity_id}-${index}`} href={'https://etherscan.io/address/' + node.id} target="_blank" rel="noopener noreferrer" className="rounded-full border border-emerald-400/15 bg-slate-950/50 px-2.5 py-1 text-[11px] text-emerald-200 hover:border-emerald-300/30" title={node.id}>{entity.entity_name || short(node.id)} · {entity.source} ↗</a>
+          )))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500">These are source-attributed address matches only; they do not establish ownership or wrongdoing.</p>
+      </section>}
     </>}
 
     <section className="panel p-5">

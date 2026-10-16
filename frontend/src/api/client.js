@@ -4,6 +4,8 @@ const API_BASE = configuredBase
   ? `${configuredBase}${configuredBase.endsWith('/api') ? '' : '/api'}`
   : '/api';
 
+// Legacy tab credential helpers remain for the old hidden AnalystReviewPanel only.
+// Case Management no longer uses browser storage for credentials.
 function analystCredential() {
   return sessionStorage.getItem('chainscope_analyst_credential') || '';
 }
@@ -143,6 +145,9 @@ export const api = {
     await ensureViewerSession();
     return request(`/wallets/${encodeURIComponent(address)}/copilot`, 30000, viewerOptions('POST'));
   },
+  getAnalystSession: () => request('/session/analyst', 8000),
+  createAnalystSession: accessKey => request('/session/analyst', 8000, jsonOptions({ access_key: accessKey })),
+  clearAnalystSession: () => request('/session/analyst', 8000, { method: 'DELETE' }),
   listCases: (status = '') => request(`/analyst/cases${status ? `?status=${encodeURIComponent(status)}` : ''}`, 15000, viewerOptions()),
   getCase: caseId => request(`/analyst/cases/${encodeURIComponent(caseId)}`, 15000, viewerOptions()),
   createCase: payload => request('/analyst/cases', 15000, jsonOptions(payload, true)),

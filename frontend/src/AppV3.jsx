@@ -30,7 +30,7 @@ function WorkflowRail({ hasResult, onAddCase }) {
   const steps = [
     ['1', 'Search'], ['2', 'Brief'], ['3', 'Flows'], ['4', 'Findings'], ['5', 'Case'],
   ];
-  return <div className="panel overflow-x-auto p-3" aria-label="Investigation workflow">
+  return <div className="panel overflow-x-auto p-3" role="region" tabIndex={0} aria-label="Investigation workflow">
     <div className="flex min-w-[620px] items-center gap-2">
       {steps.map(([number, label], index) => <div key={label} className="flex flex-1 items-center gap-2">
         <div className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 ${hasResult || index === 0 ? 'border-cyan-400/20 bg-cyan-400/[0.04]' : 'border-slate-800 bg-slate-950/25'}`}>

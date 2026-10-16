@@ -18,6 +18,11 @@ export function hasAnalystCredential() {
   return Boolean(analystCredential());
 }
 
+function authHeaders(headers = {}) {
+  const credential = analystCredential();
+  return credential ? { ...headers, Authorization: `Bearer ${credential}` } : headers;
+}
+
 async function request(path, timeoutMs = 12000, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -27,15 +32,12 @@ async function request(path, timeoutMs = 12000, options = {}) {
   } finally {
     clearTimeout(timeout);
   }
-
   if (!response.ok) {
     let detail = '';
     try {
       const payload = await response.json();
       detail = typeof payload?.detail === 'string' ? payload.detail : '';
-    } catch {
-      // Keep the HTTP fallback for non-JSON upstream failures.
-    }
+    } catch {}
     const error = new Error(detail || `API error: ${response.status} ${response.statusText}`);
     error.status = response.status;
     throw error;
@@ -44,16 +46,12 @@ async function request(path, timeoutMs = 12000, options = {}) {
 }
 
 function jsonOptions(payload, privileged = false) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (privileged) {
-    const credential = analystCredential();
-    if (credential) headers.Authorization = `Bearer ${credential}`;
-  }
-  return {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  };
+  const headers = privileged ? authHeaders({ 'Content-Type': 'application/json' }) : { 'Content-Type': 'application/json' };
+  return { method: 'POST', headers, body: JSON.stringify(payload) };
+}
+
+function viewerOptions(method = 'GET') {
+  return { method, headers: authHeaders() };
 }
 
 function browserParams(options = {}) {
@@ -117,5 +115,13 @@ export const api = {
     const params = new URLSearchParams({ depth: String(depth), limit: String(limit), per_hop_limit: '120' });
     return request(`/wallets/${encodeURIComponent(address)}/graph?${params}`, 25000);
   },
+  getFundFlow: (address, depth = 3, limit = 300) => request(`/wallets/${encodeURIComponent(address)}/fund-flow?depth=${depth}&limit=${limit}&per_hop_limit=160`, 30000),
   getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report`, 25000),
+  getCopilot: address => request(`/wallets/${encodeURIComponent(address)}/copilot`, 30000, viewerOptions('POST')),
+  listCases: (status = '') => request(`/analyst/cases${status ? `?status=${encodeURIComponent(status)}` : ''}`, 15000, viewerOptions()),
+  getCase: caseId => request(`/analyst/cases/${encodeURIComponent(caseId)}`, 15000, viewerOptions()),
+  createCase: payload => request('/analyst/cases', 15000, jsonOptions(payload, true)),
+  addCaseItem: (caseId, payload) => request(`/analyst/cases/${encodeURIComponent(caseId)}/items`, 15000, jsonOptions(payload, true)),
+  updateCase: (caseId, payload) => request(`/analyst/cases/${encodeURIComponent(caseId)}/state`, 15000, jsonOptions(payload, true)),
+  getCaseReport: caseId => request(`/analyst/cases/${encodeURIComponent(caseId)}/report`, 20000, viewerOptions()),
 };

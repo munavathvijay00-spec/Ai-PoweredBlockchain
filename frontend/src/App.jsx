@@ -7,9 +7,11 @@ import RiskChart from './components/RiskChart';
 import TransactionBrowserControls from './components/TransactionBrowserControls';
 import WalletGraphWorkspace from './components/WalletGraphWorkspace';
 import WalletInvestigator from './components/WalletInvestigator';
+import AddressDirectory from './components/AddressDirectory';
 
 const NAV = [
   { id: 'transactions', label: 'Live monitor' },
+  { id: 'addresses', label: 'Addresses' },
   { id: 'wallet', label: 'Wallet intelligence' },
   { id: 'investigate', label: 'Flow workspace' },
   { id: 'system', label: 'System coverage' },
@@ -40,6 +42,7 @@ function statusMeta(status) {
 
 function SectionHeading({ view, freshness }) {
   const copy = {
+    addresses: ['Tracked Addresses', 'Browse retained addresses, activity counts, and jump into their transaction history.'],
     wallet: ['Wallet Intelligence', 'Investigate an Ethereum address with bounded, evidence-backed transfer coverage.'],
     investigate: ['Flow Workspace', 'Explore observed transaction relationships without inferring ownership or wrongdoing.'],
     system: ['System Coverage', 'See freshness, retention, evidence limits, and verified intelligence coverage.'],
@@ -152,9 +155,14 @@ export default function App() {
     setView('transactions');
     if (key === 'flagged') { setMinRisk('20'); setMaxRisk(''); setSort('risk_desc'); setPage(1); return; }
     if (key === 'risk') { setSort('risk_desc'); setPage(1); return; }
-    if (key === 'addresses') { setView('wallet'); return; }
+    if (key === 'addresses') { setView('addresses'); return; }
     if (key === 'evidence') { setView('system'); return; }
     if (key === 'all') resetFilters();
+  }
+
+  function filterByAddress(address) {
+    setSearch(address);
+    setMinRisk(''); setMaxRisk(''); setMinValue(''); setMaxValue(''); setSort('newest'); setPage(1); setView('transactions');
   }
 
   function exportCurrent(format) {
@@ -200,12 +208,7 @@ export default function App() {
           <TransactionBrowserControls search={search} setSearch={v => updateFilter(setSearch, v)} minRisk={minRisk} setMinRisk={v => updateFilter(setMinRisk, v)} maxRisk={maxRisk} setMaxRisk={v => updateFilter(setMaxRisk, v)} minValue={minValue} setMinValue={v => updateFilter(setMinValue, v)} maxValue={maxValue} setMaxValue={v => updateFilter(setMaxValue, v)} sort={sort} setSort={v => updateFilter(setSort, v)} pageSize={pageSize} setPageSize={setPageSize} page={page} totalPages={totalPages} onPage={setPage} onReset={resetFilters} onExport={exportCurrent} onQueue={applyQueue} />
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
-            <div className={`platform-card p-5 ${singleBlockPopulation ? 'border-amber-400/25' : ''}`}>
-              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="metric-label">Retained population scope</p><p className="mt-2 text-3xl font-semibold text-white">{Number(browser.total || 0).toLocaleString()}</p></div><span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide ${singleBlockPopulation ? 'border-amber-400/25 bg-amber-400/10 text-amber-200' : 'border-sky-400/20 bg-sky-400/[0.07] text-sky-300'}`}>{singleBlockPopulation ? 'single-block snapshot' : `${distinctBlocks.toLocaleString()} blocks`}</span></div>
-              <p className="mt-2 text-sm text-slate-400">{browser.population_scope || 'Retained transactions matching the active filters.'}</p>
-              <div className="mt-4 grid gap-3 text-xs text-slate-500 sm:grid-cols-2"><span>Block range: {browser.oldest_block ? Number(browser.oldest_block).toLocaleString() : '—'} → {browser.newest_block ? Number(browser.newest_block).toLocaleString() : '—'}</span><span>Distinct blocks: {distinctBlocks.toLocaleString()} · this page: {pageDistinctBlocks.toLocaleString()}</span><span>Oldest: {utcRange(browser.oldest_timestamp)}</span><span>Newest: {utcRange(browser.newest_timestamp)}</span></div>
-              {pageDistinctBlocks === 1 && distinctBlocks > 1 && <p className="mt-3 rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">This page happens to contain one block, but the filtered retained population spans {distinctBlocks.toLocaleString()} blocks.</p>}
-            </div>
+            <div className={`platform-card p-5 ${singleBlockPopulation ? 'border-amber-400/25' : ''}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="metric-label">Retained population scope</p><p className="mt-2 text-3xl font-semibold text-white">{Number(browser.total || 0).toLocaleString()}</p></div><span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide ${singleBlockPopulation ? 'border-amber-400/25 bg-amber-400/10 text-amber-200' : 'border-sky-400/20 bg-sky-400/[0.07] text-sky-300'}`}>{singleBlockPopulation ? 'single-block snapshot' : `${distinctBlocks.toLocaleString()} blocks`}</span></div><p className="mt-2 text-sm text-slate-400">{browser.population_scope || 'Retained transactions matching the active filters.'}</p><div className="mt-4 grid gap-3 text-xs text-slate-500 sm:grid-cols-2"><span>Block range: {browser.oldest_block ? Number(browser.oldest_block).toLocaleString() : '—'} → {browser.newest_block ? Number(browser.newest_block).toLocaleString() : '—'}</span><span>Distinct blocks: {distinctBlocks.toLocaleString()} · this page: {pageDistinctBlocks.toLocaleString()}</span><span>Oldest: {utcRange(browser.oldest_timestamp)}</span><span>Newest: {utcRange(browser.newest_timestamp)}</span></div>{pageDistinctBlocks === 1 && distinctBlocks > 1 && <p className="mt-3 rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">This page happens to contain one block, but the filtered retained population spans {distinctBlocks.toLocaleString()} blocks.</p>}</div>
             <RiskChart distribution={browser.distribution} asOf={lastUpdate} />
           </div>
 
@@ -214,6 +217,7 @@ export default function App() {
         </div>}
 
         {view !== 'transactions' && <SectionHeading view={view} freshness={freshness} />}
+        {view === 'addresses' && <AddressDirectory onFilterTransactions={filterByAddress} />}
         {view === 'wallet' && <WalletInvestigator />}
         {view === 'investigate' && <WalletGraphWorkspace flagged={flagged} onSelect={inspectTransaction} />}
         {view === 'system' && <SystemCoverage coverage={coverage} />}

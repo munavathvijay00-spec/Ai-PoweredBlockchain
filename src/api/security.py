@@ -1,15 +1,18 @@
 """API abuse protection and browser-facing security controls.
 
-Process-local rate limiting remains a last-line safety net. Multi-replica production must
-use a shared gateway/Redis limiter so quotas cannot be bypassed by replica hopping.
+Redis is used when REDIS_URL is configured so limits remain coherent across replicas.
+A process-local sliding window remains as a fail-safe if Redis is unavailable.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import time
 from collections import defaultdict, deque
 from typing import Deque
 
 from fastapi import HTTPException, Request
+from redis.asyncio import Redis
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -31,12 +34,13 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.settings = get_settings()
         self._buckets: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        self._redis = Redis.from_url(redis_url, encoding="utf-8", decode_responses=True) if redis_url else None
 
     def _client_key(self, request: Request) -> str:
         forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",", 1)[0].strip()
-        return request.client.host if request.client else "unknown"
+        raw = forwarded.split(",", 1)[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+        return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
     def _bucket_name(self, path: str) -> str:
         if any(path.startswith(prefix) for prefix in _EXPENSIVE_PREFIXES):
@@ -51,7 +55,7 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
         )
         return max(1, int(value))
 
-    def _allowed(self, client: str, bucket: str, now: float) -> tuple[bool, int]:
+    def _local_allowed(self, client: str, bucket: str, now: float) -> tuple[bool, int]:
         queue = self._buckets[(client, bucket)]
         cutoff = now - 60.0
         while queue and queue[0] < cutoff:
@@ -62,6 +66,24 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
             return False, retry_after
         queue.append(now)
         return True, 0
+
+    async def _allowed(self, client: str, bucket: str) -> tuple[bool, int, str]:
+        if self._redis is not None:
+            try:
+                now = int(time.time())
+                window = now // 60
+                key = f"chainscope:ratelimit:{bucket}:{client}:{window}"
+                count = await self._redis.incr(key)
+                if count == 1:
+                    await self._redis.expire(key, 70)
+                retry_after = max(1, 60 - (now % 60))
+                return count <= self._limit(bucket), retry_after, "redis"
+            except Exception:
+                # Availability should not depend on Redis. Fall back to a stricter local
+                # limiter and expose the limiter mode through the 429 response only.
+                pass
+        allowed, retry_after = self._local_allowed(client, bucket, time.monotonic())
+        return allowed, retry_after, "local_fallback"
 
     def _secure(self, response):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -101,12 +123,12 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
 
         if path != "/" and not path.startswith("/app") and path not in _INTERNAL_PATHS:
             bucket = self._bucket_name(path)
-            allowed, retry_after = self._allowed(self._client_key(request), bucket, time.monotonic())
+            allowed, retry_after, limiter = await self._allowed(self._client_key(request), bucket)
             if not allowed:
                 return self._secure(JSONResponse(
                     status_code=429,
                     headers={"Retry-After": str(retry_after)},
-                    content={"detail": "Rate limit exceeded", "bucket": bucket},
+                    content={"detail": "Rate limit exceeded", "bucket": bucket, "limiter": limiter},
                 ))
 
         response = await call_next(request)

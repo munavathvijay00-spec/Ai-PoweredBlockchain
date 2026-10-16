@@ -5,6 +5,19 @@ const baseUrl = process.env.BASE_URL || 'http://127.0.0.1:4173/app/';
 const browser = await chromium.launch({ headless: true });
 const results = [];
 
+function compactViolation(v) {
+  return {
+    id: v.id,
+    impact: v.impact,
+    help: v.help,
+    nodes: v.nodes.map(node => ({
+      target: node.target,
+      html: node.html,
+      failureSummary: node.failureSummary,
+    })),
+  };
+}
+
 async function runViewport(name, viewport) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
@@ -22,15 +35,17 @@ async function runViewport(name, viewport) {
     }
     const axe = await new AxeBuilder({ page }).analyze();
     const critical = axe.violations.filter(v => ['critical', 'serious'].includes(v.impact));
-    results.push({
+    const result = {
       name,
       viewport,
       title: dimensions.title,
       horizontalOverflow: dimensions.scrollWidth - dimensions.innerWidth,
-      seriousOrCriticalViolations: critical.map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.length })),
+      seriousOrCriticalViolations: critical.map(compactViolation),
       consoleErrors: consoleErrors.slice(0, 10),
-    });
+    };
+    results.push(result);
     if (critical.length) {
+      console.error(JSON.stringify({ passed: false, result }, null, 2));
       throw new Error(`${name}: ${critical.length} serious/critical axe violations: ${critical.map(v => v.id).join(', ')}`);
     }
   } finally {

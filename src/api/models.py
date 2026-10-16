@@ -28,6 +28,10 @@ class TransactionResponse(BaseModel):
         default_factory=dict,
         description="Current source-attributed exact-address matches for sender and recipient",
     )
+    relationship_context: Dict = Field(
+        default_factory=dict,
+        description="Descriptive transaction relationship context such as self-transfer and repeated sender-recipient pair counts",
+    )
 
     class Config:
         json_schema_extra = {
@@ -43,6 +47,7 @@ class TransactionResponse(BaseModel):
                 "ai_explanation": "Evidence-based transaction review: recorded evidence is available.",
                 "explanation_status": "deterministic",
                 "entity_context": {"sender": [], "recipient": []},
+                "relationship_context": {"self_transfer": False, "same_pair_count": 1},
             }
         }
 

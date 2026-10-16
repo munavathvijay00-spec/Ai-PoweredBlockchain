@@ -8,12 +8,12 @@ const API_BASE = configuredBase
   ? `${configuredBase}${configuredBase.endsWith('/api') ? '' : '/api'}`
   : '/api';
 
-async function request(path, timeoutMs = 12000) {
+async function request(path, timeoutMs = 12000, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
+    response = await fetch(`${API_BASE}${path}`, { signal: controller.signal, ...options });
   } finally {
     clearTimeout(timeout);
   }
@@ -56,8 +56,14 @@ export const api = {
     params.set('format', format);
     return `${API_BASE}/transaction-export?${params}`;
   },
-  getTransaction: (hash) => request(`/transactions/${hash}`),
-  getTransactionEvents: (hash) => request(`/transactions/${encodeURIComponent(hash)}/events`),
+  getTransaction: hash => request(`/transactions/${encodeURIComponent(hash)}`),
+  getAnalystReview: hash => request(`/analyst/transactions/${encodeURIComponent(hash)}`),
+  saveAnalystReview: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}`, 12000, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
+  getTransactionEvents: hash => request(`/transactions/${encodeURIComponent(hash)}/events`),
   getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`, 15000),
   getWalletTransfers: (address, cursors = {}, directions = { outgoing: true, incoming: true }) => {
     const params = new URLSearchParams({ per_direction: '25' });

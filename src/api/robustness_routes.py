@@ -44,6 +44,13 @@ def _secure_cookie(request: Request) -> bool:
     return forwarded == "https" or request.url.scheme == "https"
 
 
+def _cleared_session_response(cookie_name: str) -> Response:
+    result = Response(status_code=204)
+    result.delete_cookie(key=cookie_name, path="/api", samesite="strict")
+    result.headers["Cache-Control"] = "no-store"
+    return result
+
+
 @router.post("/session/viewer")
 async def create_viewer_session(request: Request, response: Response):
     """Issue or refresh a short-lived HttpOnly read-only browser session."""
@@ -74,10 +81,8 @@ async def create_viewer_session(request: Request, response: Response):
 
 
 @router.delete("/session/viewer", status_code=204)
-async def clear_viewer_session(response: Response):
-    response.delete_cookie(key=SESSION_COOKIE, path="/api")
-    response.headers["Cache-Control"] = "no-store"
-    return Response(status_code=204)
+async def clear_viewer_session():
+    return _cleared_session_response(SESSION_COOKIE)
 
 
 @router.post("/session/analyst")
@@ -116,10 +121,8 @@ async def analyst_session_status(principal: Principal = Depends(require_analyst)
 
 
 @router.delete("/session/analyst", status_code=204)
-async def clear_analyst_session(response: Response):
-    response.delete_cookie(key=ANALYST_SESSION_COOKIE, path="/api")
-    response.headers["Cache-Control"] = "no-store"
-    return Response(status_code=204)
+async def clear_analyst_session():
+    return _cleared_session_response(ANALYST_SESSION_COOKIE)
 
 
 @router.get("/wallets/{address}/coverage-summary")

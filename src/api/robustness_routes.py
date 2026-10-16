@@ -7,12 +7,18 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field
 
 from src.api.auth import (
     SESSION_COOKIE,
+    ANALYST_SESSION_COOKIE,
     Principal,
+    analyst_session_configured,
     authenticate,
+    authenticate_credential,
+    issue_analyst_session,
     issue_viewer_session,
+    require_analyst,
     require_viewer,
     viewer_session_configured,
 )
@@ -23,6 +29,10 @@ from src.forensics.evidence_signing import sign_digest_hex
 
 router = APIRouter(prefix="/api", tags=["evidence robustness"])
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+class AnalystSessionExchange(BaseModel):
+    access_key: str = Field(min_length=8, max_length=512)
 
 
 def _canonical(value) -> bytes:
@@ -38,10 +48,7 @@ def _secure_cookie(request: Request) -> bool:
 async def create_viewer_session(request: Request, response: Response):
     """Issue or refresh a short-lived HttpOnly read-only browser session."""
     if not viewer_session_configured():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Viewer sessions are not configured",
-        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Viewer sessions are not configured")
 
     try:
         principal = authenticate(request)
@@ -69,6 +76,48 @@ async def create_viewer_session(request: Request, response: Response):
 @router.delete("/session/viewer", status_code=204)
 async def clear_viewer_session(response: Response):
     response.delete_cookie(key=SESSION_COOKIE, path="/api")
+    response.headers["Cache-Control"] = "no-store"
+    return Response(status_code=204)
+
+
+@router.post("/session/analyst")
+async def create_analyst_session(payload: AnalystSessionExchange, request: Request, response: Response):
+    """Exchange a privileged server credential for a short-lived analyst browser session.
+
+    The supplied key is verified in-memory only. It is never returned, persisted,
+    placed in a cookie, or written to browser storage. The browser receives only a
+    signed HttpOnly analyst session cookie with least-privilege analyst role.
+    """
+    if not analyst_session_configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Analyst sessions are not configured")
+
+    principal = authenticate_credential(payload.access_key)
+    if principal.role not in {"analyst", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Analyst or admin credential required")
+
+    token, exp = issue_analyst_session(subject=f"browser:{principal.subject}", ttl_seconds=3600)
+    response.set_cookie(
+        key=ANALYST_SESSION_COOKIE,
+        value=token,
+        max_age=3600,
+        expires=3600,
+        path="/api",
+        secure=_secure_cookie(request),
+        httponly=True,
+        samesite="strict",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return {"role": "analyst", "status": "issued", "expires_at": exp}
+
+
+@router.get("/session/analyst")
+async def analyst_session_status(principal: Principal = Depends(require_analyst)):
+    return {"role": principal.role, "subject": principal.subject, "status": "active"}
+
+
+@router.delete("/session/analyst", status_code=204)
+async def clear_analyst_session(response: Response):
+    response.delete_cookie(key=ANALYST_SESSION_COOKIE, path="/api")
     response.headers["Cache-Control"] = "no-store"
     return Response(status_code=204)
 

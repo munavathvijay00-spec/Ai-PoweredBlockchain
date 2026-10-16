@@ -15,7 +15,6 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Iterable
 
 from fastapi import HTTPException, Request, status
 
@@ -52,7 +51,24 @@ def _extract_credential(request: Request) -> str | None:
 
 
 def _session_secret() -> str:
-    return os.getenv("VIEWER_SESSION_SIGNING_KEY", "").strip()
+    explicit = os.getenv("VIEWER_SESSION_SIGNING_KEY", "").strip()
+    if explicit:
+        return explicit
+
+    # Derive a purpose-specific key from signing material already held only by the server.
+    # This avoids browser secrets and avoids directly reusing the underlying credential.
+    source = os.getenv("EVIDENCE_SIGNING_KEY", "").strip() or get_settings().api_key.strip()
+    if not source:
+        return ""
+    return hmac.new(
+        source.encode("utf-8"),
+        b"chainscope/viewer-session/v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def viewer_session_configured() -> bool:
+    return bool(_session_secret())
 
 
 def _b64encode(raw: bytes) -> str:

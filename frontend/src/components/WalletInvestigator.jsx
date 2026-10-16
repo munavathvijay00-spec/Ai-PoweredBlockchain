@@ -322,18 +322,6 @@ export default function WalletInvestigator() {
           </section>
         </div>
 
-        {report && <section className={panel}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="eyebrow">Verified entity context</p>
-              <h3 className="mt-2 text-lg font-semibold text-white">Source-attributed local intelligence</h3>
-              <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">A local match is shown with its source. No local match is not evidence that no attribution exists elsewhere.</p>
-            </div>
-            <span className={`status-pill ${entityMatches.length ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-300' : 'border-slate-700 bg-slate-950/50 text-slate-400'}`}>{entityMatches.length ? `${entityMatches.length} matched record${entityMatches.length === 1 ? '' : 's'}` : 'No local match'}</span>
-          </div>
-          {rootEntityMatches.length > 0 && <div className="mt-4 flex flex-wrap gap-2">{rootEntityMatches.map((entity, index) => <span key={`${entity.source}-${entity.entity_id}-${index}`} className="rounded-full border border-emerald-400/15 bg-emerald-400/[0.04] px-3 py-1.5 text-xs text-emerald-100">{entity.entity_name || entity.entity_id} · {entity.source}</span>)}</div>}
-        </section>}
-
         <section className={panel}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

@@ -34,13 +34,12 @@ def _where(search: str | None, min_risk: int | None, max_risk: int | None,
         clauses.append(sql.replace("?", f"${len(args)}"))
 
     if search:
-        add("(lower(t.hash) LIKE ? OR lower(a_from.address) LIKE ? OR lower(a_to.address) LIKE ?)", f"%{search.strip().lower()}%")
-        # The same search value is referenced three times; expand safely.
-        value = args.pop()
-        clauses.pop()
+        value = f"%{search.strip().lower()}%"
         args.extend([value, value, value])
         n = len(args)
-        clauses.append(f"(lower(t.hash) LIKE ${n-2} OR lower(a_from.address) LIKE ${n-1} OR lower(a_to.address) LIKE ${n})")
+        clauses.append(
+            f"(lower(t.hash) LIKE ${n-2} OR lower(a_from.address) LIKE ${n-1} OR lower(a_to.address) LIKE ${n})"
+        )
     if min_risk is not None:
         add("t.risk_score >= ?", int(min_risk))
     if max_risk is not None:
@@ -63,7 +62,8 @@ async def _query_population(repo: TransactionRepository, *, search=None, min_ris
     rows = await repo.db.fetch(f"""
         SELECT t.hash, a_from.address AS from_address, a_to.address AS to_address,
                t.value, t.block_number, t.timestamp, t.risk_score,
-               t.risk_factors, t.ai_explanation
+               t.risk_factors, t.ai_explanation,
+               COUNT(*) OVER (PARTITION BY t.from_address_id, t.to_address_id) AS same_pair_count
         FROM transactions t
         JOIN addresses a_from ON t.from_address_id = a_from.id
         JOIN addresses a_to ON t.to_address_id = a_to.id
@@ -74,19 +74,21 @@ async def _query_population(repo: TransactionRepository, *, search=None, min_ris
 
     aggregate = await repo.db.fetchrow(f"""
         SELECT COUNT(*) AS total,
+               COUNT(DISTINCT t.block_number) AS distinct_blocks,
                COUNT(*) FILTER (WHERE t.risk_score < 20) AS minimal,
                COUNT(*) FILTER (WHERE t.risk_score >= 20 AND t.risk_score < 40) AS review,
                COUNT(*) FILTER (WHERE t.risk_score >= 40 AND t.risk_score < 80) AS high_review,
                COUNT(*) FILTER (WHERE t.risk_score >= 80) AS critical,
                MIN(t.timestamp) AS oldest_timestamp,
                MAX(t.timestamp) AS newest_timestamp,
+               MIN(t.block_number) AS oldest_block,
                MAX(t.block_number) AS newest_block
         FROM transactions t
         JOIN addresses a_from ON t.from_address_id = a_from.id
         JOIN addresses a_to ON t.to_address_id = a_to.id
         WHERE {where_sql}
     """, *args)
-    return rows, dict(aggregate or {})
+    return [dict(row) for row in rows], dict(aggregate or {})
 
 
 @router.get("/transaction-browser")
@@ -98,10 +100,10 @@ async def transaction_browser(
     max_risk: int | None = Query(None, ge=0, le=100),
     min_value_eth: float | None = Query(None, ge=0),
     max_value_eth: float | None = Query(None, ge=0),
-    sort: Literal["newest", "oldest", "risk_desc", "risk_asc", "value_desc", "value_asc"] = "newest",
+    sort: Literal["newest", "oldest", "risk_desc", "risk_asc", "value_desc", "value_asc"] = "risk_desc",
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    """Return one filtered page plus distribution counts over that exact same population."""
+    """Return one filtered page plus population-wide aggregates over the same query."""
     rows, aggregate = await _query_population(
         repo, search=search, min_risk=min_risk, max_risk=max_risk,
         min_value_eth=min_value_eth, max_value_eth=max_value_eth,
@@ -109,8 +111,18 @@ async def transaction_browser(
     )
     matches = await _load_entity_matches(repo, rows)
     total = int(aggregate.get("total") or 0)
+    page_blocks = {int(row["block_number"]) for row in rows if row.get("block_number") is not None}
+    formatted = []
+    for row in rows:
+        row["relationship_context"] = {
+            "self_transfer": str(row.get("from_address") or "").lower() == str(row.get("to_address") or "").lower(),
+            "same_pair_count": int(row.get("same_pair_count") or 1),
+        }
+        formatted.append(_format_tx(row, matches))
+
+    distinct_blocks = int(aggregate.get("distinct_blocks") or 0)
     return {
-        "transactions": [_format_tx(row, matches) for row in rows],
+        "transactions": formatted,
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -123,9 +135,16 @@ async def transaction_browser(
             "high_review": int(aggregate.get("high_review") or 0),
             "critical": int(aggregate.get("critical") or 0),
         },
-        "population_scope": "All retained transactions matching the current filters; chart counts are not sampled from the visible page.",
+        "population_scope": (
+            "Single-block retained snapshot matching the current filters."
+            if distinct_blocks == 1 and total > 0
+            else "All retained transactions matching the current filters; chart counts are not sampled from the visible page."
+        ),
+        "distinct_blocks": distinct_blocks,
+        "page_distinct_blocks": len(page_blocks),
         "oldest_timestamp": aggregate.get("oldest_timestamp"),
         "newest_timestamp": aggregate.get("newest_timestamp"),
+        "oldest_block": aggregate.get("oldest_block"),
         "newest_block": aggregate.get("newest_block"),
     }
 
@@ -138,7 +157,7 @@ async def transaction_export(
     max_risk: int | None = Query(None, ge=0, le=100),
     min_value_eth: float | None = Query(None, ge=0),
     max_value_eth: float | None = Query(None, ge=0),
-    sort: Literal["newest", "oldest", "risk_desc", "risk_asc", "value_desc", "value_asc"] = "newest",
+    sort: Literal["newest", "oldest", "risk_desc", "risk_asc", "value_desc", "value_asc"] = "risk_desc",
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
     """Export at most 5,000 rows matching the same browser filters."""
@@ -150,8 +169,10 @@ async def transaction_export(
     data = [{
         "hash": row["hash"], "from_address": row["from_address"], "to_address": row["to_address"],
         "value_wei": str(row["value"]), "block_number": row["block_number"],
-        "timestamp": row["timestamp"].isoformat() if row.get("timestamp") else None,
+        "timestamp_utc": row["timestamp"].isoformat() if row.get("timestamp") else None,
         "risk_score": row.get("risk_score", 0),
+        "same_pair_count": int(row.get("same_pair_count") or 1),
+        "self_transfer": str(row.get("from_address") or "").lower() == str(row.get("to_address") or "").lower(),
     } for row in rows]
     headers = {
         "X-ChainScope-Matching-Rows": str(int(aggregate.get("total") or 0)),
@@ -163,7 +184,7 @@ async def transaction_export(
         return Response(content=json.dumps({"rows": data, "matching_rows": int(aggregate.get("total") or 0), "export_limit": 5000}), media_type="application/json", headers=headers)
 
     out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=["hash", "from_address", "to_address", "value_wei", "block_number", "timestamp", "risk_score"])
+    writer = csv.DictWriter(out, fieldnames=["hash", "from_address", "to_address", "value_wei", "block_number", "timestamp_utc", "risk_score", "same_pair_count", "self_transfer"])
     writer.writeheader()
     writer.writerows(data)
     headers["Content-Disposition"] = 'attachment; filename="chainscope-transactions.csv"'

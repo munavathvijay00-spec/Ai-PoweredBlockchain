@@ -1,0 +1,56 @@
+name: Production quality gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  browser-quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm install --no-save playwright@1.56.1 @axe-core/playwright@4.11.0
+      - run: npx playwright install --with-deps chromium
+      - name: Start built frontend
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/chainscope-preview.log 2>&1 &
+          echo $! > /tmp/chainscope-preview.pid
+          for i in {1..30}; do
+            curl -fsS http://127.0.0.1:4173/app/ >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/chainscope-preview.log
+          exit 1
+      - name: Mobile and accessibility smoke
+        env:
+          BASE_URL: http://127.0.0.1:4173/app/
+        run: node tests/browser-smoke.mjs
+
+  production-load-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Clustered queue load smoke
+        run: >-
+          python scripts/review_queue_load_test.py
+          https://ai-poweredblockchain-production.up.railway.app/api
+          --requests 120 --concurrency 12 --max-p95-ms 3000 --min-success-rate 0.98
+      - name: Client-abort chaos smoke
+        run: >-
+          python scripts/review_queue_load_test.py
+          https://ai-poweredblockchain-production.up.railway.app/api
+          --requests 80 --concurrency 10 --chaos-rate 0.10 --max-p95-ms 3500 --min-success-rate 0.98

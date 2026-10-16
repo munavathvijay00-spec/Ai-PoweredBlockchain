@@ -35,6 +35,7 @@ from src.api.flagship_routes import router as flagship_router
 from src.api.browse_routes import router as browse_router
 from src.api.analyst_routes import router as analyst_router
 from src.api.address_routes import router as address_router
+from src.api.robustness_routes import router as robustness_router
 from src.api.security import AbuseProtectionMiddleware
 from src.api.models import HealthResponse
 from src.agents.ai_audit import ai_quality_summary, ensure_ai_audit_schema, provider_configuration, record_ai_run
@@ -52,9 +53,6 @@ from src.utils.config import get_settings
 TARGET_EXTERNAL_BENCHMARK = 500
 FRONTEND_DIST = Path("/app/frontend_dist")
 
-# Loguru defaults to stderr, which several hosting platforms classify as an
-# application error even for INFO/SUCCESS messages. Route normal application
-# logs to stdout so operational dashboards distinguish healthy events from faults.
 logger.remove()
 logger.add(
     sys.stdout,
@@ -230,8 +228,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Blockchain Intelligence API", description="Evidence-grounded Ethereum intelligence", version="1.11.0", lifespan=lifespan)
 settings = get_settings()
 allowed_origins = [origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()]
-# Empty allow_origins intentionally means same-origin browser requests only.
-# Never fall back to '*': production must explicitly opt in to cross-origin clients.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -246,7 +242,6 @@ app.add_middleware(AbuseProtectionMiddleware)
 async def observe_http(request: Request, call_next):
     start = time.monotonic()
     status = 500
-    response = None
     try:
         response = await call_next(request)
         status = response.status_code
@@ -268,7 +263,13 @@ async def observe_http(request: Request, call_next):
             log.warning("Slow HTTP request status={} duration_ms={:.1f}", status, elapsed * 1000)
 
 
-for api_router in [router, agent_router, event_router, wallet_router, coverage_router, graph_router, indexed_transfer_router, observability_router, explanation_router, ai_router, historical_router, deep_history_router, entity_router, evaluation_router, ml_router, readiness_router, forensic_router, investigator_router, flagship_router, browse_router, analyst_router, address_router]:
+for api_router in [
+    router, agent_router, event_router, wallet_router, coverage_router, graph_router,
+    indexed_transfer_router, observability_router, explanation_router, ai_router,
+    historical_router, deep_history_router, entity_router, evaluation_router, ml_router,
+    readiness_router, forensic_router, investigator_router, flagship_router, browse_router,
+    analyst_router, address_router, robustness_router,
+]:
     app.include_router(api_router)
 
 

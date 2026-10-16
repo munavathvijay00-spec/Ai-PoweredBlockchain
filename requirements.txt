@@ -97,6 +97,7 @@ python-dotenv==1.0.0
 pytz==2026.5
 pyunormalize==18.0.0
 PyYAML==6.0.3
+redis>=5.0,<7.0
 referencing==0.37.0
 regex==2026.9.29
 requests==2.34.2

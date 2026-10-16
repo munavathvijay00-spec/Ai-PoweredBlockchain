@@ -33,14 +33,10 @@ from src.api.investigator_routes import router as investigator_router
 from src.api.flagship_routes import router as flagship_router
 from src.api.browse_routes import router as browse_router
 from src.api.analyst_routes import router as analyst_router
+from src.api.address_routes import router as address_router
 from src.api.security import AbuseProtectionMiddleware
 from src.api.models import HealthResponse
-from src.agents.ai_audit import (
-    ai_quality_summary,
-    ensure_ai_audit_schema,
-    provider_configuration,
-    record_ai_run,
-)
+from src.agents.ai_audit import ai_quality_summary, ensure_ai_audit_schema, provider_configuration, record_ai_run
 from src.agents.explainer import evidence_explanation
 from src.agents.structured_grounding import structured_explain_with_audit
 from src.database.connection import get_db, close_db
@@ -65,7 +61,6 @@ async def _refresh_verified_intelligence(db):
         raise
     except Exception as exc:
         logger.warning("First-party entity registry refresh unavailable; preserving stored rows: {}", type(exc).__name__)
-
     try:
         count = await asyncio.wait_for(refresh_ofac(db), timeout=45)
         if count:
@@ -85,18 +80,11 @@ async def _prepare_ai_and_benchmark(db):
         raise
     except Exception as exc:
         logger.warning("AI audit schema unavailable: {}", type(exc).__name__)
-
     try:
         summary = await external_benchmark_summary(db)
         if summary.get("sample_size", 0) < TARGET_EXTERNAL_BENCHMARK:
-            result = await asyncio.wait_for(
-                sync_external_benchmark(db, per_class=TARGET_EXTERNAL_BENCHMARK // 2),
-                timeout=90,
-            )
-            logger.info(
-                "External detection benchmark refreshed: {} rows from {} (target={})",
-                result.get("rows_fetched", 0), result.get("source"), TARGET_EXTERNAL_BENCHMARK,
-            )
+            result = await asyncio.wait_for(sync_external_benchmark(db, per_class=TARGET_EXTERNAL_BENCHMARK // 2), timeout=90)
+            logger.info("External detection benchmark refreshed: {} rows from {} (target={})", result.get("rows_fetched", 0), result.get("source"), TARGET_EXTERNAL_BENCHMARK)
         else:
             logger.info("External detection benchmark already present: {} cases", summary.get("sample_size"))
     except asyncio.CancelledError:
@@ -115,17 +103,11 @@ async def _verify_grounded_ai_runtime(db):
         if not configuration.get("provider_configured"):
             logger.info("Grounded AI runtime verification deferred: provider not configured")
             return
-
         quality = await ai_quality_summary(db, provider=provider, model=model)
         if quality.get("last_grounded_at") is not None:
-            logger.info(
-                "Grounded AI runtime already verified: provider={} model={} accepted_runs={}",
-                provider, model, quality.get("grounded_ai_runs"),
-            )
+            logger.info("Grounded AI runtime already verified: provider={} model={} accepted_runs={}", provider, model, quality.get("grounded_ai_runs"))
             return
-
-        row = await db.fetchrow(
-            """
+        row = await db.fetchrow("""
             SELECT t.hash, t.block_number, t.value::text AS value_wei, t.risk_score,
                    t.risk_factors, a_from.address AS from_address, a_to.address AS to_address
             FROM transactions t
@@ -136,12 +118,10 @@ async def _verify_grounded_ai_runtime(db):
               AND jsonb_array_length(t.risk_factors) > 0
             ORDER BY t.risk_score DESC, t.block_number DESC
             LIMIT 1
-            """
-        )
+        """)
         if not row:
             logger.warning("Grounded AI runtime verification deferred: no retained transaction with risk evidence")
             return
-
         factors = row["risk_factors"] or []
         if isinstance(factors, str):
             factors = json.loads(factors)
@@ -149,24 +129,11 @@ async def _verify_grounded_ai_runtime(db):
         if not factors:
             logger.warning("Grounded AI runtime verification deferred: selected evidence row had no usable factors")
             return
-
-        tx = {
-            "hash": row["hash"],
-            "block_number": row["block_number"],
-            "value": row["value_wei"],
-            "value_wei": row["value_wei"],
-            "risk_score": row["risk_score"],
-            "from_address": row["from_address"],
-            "to_address": row["to_address"],
-        }
+        tx = {"hash": row["hash"], "block_number": row["block_number"], "value": row["value_wei"], "value_wei": row["value_wei"], "risk_score": row["risk_score"], "from_address": row["from_address"], "to_address": row["to_address"]}
         baseline = evidence_explanation(tx, factors)
         audit = await asyncio.wait_for(structured_explain_with_audit(tx, factors), timeout=45)
         await record_ai_run(db, tx_hash=row["hash"], baseline=baseline, audit=audit)
-        logger.info(
-            "Grounded AI runtime verification attempt: provider={} model={} status={} ai_used={} grounded={} latency_ms={}",
-            audit.get("provider"), audit.get("model"), audit.get("status"),
-            audit.get("ai_used"), audit.get("grounded"), audit.get("latency_ms"),
-        )
+        logger.info("Grounded AI runtime verification attempt: provider={} model={} status={} ai_used={} grounded={} latency_ms={}", audit.get("provider"), audit.get("model"), audit.get("status"), audit.get("ai_used"), audit.get("grounded"), audit.get("latency_ms"))
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -182,45 +149,21 @@ async def _prepare_independent_ml():
                 break
             await asyncio.sleep(5)
             benchmark = await external_benchmark_summary(db)
-
         status = await independent_ml_status()
         model_rows = int(status.get("dataset_rows") or 0) if status.get("available") else 0
         benchmark_rows = int(benchmark.get("sample_size") or 0)
         runtime_compatible = bool(status.get("runtime_compatible"))
-
         if status.get("available") and runtime_compatible and model_rows >= benchmark_rows:
             test = status.get("test_metrics") or {}
-            logger.info(
-                "Independent ML model current: family={} mode={} rows={} gate={} test_auc={} test_f1={} test_precision={} test_brier={}",
-                status.get("model_family"), status.get("deployment_mode"), model_rows,
-                status.get("production_quality_gate_passed"), test.get("roc_auc"), test.get("f1"),
-                test.get("precision"), test.get("brier"),
-            )
+            logger.info("Independent ML model current: family={} mode={} rows={} gate={} test_auc={} test_f1={} test_precision={} test_brier={}", status.get("model_family"), status.get("deployment_mode"), model_rows, status.get("production_quality_gate_passed"), test.get("roc_auc"), test.get("f1"), test.get("precision"), test.get("brier"))
             return
-
         if status.get("available") and not runtime_compatible:
-            logger.info(
-                "Independent ML model migration required: stored_family={} expected_family={}",
-                status.get("model_family"), status.get("expected_model_family"),
-            )
-
+            logger.info("Independent ML model migration required: stored_family={} expected_family={}", status.get("model_family"), status.get("expected_model_family"))
         if benchmark_rows < 100:
             logger.warning("Independent ML bootstrap deferred: only {} external cases available", benchmark_rows)
             return
-
-        metadata = await asyncio.wait_for(
-            train_and_register(limit=max(benchmark_rows, 500)),
-            timeout=120,
-        )
-        logger.info(
-            "Independent ML model registered/refreshed: family={} rows={} AUC={} F1={} precision={} brier={} mode={} gate={}",
-            metadata.get("model_family"), metadata.get("dataset_rows"),
-            (metadata.get("test_metrics") or {}).get("roc_auc"),
-            (metadata.get("test_metrics") or {}).get("f1"),
-            (metadata.get("test_metrics") or {}).get("precision"),
-            (metadata.get("test_metrics") or {}).get("brier"),
-            metadata.get("deployment_mode"), metadata.get("production_quality_gate_passed"),
-        )
+        metadata = await asyncio.wait_for(train_and_register(limit=max(benchmark_rows, 500)), timeout=120)
+        logger.info("Independent ML model registered/refreshed: family={} rows={} AUC={} F1={} precision={} brier={} mode={} gate={}", metadata.get("model_family"), metadata.get("dataset_rows"), (metadata.get("test_metrics") or {}).get("roc_auc"), (metadata.get("test_metrics") or {}).get("f1"), (metadata.get("test_metrics") or {}).get("precision"), (metadata.get("test_metrics") or {}).get("brier"), metadata.get("deployment_mode"), metadata.get("production_quality_gate_passed"))
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -243,12 +186,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Blockchain Intelligence API")
     db = await get_db()
     db_health_up.set(1)
-    background_tasks = [
-        asyncio.create_task(_refresh_verified_intelligence(db)),
-        asyncio.create_task(_prepare_ai_and_benchmark(db)),
-        asyncio.create_task(_verify_grounded_ai_runtime(db)),
-        asyncio.create_task(_prepare_independent_ml()),
-    ]
+    background_tasks = [asyncio.create_task(_refresh_verified_intelligence(db)), asyncio.create_task(_prepare_ai_and_benchmark(db)), asyncio.create_task(_verify_grounded_ai_runtime(db)), asyncio.create_task(_prepare_independent_ml())]
     if os.getenv("RUN_FLAGSHIP_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes"}:
         background_tasks.append(asyncio.create_task(_run_flagship_once(db)))
         logger.info("Flagship startup execution enabled")
@@ -270,22 +208,10 @@ async def lifespan(app: FastAPI):
         await close_db()
 
 
-app = FastAPI(
-    title="Blockchain Intelligence API",
-    description="Evidence-grounded Ethereum intelligence",
-    version="1.10.0",
-    lifespan=lifespan,
-)
-
+app = FastAPI(title="Blockchain Intelligence API", description="Evidence-grounded Ethereum intelligence", version="1.10.1", lifespan=lifespan)
 settings = get_settings()
 allowed_origins = [origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()] or ["*"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key", "Authorization"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=allowed_origins, allow_credentials=False, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "X-API-Key", "Authorization"])
 app.add_middleware(AbuseProtectionMiddleware)
 
 
@@ -305,47 +231,19 @@ async def observe_http(request: Request, call_next):
         api_request_duration_seconds.labels(method=method, route=route_label).observe(time.monotonic() - start)
 
 
-app.include_router(router)
-app.include_router(agent_router)
-app.include_router(event_router)
-app.include_router(wallet_router)
-app.include_router(coverage_router)
-app.include_router(graph_router)
-app.include_router(indexed_transfer_router)
-app.include_router(observability_router)
-app.include_router(explanation_router)
-app.include_router(ai_router)
-app.include_router(historical_router)
-app.include_router(deep_history_router)
-app.include_router(entity_router)
-app.include_router(evaluation_router)
-app.include_router(ml_router)
-app.include_router(readiness_router)
-app.include_router(forensic_router)
-app.include_router(investigator_router)
-app.include_router(flagship_router)
-app.include_router(browse_router)
-app.include_router(analyst_router)
+for api_router in [router, agent_router, event_router, wallet_router, coverage_router, graph_router, indexed_transfer_router, observability_router, explanation_router, ai_router, historical_router, deep_history_router, entity_router, evaluation_router, ml_router, readiness_router, forensic_router, investigator_router, flagship_router, browse_router, analyst_router, address_router]:
+    app.include_router(api_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])
 async def root():
     settings = get_settings()
-    return HealthResponse(
-        status="operational",
-        service="Blockchain Intelligence Platform",
-        version="1.10.0",
-        database=settings.postgres_db,
-        blockchain="ethereum-mainnet",
-    )
+    return HealthResponse(status="operational", service="Blockchain Intelligence Platform", version="1.10.1", database=settings.postgres_db, blockchain="ethereum-mainnet")
 
 
 @app.get("/metrics", tags=["monitoring"])
 async def metrics():
-    return Response(
-        content=generate_latest(REGISTRY),
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-    )
+    return Response(content=generate_latest(REGISTRY), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 if FRONTEND_DIST.exists():

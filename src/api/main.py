@@ -31,6 +31,7 @@ from src.api.readiness_routes import router as readiness_router
 from src.api.forensic_routes import router as forensic_router
 from src.api.investigator_routes import router as investigator_router
 from src.api.flagship_routes import router as flagship_router
+from src.api.browse_routes import router as browse_router
 from src.api.security import AbuseProtectionMiddleware
 from src.api.models import HealthResponse
 from src.agents.ai_audit import (
@@ -271,7 +272,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blockchain Intelligence API",
     description="Evidence-grounded Ethereum intelligence",
-    version="1.8.1",
+    version="1.9.0",
     lifespan=lifespan,
 )
 
@@ -322,6 +323,7 @@ app.include_router(readiness_router)
 app.include_router(forensic_router)
 app.include_router(investigator_router)
 app.include_router(flagship_router)
+app.include_router(browse_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])
@@ -330,7 +332,7 @@ async def root():
     return HealthResponse(
         status="operational",
         service="Blockchain Intelligence Platform",
-        version="1.8.1",
+        version="1.9.0",
         database=settings.postgres_db,
         blockchain="ethereum-mainnet",
     )

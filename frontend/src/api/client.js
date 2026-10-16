@@ -32,14 +32,30 @@ async function request(path, timeoutMs = 12000) {
   return response.json();
 }
 
+function browserParams(options = {}) {
+  const params = new URLSearchParams();
+  const allowed = ['limit', 'offset', 'search', 'min_risk', 'max_risk', 'min_value_eth', 'max_value_eth', 'sort'];
+  allowed.forEach(key => {
+    const value = options[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') params.set(key, String(value));
+  });
+  return params;
+}
+
 export const api = {
   getStats: () => request('/stats'),
   getCoverage: () => request('/coverage'),
   getAIStatus: () => request('/ai/status'),
   getMLStatus: () => request('/ml/status'),
   getExternalEvaluation: () => request('/evaluation/external', 20000),
-  getTransactions: (limit = 50) => request(`/transactions?limit=${limit}`),
+  getTransactions: (limit = 50, offset = 0) => request(`/transactions?limit=${limit}&offset=${offset}`),
   getFlagged: (limit = 50, minScore = 20) => request(`/flagged?min_score=${minScore}&limit=${limit}`),
+  getTransactionBrowser: options => request(`/transaction-browser?${browserParams(options)}`, 20000),
+  getTransactionExportUrl: (format = 'csv', options = {}) => {
+    const params = browserParams(options);
+    params.set('format', format);
+    return `${API_BASE}/transaction-export?${params}`;
+  },
   getTransaction: (hash) => request(`/transactions/${hash}`),
   getTransactionEvents: (hash) => request(`/transactions/${encodeURIComponent(hash)}/events`),
   getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`, 15000),

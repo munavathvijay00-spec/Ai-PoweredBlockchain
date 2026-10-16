@@ -1,0 +1,44 @@
+name: Review queue load test
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: "Deployed API root, e.g. https://example.com/api"
+        required: true
+        type: string
+      requests:
+        description: "Total requests"
+        required: true
+        default: "5022"
+        type: string
+      concurrency:
+        description: "Concurrent clients"
+        required: true
+        default: "100"
+        type: string
+      chaos_rate:
+        description: "Fraction of client reads intentionally aborted (0-1)"
+        required: true
+        default: "0.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Exercise clustered queue
+        run: >-
+          python scripts/review_queue_load_test.py
+          "${{ inputs.api_base_url }}"
+          --requests "${{ inputs.requests }}"
+          --concurrency "${{ inputs.concurrency }}"
+          --chaos-rate "${{ inputs.chaos_rate }}"

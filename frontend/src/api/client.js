@@ -28,7 +28,11 @@ async function request(path, timeoutMs = 12000, options = {}) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { signal: controller.signal, ...options });
+    response = await fetch(`${API_BASE}${path}`, {
+      credentials: 'include',
+      ...options,
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
   }
@@ -45,6 +49,7 @@ async function request(path, timeoutMs = 12000, options = {}) {
     error.requestId = response.headers.get('x-request-id') || '';
     throw error;
   }
+  if (response.status === 204) return null;
   return response.json();
 }
 
@@ -55,6 +60,19 @@ function jsonOptions(payload, privileged = false) {
 
 function viewerOptions(method = 'GET') {
   return { method, headers: authHeaders() };
+}
+
+let viewerSessionPromise = null;
+async function ensureViewerSession() {
+  if (analystCredential()) return;
+  if (!viewerSessionPromise) {
+    viewerSessionPromise = request('/session/viewer', 8000, { method: 'POST' })
+      .catch(error => {
+        viewerSessionPromise = null;
+        throw error;
+      });
+  }
+  await viewerSessionPromise;
 }
 
 function browserParams(options = {}) {
@@ -121,7 +139,10 @@ export const api = {
   getFundFlow: (address, depth = 3, limit = 300) => request(`/wallets/${encodeURIComponent(address)}/fund-flow?depth=${depth}&limit=${limit}&per_hop_limit=160`, 30000),
   getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report?per_direction=50`, 30000),
   getWalletCoverageSummary: address => request(`/wallets/${encodeURIComponent(address)}/coverage-summary`, 15000),
-  getCopilot: address => request(`/wallets/${encodeURIComponent(address)}/copilot`, 30000, viewerOptions('POST')),
+  getCopilot: async address => {
+    await ensureViewerSession();
+    return request(`/wallets/${encodeURIComponent(address)}/copilot`, 30000, viewerOptions('POST'));
+  },
   listCases: (status = '') => request(`/analyst/cases${status ? `?status=${encodeURIComponent(status)}` : ''}`, 15000, viewerOptions()),
   getCase: caseId => request(`/analyst/cases/${encodeURIComponent(caseId)}`, 15000, viewerOptions()),
   createCase: payload => request('/analyst/cases', 15000, jsonOptions(payload, true)),

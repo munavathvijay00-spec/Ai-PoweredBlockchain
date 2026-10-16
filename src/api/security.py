@@ -47,9 +47,16 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
         return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
     def _identity(self, request: Request) -> tuple[str, bool]:
-        """Prefer authenticated identity so users behind one NAT do not share a quota."""
+        """Use credential identity for trusted users; keep anonymous viewer sessions IP-scoped.
+
+        Anonymous browser sessions exist only to remove secret handling from the UI. Treating
+        them as IP-scoped prevents cookie deletion/session re-issuance from multiplying the
+        expensive AI quota. Analyst/admin API credentials still avoid shared-NAT quotas.
+        """
         try:
             principal = authenticate(request)
+            if principal.role == "viewer" and principal.subject == "web-viewer":
+                return f"ip:{self._ip_key(request)}", False
             stable = hashlib.sha256(f"{principal.role}:{principal.subject}".encode()).hexdigest()[:24]
             return f"principal:{stable}", True
         except HTTPException:

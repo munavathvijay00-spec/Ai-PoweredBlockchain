@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.auth import Principal, require_viewer
 from src.api.dependencies import get_transaction_repo
+from src.api.analyst_routes import _ensure_schema
 from src.database.repositories import TransactionRepository
 from src.forensics.evidence_signing import sign_digest_hex
 
@@ -42,6 +43,7 @@ async def wallet_coverage_summary(
     """, wallet)
 
     history_exists = await repo.db.fetchval("SELECT to_regclass('public.wallet_transfer_evidence') IS NOT NULL")
+    sync_exists = await repo.db.fetchval("SELECT to_regclass('public.wallet_history_sync') IS NOT NULL")
     cached = {"records": 0, "oldest_block": None, "newest_block": None, "categories": []}
     sync = None
     if history_exists:
@@ -55,6 +57,7 @@ async def wallet_coverage_summary(
         """, wallet)
         if row:
             cached = dict(row)
+    if sync_exists:
         sync_row = await repo.db.fetchrow("""
             SELECT provider,categories,outgoing_complete,incoming_complete,
                    oldest_block,newest_block,records_cached,updated_at,last_error
@@ -111,6 +114,7 @@ async def signed_case_bundle(
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
     """Export a canonical, hash-addressed, optionally Ed25519-signed case bundle."""
+    await _ensure_schema(repo)
     case_row = await repo.db.fetchrow("SELECT * FROM investigation_cases WHERE id=$1", case_id)
     if not case_row:
         raise HTTPException(status_code=404, detail="Case not found")

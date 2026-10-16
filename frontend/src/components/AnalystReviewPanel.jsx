@@ -20,7 +20,6 @@ export default function AnalystReviewPanel({ txHash }) {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
     Promise.all([api.getAnalystReview(txHash), api.getAnalystAudit(txHash, 30)]).then(([review, history]) => {
       if (!active) return;
       setStatus(review.status || 'unreviewed');

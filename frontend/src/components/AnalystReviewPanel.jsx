@@ -18,27 +18,20 @@ export default function AnalystReviewPanel({ txHash }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  async function load() {
-    setLoading(true);
-    try {
-      const [review, history] = await Promise.all([api.getAnalystReview(txHash), api.getAnalystAudit(txHash, 30)]);
-      setStatus(review.status || 'unreviewed');
-      setAssignee(review.assignee || '');
-      setNote(review.note || '');
-      setAudit(history.events || []);
-    } catch {
-      setMessage('Review or audit state unavailable.');
-    } finally { setLoading(false); }
-  }
-
   useEffect(() => {
     let active = true;
     setLoading(true);
     Promise.all([api.getAnalystReview(txHash), api.getAnalystAudit(txHash, 30)]).then(([review, history]) => {
       if (!active) return;
-      setStatus(review.status || 'unreviewed'); setAssignee(review.assignee || ''); setNote(review.note || ''); setAudit(history.events || []);
-    }).catch(() => { if (active) setMessage('Review or audit state unavailable.'); })
-      .finally(() => { if (active) setLoading(false); });
+      setStatus(review.status || 'unreviewed');
+      setAssignee(review.assignee || '');
+      setNote(review.note || '');
+      setAudit(history.events || []);
+    }).catch(() => {
+      if (active) setMessage('Review or audit state unavailable.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
     return () => { active = false; };
   }, [txHash]);
 
@@ -51,25 +44,36 @@ export default function AnalystReviewPanel({ txHash }) {
     const why = note.trim();
     if (!why) { setMessage('Add a case note explaining why before saving.'); return; }
     if (nextStatus === 'escalated' && !assignee.trim()) { setMessage('Escalation requires an assignee.'); return; }
-    setSaving(true); setMessage('');
+    setSaving(true);
+    setMessage('');
     try {
       const result = await api.saveAnalystReview(txHash, {
-        status: nextStatus, actor: actor.trim() || 'Analyst',
-        assignee: assignee.trim() || null, note: why,
+        status: nextStatus,
+        actor: actor.trim() || 'Analyst',
+        assignee: assignee.trim() || null,
+        note: why,
       });
-      setStatus(result.status || nextStatus); setMessage('Review saved and audit event recorded.');
-      const history = await api.getAnalystAudit(txHash, 30); setAudit(history.events || []);
-    } catch (error) { setMessage(error?.message || 'Unable to save review.'); }
-    finally { setSaving(false); }
+      setStatus(result.status || nextStatus);
+      setMessage('Review saved and audit event recorded.');
+      const history = await api.getAnalystAudit(txHash, 30);
+      setAudit(history.events || []);
+    } catch (error) {
+      setMessage(error?.message || 'Unable to save review.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return <section className="rounded-lg border border-sky-400/25 bg-sky-400/[0.05] p-4" aria-labelledby="analyst-actions-title">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 id="analyst-actions-title" className="text-sm font-semibold uppercase tracking-wider text-sky-200">Analyst Actions</h3><p className="mt-1 text-xs text-slate-400">Every decision is appended to the audit trail separately from automated signals.</p></div><span className="rounded-full border border-slate-500 bg-slate-800 px-2 py-1 text-[10px] uppercase tracking-wide text-slate-200">{loading ? 'loading' : status.replaceAll('_', ' ')}</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div><h3 id="analyst-actions-title" className="text-sm font-semibold uppercase tracking-wider text-sky-200">Analyst Actions</h3><p className="mt-1 text-xs text-slate-400">Every decision is appended to the audit trail separately from automated signals.</p></div>
+      <span className="rounded-full border border-slate-500 bg-slate-800 px-2 py-1 text-[10px] uppercase tracking-wide text-slate-200">{loading ? 'loading' : status.replaceAll('_', ' ')}</span>
+    </div>
 
     <div className="mt-4 grid gap-3 md:grid-cols-[220px_220px_1fr]">
-      <label className="text-xs text-slate-300">Analyst identity<input value={actor} onChange={e => updateActor(e.target.value)} className="mt-1 w-full rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
-      <label className="text-xs text-slate-300">Assignee<input value={assignee} onChange={e => setAssignee(e.target.value)} placeholder="Analyst / team" className="mt-1 w-full rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
-      <label className="text-xs text-slate-300">Decision reason / case note<textarea value={note} onChange={e => setNote(e.target.value)} rows="2" placeholder="Required: evidence checked, reason for disposition, next step…" className="mt-1 w-full resize-y rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
+      <label className="text-xs text-slate-300">Analyst identity<input value={actor} onChange={event => updateActor(event.target.value)} className="mt-1 w-full rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
+      <label className="text-xs text-slate-300">Assignee<input value={assignee} onChange={event => setAssignee(event.target.value)} placeholder="Analyst / team" className="mt-1 w-full rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
+      <label className="text-xs text-slate-300">Decision reason / case note<textarea value={note} onChange={event => setNote(event.target.value)} rows="2" placeholder="Required: evidence checked, reason for disposition, next step…" className="mt-1 w-full resize-y rounded-lg border border-[#56657a] bg-[#0d1728] px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300" /></label>
     </div>
 
     <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{ACTIONS.map(([value, label]) => <button key={value} type="button" disabled={saving || loading} onClick={() => save(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:opacity-50 ${status === value ? 'border-sky-300/60 bg-sky-400/20 text-white' : 'border-[#56657a] bg-[#111b2d] text-slate-200 hover:border-sky-300/50'}`}>{label}</button>)}</div>

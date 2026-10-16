@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReceiptEvents from './ReceiptEvents';
+import AnalystReviewPanel from './AnalystReviewPanel';
+import { bestAddressLabel } from '../utils/knownContracts';
 
 const AMOUNT_ONLY = new Set(['whale_transaction', 'large_transaction', 'notable_transaction', 'medium_transaction']);
 
@@ -9,10 +11,18 @@ function formatEth(tx) {
     if (amount === 0n) return '0 ETH';
     const whole = amount / 1000000000000000000n;
     const fraction = (amount % 1000000000000000000n).toString().padStart(18, '0').replace(/0+$/, '');
-    return String(whole) + (fraction ? '.' + fraction : '') + ' ETH';
+    return `${whole}${fraction ? `.${fraction.slice(0, 8)}` : ''} ETH`;
   }
   const value = Number(tx.value_eth);
-  return Number.isFinite(value) ? (value === 0 ? '0 ETH' : value.toPrecision(6) + ' ETH') : 'Amount unavailable';
+  return Number.isFinite(value) ? `${value.toPrecision(6)} ETH` : 'Amount unavailable';
+}
+
+function utcLabel(timestamp) {
+  if (!timestamp) return 'Unknown UTC time';
+  const raw = String(timestamp);
+  const explicit = /(?:Z|[+-]\d\d:\d\d)$/.test(raw) ? raw : `${raw}Z`;
+  const date = new Date(explicit);
+  return Number.isNaN(date.getTime()) ? 'Unknown UTC time' : `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }
 
 function amountOnlyEvidence(tx) {
@@ -20,10 +30,11 @@ function amountOnlyEvidence(tx) {
 }
 
 function riskLabel(score) {
-  if (score >= 80) return { text: 'Critical review', color: 'text-red-400', bar: 'bg-red-500' };
-  if (score >= 40) return { text: 'High review', color: 'text-orange-400', bar: 'bg-orange-500' };
-  if (score >= 20) return { text: 'Review', color: 'text-yellow-300', bar: 'bg-yellow-500' };
-  return { text: 'Minimal', color: 'text-emerald-400', bar: 'bg-emerald-500' };
+  if (score >= 80) return { text: 'Critical review', color: 'text-red-300', bar: 'bg-red-500' };
+  if (score >= 40) return { text: 'High review', color: 'text-orange-300', bar: 'bg-orange-500' };
+  if (score >= 20) return { text: 'Review', color: 'text-yellow-200', bar: 'bg-yellow-500' };
+  if (score > 0) return { text: 'Low signal', color: 'text-emerald-300', bar: 'bg-emerald-500' };
+  return { text: 'No review signal', color: 'text-slate-400', bar: 'bg-slate-600' };
 }
 
 function explanationMeta(tx) {
@@ -33,54 +44,72 @@ function explanationMeta(tx) {
       : explanation.startsWith('Rule-based risk assessment:') || explanation.startsWith('Evidence-based assessment:') || explanation.startsWith('Evidence-based transaction review:') ? 'deterministic'
         : explanation ? 'legacy_unverified' : 'none'
   );
-  if (status === 'grounded_ai') return { status, explanation, title: 'Grounded AI explanation', trusted: true, badge: 'fact-bound' };
-  if (status === 'deterministic') return { status, explanation, title: 'Transaction-specific evidence review', trusted: true, badge: 'deterministic' };
-  if (status === 'legacy_unverified') return { status, explanation: '', title: 'Legacy explanation withheld', trusted: false, badge: 'unverified' };
-  return { status: 'none', explanation: '', title: 'Explanation unavailable', trusted: false, badge: null };
+  if (status === 'grounded_ai') return { status, explanation, title: 'Grounded AI explanation', badge: 'fact-bound' };
+  if (status === 'deterministic') return { status, explanation, title: 'Deterministic evidence review', badge: 'deterministic' };
+  if (status === 'legacy_unverified') return { status, explanation: '', title: 'Legacy explanation withheld', badge: 'unverified' };
+  return { status: 'none', explanation: '', title: 'Explanation unavailable', badge: null };
 }
 
-function entityRows(tx) {
+function CopyField({ label, value, extra }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value || '');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-2"><span className="text-sm uppercase tracking-wide text-slate-400">{label}</span><button type="button" onClick={copy} className="text-xs text-sky-400 hover:text-sky-300">{copied ? 'Copied' : 'Copy'}</button></div>
+      <div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{value || 'N/A'}</div>
+      {extra}
+    </section>
+  );
+}
+
+function EntityContext({ tx }) {
   const context = tx?.entity_context || {};
   const rows = [];
   for (const [role, items] of [['sender', context.sender], ['recipient', context.recipient]]) {
     if (!Array.isArray(items)) continue;
     for (const item of items) rows.push({ role, ...item });
   }
-  return rows;
-}
-
-function EntityContext({ tx }) {
-  const rows = entityRows(tx);
-  if (!rows.length) return null;
+  const senderKnown = bestAddressLabel(tx.from_address, context.sender);
+  const recipientKnown = bestAddressLabel(tx.to_address, context.recipient);
+  if (!rows.length && !senderKnown && !recipientKnown) return null;
   return (
     <section className="rounded-lg border border-violet-400/20 bg-violet-400/[0.04] p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-violet-300">Source-attributed entity context</h3>
-        <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-1 text-[10px] font-medium text-violet-200">exact-address labels</span>
+      <h3 className="text-sm font-semibold uppercase tracking-wider text-violet-300">Address identity context</h3>
+      <div className="mt-3 space-y-2">
+        {[['sender', tx.from_address, senderKnown], ['recipient', tx.to_address, recipientKnown]].map(([role, address, known]) => known && <div key={role} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><div className="flex flex-wrap items-center gap-2"><span className="rounded border border-violet-400/25 bg-violet-400/10 px-2 py-0.5 text-[10px] uppercase text-violet-200">{role}</span><span className="text-sm font-medium text-white">{known.label}</span><span className="text-xs text-slate-400">{known.type}</span></div><div className="mt-1 break-all font-mono text-[11px] text-slate-500">{address}</div>{known.source && <div className="mt-1 text-[10px] text-slate-500">Source: {known.source}</div>}</div>)}
       </div>
-      <div className="space-y-2">
-        {rows.map((item, index) => (
-          <div key={`${item.role}-${item.source}-${item.entity_id}-${index}`} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded border border-violet-400/25 bg-violet-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-violet-200">{item.role}</span>
-              <span className="text-sm font-medium text-slate-100">{item.entity_name || item.entity_id || 'Source-labelled address'}</span>
-              {item.entity_type && <span className="rounded bg-slate-700/70 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">{item.entity_type}</span>}
-            </div>
-            <div className="mt-2 text-xs text-slate-400">Source: {item.source || 'unknown'}{Number.isFinite(Number(item.confidence)) ? ` • confidence ${Number(item.confidence).toFixed(2)}` : ''}</div>
-            {item.source_url && <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-sky-400 hover:text-sky-300">Open source evidence ↗</a>}
-          </div>
-        ))}
-      </div>
-      <p className="mt-3 text-xs leading-5 text-slate-500">These are address-level labels from cited sources. They do not establish beneficial ownership, transaction intent, or wrongdoing. No local match would not prove an address is benign or unattributed elsewhere.</p>
+      <p className="mt-3 text-xs text-slate-500">Labels identify exact known addresses only. They do not establish beneficial ownership or transaction intent.</p>
     </section>
   );
 }
 
 export default function TransactionModal({ tx, onClose }) {
+  const dialogRef = useRef(null);
+  const closeRef = useRef(null);
+
   useEffect(() => {
-    const handleEscape = event => { if (event.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
+    const previous = document.activeElement;
+    closeRef.current?.focus();
+    const handleKey = event => {
+      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll('button, a, input, textarea, select, [tabindex]:not([tabindex="-1"])')).filter(el => !el.disabled);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('keydown', handleKey); previous?.focus?.(); };
   }, [onClose]);
 
   if (!tx) return null;
@@ -90,39 +119,47 @@ export default function TransactionModal({ tx, onClose }) {
   const insufficient = evidence?.assessment === 'insufficient_evidence';
   const risk = insufficient ? { text: 'Insufficient evidence', color: 'text-amber-300', bar: 'bg-amber-400' } : amountOnly ? { text: 'Amount review only', color: 'text-amber-300', bar: 'bg-amber-400' } : riskLabel(score);
   const explanation = explanationMeta(tx);
+  const factors = Array.isArray(tx.risk_factors) ? tx.risk_factors.filter(item => item && typeof item === 'object') : [];
+  const selfTransfer = Boolean(tx.relationship_context?.self_transfer) || String(tx.from_address).toLowerCase() === String(tx.to_address).toLowerCase();
+  const samePairCount = Number(tx.relationship_context?.same_pair_count || 1);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-[#46556d] bg-[#202c40] shadow-2xl" onClick={event => event.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="transaction-dialog-title" className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-[#46556d] bg-[#202c40] shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#39475d] bg-[#202c40] px-6 py-4">
-          <div><h2 className="text-xl font-semibold text-white">Transaction Details</h2><p className="mt-1 text-xs text-slate-400">Block {Number(tx.block_number || 0).toLocaleString()}</p></div>
-          <button onClick={onClose} className="p-2 text-2xl leading-none text-slate-400 hover:text-white" aria-label="Close">×</button>
+          <div><h2 id="transaction-dialog-title" className="text-xl font-semibold text-white">Transaction Investigation</h2><p className="mt-1 text-xs text-slate-400">Block {Number(tx.block_number || 0).toLocaleString()} · {utcLabel(tx.timestamp)}</p></div>
+          <button ref={closeRef} onClick={onClose} className="rounded p-2 text-2xl leading-none text-slate-400 hover:text-white focus:ring-2 focus:ring-sky-400/50" aria-label="Close transaction details">×</button>
         </div>
 
-        <div className="space-y-6 p-6">
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-4"><span className="text-sm uppercase tracking-wide text-slate-400">Risk score</span><span className={`text-xl font-semibold ${risk.color}`}>{score}/100 — {risk.text}</span></div>
-            <div className="h-2.5 overflow-hidden rounded-full bg-[#111b2d]"><div className={`h-full ${risk.bar}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} /></div>
-            {evidence?.engine_version && <p className="mt-3 text-sm text-slate-400">Evidence engine {evidence.engine_version}: {evidence.rationale} Confidence: {evidence.confidence}. This is not a calibrated probability.</p>}
-            {amountOnly && <p className="mt-3 text-sm text-amber-200">The score is based only on transfer size, not verified suspicious behavior.</p>}
+        <div className="space-y-5 p-6">
+          <section className="rounded-lg border border-[#39475d] bg-[#111b2d] p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-4"><span className="text-sm uppercase tracking-wide text-slate-400">Review score</span><span className={`text-xl font-semibold ${risk.color}`}>{score ? `${score}/100` : '—'} · {risk.text}</span></div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-[#0b1423]"><div className={`h-full ${risk.bar}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} /></div>
+            {evidence?.engine_version && <p className="mt-3 text-sm text-slate-400">Evidence engine {evidence.engine_version}: {evidence.rationale} Confidence: {evidence.confidence}. This is not a calibrated fraud probability.</p>}
+            <div className="mt-3 flex flex-wrap gap-2">{selfTransfer && <span className="rounded border border-violet-400/25 bg-violet-400/10 px-2 py-1 text-xs text-violet-200">Self-transfer</span>}{samePairCount > 1 && <span className="rounded border border-sky-400/25 bg-sky-400/10 px-2 py-1 text-xs text-sky-200">Repeated sender-recipient pair ×{samePairCount}</span>}</div>
           </section>
 
-          <section className={`rounded-lg border p-4 ${explanation.status === 'grounded_ai' ? 'border-sky-400/25 bg-sky-400/[0.07]' : explanation.trusted ? 'border-emerald-400/20 bg-emerald-400/[0.05]' : 'border-amber-400/20 bg-amber-400/[0.04]'}`}>
-            <div className="mb-2 flex items-center justify-between gap-3"><h3 className={`text-sm font-semibold uppercase tracking-wide ${explanation.status === 'grounded_ai' ? 'text-sky-300' : explanation.trusted ? 'text-emerald-300' : 'text-amber-300'}`}>{explanation.title}</h3>{explanation.badge && <span className={`rounded-full border px-2 py-1 text-[10px] font-medium ${explanation.trusted ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border-amber-400/20 bg-amber-400/10 text-amber-300'}`}>{explanation.badge}</span>}</div>
-            {explanation.explanation ? <p className="leading-7 text-slate-200">{explanation.explanation}</p> : explanation.status === 'legacy_unverified' ? <p className="text-sm leading-6 text-amber-100">A stored explanation exists, but it predates the current grounding contract or cannot be verified against recorded evidence. ChainScope hides it instead of presenting unverified AI text as fact.</p> : <p className="text-sm italic text-slate-400">No trusted explanation is stored for this transaction.</p>}
-            {explanation.status === 'grounded_ai' && <p className="mt-3 text-xs leading-5 text-slate-500">AI wording is accepted only when it stays inside the stored score/evidence boundary and preserves valid [E#] evidence references. Unsupported claims fall back to deterministic evidence text.</p>}
+          <section className="rounded-lg border border-cyan-400/25 bg-cyan-400/[0.05] p-4" aria-labelledby="why-flagged-title">
+            <h3 id="why-flagged-title" className="text-sm font-semibold uppercase tracking-wider text-cyan-300">Why flagged</h3>
+            {factors.length ? <div className="mt-3 space-y-2">{factors.map((factor, index) => <div key={index} className="flex gap-3 rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><span className="shrink-0 rounded border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 font-mono text-xs text-cyan-300">E{index + 1}</span><div><p className="text-sm text-slate-100">{factor.reason || factor.name || factor.type || 'Recorded review signal'}</p>{factor.source && <p className="mt-1 text-xs text-cyan-400">Source: {factor.source}</p>}{factor.source_url && <a href={factor.source_url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-sky-400">Open cited evidence ↗</a>}</div></div>)}</div> : <p className="mt-3 text-sm text-slate-500">No review factors are recorded for this transaction. A zero score is displayed as no signal rather than as a risk verdict.</p>}
+            {amountOnly && <p className="mt-3 text-xs text-amber-200">Current review score is based only on transfer size, not verified malicious behavior.</p>}
           </section>
 
-          {Array.isArray(tx.risk_factors) && tx.risk_factors.length > 0 && <section className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan-300">Risk evidence trail</h3><div className="space-y-2">{tx.risk_factors.map((factor, index) => <div key={index} className="rounded-lg border border-[#39475d] bg-[#111b2d] p-3"><div className="flex gap-3"><span className="shrink-0 rounded border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 font-mono text-xs text-cyan-300">E{index + 1}</span><div><div className="text-sm text-slate-200">{factor.reason || factor.name || factor.type || 'Recorded scoring signal'}</div>{factor.source && <div className="mt-1 text-xs text-cyan-400">Source: {factor.source}</div>}{factor.source_url && <a href={factor.source_url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-sky-400 hover:text-sky-300">Open cited source ↗</a>}</div></div></div>)}</div><p className="mt-3 text-xs text-slate-500">Evidence IDs map explanation claims back to stored scoring signals. Signals are investigation cues, not a determination of wrongdoing.</p></section>}
+          <AnalystReviewPanel txHash={tx.hash} />
+
+          <section className={`rounded-lg border p-4 ${explanation.status === 'grounded_ai' ? 'border-sky-400/25 bg-sky-400/[0.06]' : 'border-emerald-400/20 bg-emerald-400/[0.04]'}`}>
+            <div className="mb-2 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold uppercase tracking-wide text-slate-200">{explanation.title}</h3>{explanation.badge && <span className="rounded-full border border-slate-600 bg-slate-800 px-2 py-1 text-[10px] text-slate-300">{explanation.badge}</span>}</div>
+            {explanation.explanation ? <p className="leading-7 text-slate-200">{explanation.explanation}</p> : <p className="text-sm italic text-slate-500">No trusted explanation is available.</p>}
+          </section>
 
           <EntityContext tx={tx} />
 
-          <section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Transaction hash</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.hash}</div></section>
-          <div className="grid gap-4 md:grid-cols-2"><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">From</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.from_address}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">To</div><div className="break-all rounded-lg bg-[#111b2d] p-3 font-mono text-xs text-slate-300">{tx.to_address}</div></section></div>
-          <div className="grid gap-4 sm:grid-cols-2"><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Value</div><div className="text-2xl font-semibold text-white">{formatEth(tx)}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Value (wei)</div><div className="break-all font-mono text-sm text-slate-300">{tx.value_wei}</div></section></div>
+          <CopyField label="Transaction hash" value={tx.hash} />
+          <div className="grid gap-4 md:grid-cols-2"><CopyField label="From" value={tx.from_address} /><CopyField label="To" value={tx.to_address} /></div>
+          <div className="grid gap-4 sm:grid-cols-3"><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Value</div><div className="text-xl font-semibold text-white">{formatEth(tx)}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Block</div><div className="text-lg font-semibold text-white">{Number(tx.block_number || 0).toLocaleString()}</div></section><section><div className="mb-2 text-sm uppercase tracking-wide text-slate-400">Timestamp</div><div className="text-sm text-slate-200">{utcLabel(tx.timestamp)}</div></section></div>
 
           <ReceiptEvents key={tx.hash} hash={tx.hash} />
-          <div className="border-t border-[#39475d] pt-4"><a href={`https://etherscan.io/tx/${tx.hash}`} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:text-sky-300">View on Etherscan ↗</a></div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#39475d] pt-4"><p className="text-xs text-slate-500">Automated signals prioritize human review; analyst decisions are stored separately.</p><a href={`https://etherscan.io/tx/${tx.hash}`} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:text-sky-300">View full transaction on Etherscan ↗</a></div>
         </div>
       </div>
     </div>

@@ -1,8 +1,9 @@
-"""Transaction browsing endpoints with one consistent filtered population."""
+"""Transaction browsing endpoints with a clustered analyst review queue."""
 from __future__ import annotations
 
 import csv
 import io
+import json
 from decimal import Decimal
 from typing import Literal
 
@@ -23,11 +24,20 @@ SORT_SQL = {
     "value_asc": "t.value ASC, t.timestamp DESC, t.id DESC",
 }
 
+CLUSTER_SORT_SQL = {
+    "newest": "stats.newest_timestamp DESC, ranked.id DESC",
+    "oldest": "stats.oldest_timestamp ASC, ranked.id ASC",
+    "risk_desc": "ranked.risk_score DESC, stats.cluster_count DESC, stats.newest_timestamp DESC",
+    "risk_asc": "ranked.risk_score ASC, stats.cluster_count DESC, stats.newest_timestamp DESC",
+    "value_desc": "ranked.value DESC, stats.newest_timestamp DESC",
+    "value_asc": "ranked.value ASC, stats.newest_timestamp DESC",
+}
+
 
 def _where(search: str | None, min_risk: int | None, max_risk: int | None,
            min_value_eth: float | None, max_value_eth: float | None):
-    clauses = []
-    args = []
+    clauses: list[str] = []
+    args: list[object] = []
 
     def add(sql: str, value):
         args.append(value)
@@ -52,27 +62,8 @@ def _where(search: str | None, min_risk: int | None, max_risk: int | None,
     return (" AND ".join(clauses) if clauses else "TRUE"), args
 
 
-async def _query_population(repo: TransactionRepository, *, search=None, min_risk=None, max_risk=None,
-                            min_value_eth=None, max_value_eth=None, limit=50, offset=0,
-                            sort="newest"):
-    where_sql, args = _where(search, min_risk, max_risk, min_value_eth, max_value_eth)
-    order_sql = SORT_SQL[sort]
-    page_limit_param = len(args) + 1
-    offset_param = len(args) + 2
-    rows = await repo.db.fetch(f"""
-        SELECT t.hash, a_from.address AS from_address, a_to.address AS to_address,
-               t.value, t.block_number, t.timestamp, t.risk_score,
-               t.risk_factors, t.ai_explanation,
-               COUNT(*) OVER (PARTITION BY t.from_address_id, t.to_address_id) AS same_pair_count
-        FROM transactions t
-        JOIN addresses a_from ON t.from_address_id = a_from.id
-        JOIN addresses a_to ON t.to_address_id = a_to.id
-        WHERE {where_sql}
-        ORDER BY {order_sql}
-        LIMIT ${page_limit_param} OFFSET ${offset_param}
-    """, *args, limit, offset)
-
-    aggregate = await repo.db.fetchrow(f"""
+async def _aggregate_population(repo: TransactionRepository, where_sql: str, args: list[object]):
+    row = await repo.db.fetchrow(f"""
         SELECT COUNT(*) AS total,
                COUNT(DISTINCT t.block_number) AS distinct_blocks,
                COUNT(*) FILTER (WHERE t.risk_score < 20) AS minimal,
@@ -88,7 +79,107 @@ async def _query_population(repo: TransactionRepository, *, search=None, min_ris
         JOIN addresses a_to ON t.to_address_id = a_to.id
         WHERE {where_sql}
     """, *args)
-    return [dict(row) for row in rows], dict(aggregate or {})
+    return dict(row or {})
+
+
+async def _query_population(repo: TransactionRepository, *, search=None, min_risk=None, max_risk=None,
+                            min_value_eth=None, max_value_eth=None, limit=50, offset=0,
+                            sort="newest"):
+    where_sql, args = _where(search, min_risk, max_risk, min_value_eth, max_value_eth)
+    order_sql = SORT_SQL[sort]
+    rows = await repo.db.fetch(f"""
+        SELECT t.hash, a_from.address AS from_address, a_to.address AS to_address,
+               t.value, t.block_number, t.timestamp, t.risk_score,
+               t.risk_factors, t.ai_explanation,
+               COUNT(*) OVER (PARTITION BY t.from_address_id, t.to_address_id) AS same_pair_count
+        FROM transactions t
+        JOIN addresses a_from ON t.from_address_id = a_from.id
+        JOIN addresses a_to ON t.to_address_id = a_to.id
+        WHERE {where_sql}
+        ORDER BY {order_sql}
+        LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}
+    """, *args, limit, offset)
+    aggregate = await _aggregate_population(repo, where_sql, args)
+    return [dict(row) for row in rows], aggregate
+
+
+async def _query_clusters(repo: TransactionRepository, *, search=None, min_risk=None, max_risk=None,
+                          min_value_eth=None, max_value_eth=None, limit=50, offset=0,
+                          sort="risk_desc"):
+    """Collapse repeated sender→recipient activity into one reproducible review row."""
+    where_sql, args = _where(search, min_risk, max_risk, min_value_eth, max_value_eth)
+    order_sql = CLUSTER_SORT_SQL[sort]
+    rows = await repo.db.fetch(f"""
+        WITH filtered AS (
+            SELECT t.id, t.hash, t.from_address_id, t.to_address_id,
+                   a_from.address AS from_address, a_to.address AS to_address,
+                   t.value, t.block_number, t.timestamp, t.risk_score,
+                   t.risk_factors, t.ai_explanation
+            FROM transactions t
+            JOIN addresses a_from ON t.from_address_id = a_from.id
+            JOIN addresses a_to ON t.to_address_id = a_to.id
+            WHERE {where_sql}
+        ),
+        ranked AS (
+            SELECT filtered.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY from_address_id, to_address_id
+                       ORDER BY risk_score DESC, timestamp DESC, id DESC
+                   ) AS cluster_rank
+            FROM filtered
+        ),
+        stats AS (
+            SELECT from_address_id, to_address_id,
+                   COUNT(*) AS cluster_count,
+                   MIN(timestamp) AS oldest_timestamp,
+                   MAX(timestamp) AS newest_timestamp,
+                   COUNT(DISTINCT block_number) AS cluster_blocks,
+                   ARRAY_AGG(hash ORDER BY timestamp DESC, id DESC) AS cluster_hashes
+            FROM filtered
+            GROUP BY from_address_id, to_address_id
+        )
+        SELECT ranked.id AS representative_id, ranked.hash, ranked.from_address, ranked.to_address,
+               ranked.value, ranked.block_number, ranked.timestamp, ranked.risk_score,
+               ranked.risk_factors, ranked.ai_explanation,
+               stats.cluster_count, stats.oldest_timestamp, stats.newest_timestamp,
+               stats.cluster_blocks, stats.cluster_hashes
+        FROM ranked
+        JOIN stats USING (from_address_id, to_address_id)
+        WHERE ranked.cluster_rank = 1
+        ORDER BY {order_sql}
+        LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}
+    """, *args, limit, offset)
+
+    total = await repo.db.fetchval(f"""
+        SELECT COUNT(*) FROM (
+            SELECT t.from_address_id, t.to_address_id
+            FROM transactions t
+            JOIN addresses a_from ON t.from_address_id = a_from.id
+            JOIN addresses a_to ON t.to_address_id = a_to.id
+            WHERE {where_sql}
+            GROUP BY t.from_address_id, t.to_address_id
+        ) grouped
+    """, *args)
+    return [dict(row) for row in rows], int(total or 0)
+
+
+def _decorate_row(row: dict, matches, clustered: bool):
+    count = int(row.get("cluster_count") or row.get("same_pair_count") or 1)
+    row["relationship_context"] = {
+        "self_transfer": str(row.get("from_address") or "").lower() == str(row.get("to_address") or "").lower(),
+        "same_pair_count": count,
+    }
+    item = _format_tx(row, matches)
+    if clustered:
+        item["cluster"] = {
+            "kind": "address_pair",
+            "count": count,
+            "hashes": list(row.get("cluster_hashes") or []),
+            "oldest_timestamp": row.get("oldest_timestamp"),
+            "newest_timestamp": row.get("newest_timestamp"),
+            "distinct_blocks": int(row.get("cluster_blocks") or 0),
+        }
+    return item
 
 
 @router.get("/transaction-browser")
@@ -101,43 +192,51 @@ async def transaction_browser(
     min_value_eth: float | None = Query(None, ge=0),
     max_value_eth: float | None = Query(None, ge=0),
     sort: Literal["newest", "oldest", "risk_desc", "risk_asc", "value_desc", "value_asc"] = "risk_desc",
+    clustered: bool = Query(True),
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    """Return one filtered page plus population-wide aggregates over the same query."""
-    rows, aggregate = await _query_population(
-        repo, search=search, min_risk=min_risk, max_risk=max_risk,
-        min_value_eth=min_value_eth, max_value_eth=max_value_eth,
-        limit=limit, offset=offset, sort=sort,
-    )
-    matches = await _load_entity_matches(repo, rows)
-    total = int(aggregate.get("total") or 0)
-    page_blocks = {int(row["block_number"]) for row in rows if row.get("block_number") is not None}
-    formatted = []
-    for row in rows:
-        row["relationship_context"] = {
-            "self_transfer": str(row.get("from_address") or "").lower() == str(row.get("to_address") or "").lower(),
-            "same_pair_count": int(row.get("same_pair_count") or 1),
-        }
-        formatted.append(_format_tx(row, matches))
+    where_sql, where_args = _where(search, min_risk, max_risk, min_value_eth, max_value_eth)
+    aggregate = await _aggregate_population(repo, where_sql, where_args)
+    transaction_total = int(aggregate.get("total") or 0)
 
+    if clustered:
+        rows, queue_total = await _query_clusters(
+            repo, search=search, min_risk=min_risk, max_risk=max_risk,
+            min_value_eth=min_value_eth, max_value_eth=max_value_eth,
+            limit=limit, offset=offset, sort=sort,
+        )
+    else:
+        rows, _ = await _query_population(
+            repo, search=search, min_risk=min_risk, max_risk=max_risk,
+            min_value_eth=min_value_eth, max_value_eth=max_value_eth,
+            limit=limit, offset=offset, sort=sort,
+        )
+        queue_total = transaction_total
+
+    matches = await _load_entity_matches(repo, rows)
+    formatted = [_decorate_row(row, matches, clustered) for row in rows]
+    page_blocks = {int(row["block_number"]) for row in rows if row.get("block_number") is not None}
     distinct_blocks = int(aggregate.get("distinct_blocks") or 0)
+
     return {
         "transactions": formatted,
-        "total": total,
+        "total": queue_total,
+        "matching_transactions": transaction_total,
+        "clustered": clustered,
         "limit": limit,
         "offset": offset,
         "has_previous": offset > 0,
-        "has_next": offset + limit < total,
+        "has_next": offset + limit < queue_total,
         "distribution": {
-            "population": total,
+            "population": transaction_total,
             "minimal": int(aggregate.get("minimal") or 0),
             "review": int(aggregate.get("review") or 0),
             "high_review": int(aggregate.get("high_review") or 0),
             "critical": int(aggregate.get("critical") or 0),
         },
         "population_scope": (
-            "Single-block retained snapshot matching the current filters."
-            if distinct_blocks == 1 and total > 0
+            f"{queue_total:,} review clusters represent {transaction_total:,} retained transactions matching the current filters."
+            if clustered
             else "All retained transactions matching the current filters; chart counts are not sampled from the visible page."
         ),
         "distinct_blocks": distinct_blocks,
@@ -160,32 +259,45 @@ async def transaction_export(
     sort: Literal["newest", "oldest", "risk_desc", "risk_asc", "value_desc", "value_asc"] = "risk_desc",
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    """Export at most 5,000 rows matching the same browser filters."""
     rows, aggregate = await _query_population(
         repo, search=search, min_risk=min_risk, max_risk=max_risk,
         min_value_eth=min_value_eth, max_value_eth=max_value_eth,
         limit=5000, offset=0, sort=sort,
     )
     data = [{
-        "hash": row["hash"], "from_address": row["from_address"], "to_address": row["to_address"],
-        "value_wei": str(row["value"]), "block_number": row["block_number"],
+        "hash": row["hash"],
+        "from_address": row["from_address"],
+        "to_address": row["to_address"],
+        "value_wei": str(row["value"]),
+        "block_number": row["block_number"],
         "timestamp_utc": row["timestamp"].isoformat() if row.get("timestamp") else None,
         "risk_score": row.get("risk_score", 0),
+        "risk_factors": row.get("risk_factors") or [],
         "same_pair_count": int(row.get("same_pair_count") or 1),
         "self_transfer": str(row.get("from_address") or "").lower() == str(row.get("to_address") or "").lower(),
     } for row in rows]
+    matching_rows = int(aggregate.get("total") or 0)
     headers = {
-        "X-ChainScope-Matching-Rows": str(int(aggregate.get("total") or 0)),
+        "X-ChainScope-Matching-Rows": str(matching_rows),
         "X-ChainScope-Exported-Rows": str(len(data)),
         "X-ChainScope-Export-Limit": "5000",
     }
+
     if format == "json":
-        import json
-        return Response(content=json.dumps({"rows": data, "matching_rows": int(aggregate.get("total") or 0), "export_limit": 5000}), media_type="application/json", headers=headers)
+        return Response(
+            content=json.dumps({"rows": data, "matching_rows": matching_rows, "export_limit": 5000}, default=str),
+            media_type="application/json",
+            headers=headers,
+        )
 
     out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=["hash", "from_address", "to_address", "value_wei", "block_number", "timestamp_utc", "risk_score", "same_pair_count", "self_transfer"])
+    fields = ["hash", "from_address", "to_address", "value_wei", "block_number", "timestamp_utc",
+              "risk_score", "risk_factors", "same_pair_count", "self_transfer"]
+    writer = csv.DictWriter(out, fieldnames=fields)
     writer.writeheader()
-    writer.writerows(data)
+    for item in data:
+        serializable = dict(item)
+        serializable["risk_factors"] = json.dumps(serializable["risk_factors"], default=str)
+        writer.writerow(serializable)
     headers["Content-Disposition"] = 'attachment; filename="chainscope-transactions.csv"'
     return Response(content=out.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)

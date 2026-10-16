@@ -1,8 +1,4 @@
-/**
- * API client for the Blockchain Intelligence backend.
- * Uses VITE_API_URL env var in production, falls back to /api in dev.
- */
-
+/** API client for the Blockchain Intelligence backend. */
 const configuredBase = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
 const API_BASE = configuredBase
   ? `${configuredBase}${configuredBase.endsWith('/api') ? '' : '/api'}`
@@ -24,17 +20,24 @@ async function request(path, timeoutMs = 12000, options = {}) {
       const payload = await response.json();
       detail = typeof payload?.detail === 'string' ? payload.detail : '';
     } catch {
-      // Keep the status fallback when an upstream proxy returns non-JSON.
+      // Keep the HTTP fallback for non-JSON upstream failures.
     }
     throw new Error(detail || `API error: ${response.status} ${response.statusText}`);
   }
-
   return response.json();
+}
+
+function jsonOptions(payload) {
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  };
 }
 
 function browserParams(options = {}) {
   const params = new URLSearchParams();
-  const allowed = ['limit', 'offset', 'search', 'min_risk', 'max_risk', 'min_value_eth', 'max_value_eth', 'sort'];
+  const allowed = ['limit', 'offset', 'search', 'min_risk', 'max_risk', 'min_value_eth', 'max_value_eth', 'sort', 'clustered'];
   allowed.forEach(key => {
     const value = options[key];
     if (value !== undefined && value !== null && String(value).trim() !== '') params.set(key, String(value));
@@ -59,20 +62,20 @@ export const api = {
   getExternalEvaluation: () => request('/evaluation/external', 20000),
   getTransactions: (limit = 50, offset = 0) => request(`/transactions?limit=${limit}&offset=${offset}`),
   getFlagged: (limit = 50, minScore = 20) => request(`/flagged?min_score=${minScore}&limit=${limit}`),
-  getTransactionBrowser: options => request(`/transaction-browser?${browserParams(options)}`, 20000),
+  getTransactionBrowser: options => request(`/transaction-browser?${browserParams({ clustered: true, ...options })}`, 20000),
   getTransactionExportUrl: (format = 'csv', options = {}) => {
     const params = browserParams(options);
+    params.delete('clustered');
     params.set('format', format);
     return `${API_BASE}/transaction-export?${params}`;
   },
   getAddressBrowser: options => request(`/address-browser?${addressParams(options)}`, 20000),
   getTransaction: hash => request(`/transactions/${encodeURIComponent(hash)}`),
   getAnalystReview: hash => request(`/analyst/transactions/${encodeURIComponent(hash)}`),
-  saveAnalystReview: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}`, 12000, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }),
+  saveAnalystReview: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}`, 12000, jsonOptions(payload)),
+  saveClusterReview: payload => request('/analyst/clusters/review', 30000, jsonOptions(payload)),
+  recordAnalystEvent: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}/events`, 12000, jsonOptions(payload)),
+  getAnalystAudit: (hash, limit = 100) => request(`/analyst/transactions/${encodeURIComponent(hash)}/audit?limit=${limit}`),
   getTransactionEvents: hash => request(`/transactions/${encodeURIComponent(hash)}/events`),
   getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`, 15000),
   getWalletTransfers: (address, cursors = {}, directions = { outgoing: true, incoming: true }) => {

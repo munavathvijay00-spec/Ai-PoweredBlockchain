@@ -31,5 +31,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Lint hardened review queue files
+        run: npx eslint src/api/client.js src/components/TransactionList.jsx src/components/TransactionBrowserControls.jsx src/components/RiskChart.jsx src/components/AnalystReviewPanel.jsx tests/transaction-list-component.mjs
+      - name: Component render checks
+        run: npm run test:component
       - name: Verify production build
         run: npm run build

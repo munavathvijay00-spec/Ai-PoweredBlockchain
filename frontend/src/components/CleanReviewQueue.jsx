@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { api } from '../api/client';
+import { api, hasAnalystCredential, setAnalystCredential } from '../api/client';
 
 const short = (value, left = 8, right = 6) => value ? `${value.slice(0, left)}…${value.slice(-right)}` : '—';
 
@@ -42,13 +42,31 @@ function ReviewDrawer({ tx, onClose, onChanged }) {
   const [note, setNote] = useState('');
   const [assignee, setAssignee] = useState('');
   const [message, setMessage] = useState('');
+  const [accessKey, setAccessKey] = useState('');
+  const [unlocked, setUnlocked] = useState(() => hasAnalystCredential());
   const hashes = useMemo(() => Array.isArray(tx?.cluster?.hashes) && tx.cluster.hashes.length ? tx.cluster.hashes : [tx?.hash], [tx]);
   if (!tx) return null;
   const score = Number(tx.risk_score || 0);
   const [riskLabel, riskClass] = riskMeta(score);
   const recordedFactors = factors(tx);
 
+  function unlock() {
+    const key = accessKey.trim();
+    if (!key) { setMessage('Enter the analyst access key.'); return; }
+    setAnalystCredential(key);
+    setUnlocked(true);
+    setAccessKey('');
+    setMessage('Analyst mode unlocked for this browser tab.');
+  }
+
+  function lock() {
+    setAnalystCredential('');
+    setUnlocked(false);
+    setMessage('Analyst mode locked.');
+  }
+
   async function review(status) {
+    if (!unlocked) { setMessage('Unlock analyst mode first.'); return; }
     if (!note.trim()) { setMessage('Add a short reason before saving a disposition.'); return; }
     if (status === 'escalated' && !assignee.trim()) { setMessage('Add an assignee before escalation.'); return; }
     setBusy(true); setMessage('');
@@ -56,8 +74,13 @@ function ReviewDrawer({ tx, onClose, onChanged }) {
       await api.saveClusterReview({ hashes, status, assignee: assignee.trim() || null, note: note.trim() });
       setMessage('Decision saved.');
       onChanged?.();
-    } catch (error) { setMessage(error?.message || 'Unable to save decision.'); }
-    finally { setBusy(false); }
+    } catch (error) {
+      if (error?.status === 401 || error?.status === 403) {
+        setAnalystCredential('');
+        setUnlocked(false);
+        setMessage('Access key was rejected. Enter the correct analyst key and unlock again.');
+      } else setMessage(error?.message || 'Unable to save decision.');
+    } finally { setBusy(false); }
   }
 
   async function exportEvidence() {
@@ -74,7 +97,9 @@ function ReviewDrawer({ tx, onClose, onChanged }) {
     anchor.href = url;
     anchor.download = `chainscope-evidence-${tx.hash.slice(0, 12)}.json`;
     document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
-    try { await api.recordAnalystEvent(tx.hash, { action: 'export_evidence', note: `Exported evidence for ${hashes.length} retained transaction(s).` }); } catch {}
+    if (unlocked) {
+      try { await api.recordAnalystEvent(tx.hash, { action: 'export_evidence', note: `Exported evidence for ${hashes.length} retained transaction(s).` }); } catch {}
+    }
   }
 
   return <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/55" role="dialog" aria-modal="true" aria-label="Review transaction cluster">
@@ -84,6 +109,14 @@ function ReviewDrawer({ tx, onClose, onChanged }) {
         <div><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-300">Focused review</p><h2 className="mt-2 text-xl font-semibold text-white">{short(tx.hash, 12, 10)}</h2><p className="mt-1 text-xs text-slate-400">{Number(tx.cluster?.count || 1)} retained transfer{Number(tx.cluster?.count || 1) === 1 ? '' : 's'} represented</p></div>
         <button onClick={onClose} className="workspace-chip">Close</button>
       </div>
+
+      {!unlocked && <section className="mt-5 rounded-xl border border-sky-400/20 bg-sky-400/[0.05] p-4">
+        <p className="text-sm font-semibold text-white">Unlock analyst mode</p>
+        <p className="mt-1 text-xs text-slate-400">Enter the access key once. It is kept only for this browser tab.</p>
+        <div className="mt-3 flex gap-2"><input type="password" value={accessKey} onChange={event => setAccessKey(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') unlock(); }} placeholder="Analyst access key" className="soft-input min-w-0 flex-1" /><button onClick={unlock} className="primary-button">Unlock</button></div>
+      </section>}
+
+      {unlocked && <div className="mt-5 flex items-center justify-between rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] px-4 py-3"><div><p className="text-sm font-medium text-emerald-200">Analyst mode unlocked</p><p className="mt-0.5 text-[11px] text-slate-500">No repeated authentication for this tab.</p></div><button onClick={lock} className="workspace-chip">Lock</button></div>}
 
       <div className="mt-5 grid grid-cols-2 gap-3">
         <div className="rounded-xl border border-slate-700 bg-slate-950/40 p-4"><p className="metric-label">Value</p><p className="mt-2 font-semibold text-white">{formatEth(tx)}</p></div>
@@ -100,15 +133,15 @@ function ReviewDrawer({ tx, onClose, onChanged }) {
         <div className="mt-3 space-y-2">{recordedFactors.length ? recordedFactors.map((factor, index) => <div key={`${factor.name}-${index}`} className="flex items-start justify-between gap-4 rounded-lg border border-slate-800 bg-slate-900/55 px-3 py-2 text-xs"><div><p className="font-medium text-slate-100">{factor.reason}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{factor.name}</p></div><span className="font-semibold text-amber-200">+{factor.points}</span></div>) : <p className="text-sm text-slate-400">No recorded review factors.</p>}</div>
       </section>
 
-      <section className="mt-5 rounded-xl border border-slate-700 bg-slate-950/35 p-4">
+      <section className={`mt-5 rounded-xl border p-4 ${unlocked ? 'border-slate-700 bg-slate-950/35' : 'border-slate-800 bg-slate-950/20 opacity-60'}`}>
         <p className="metric-label">Disposition</p>
-        <textarea value={note} onChange={event => setNote(event.target.value)} placeholder="Evidence checked, reason for decision, next step…" className="soft-input mt-3 min-h-24 w-full resize-y" />
-        <input value={assignee} onChange={event => setAssignee(event.target.value)} placeholder="Assignee / team (required only for escalation)" className="soft-input mt-3 w-full" />
+        <textarea disabled={!unlocked} value={note} onChange={event => setNote(event.target.value)} placeholder="Short reason for the decision…" className="soft-input mt-3 min-h-20 w-full resize-y disabled:cursor-not-allowed" />
+        <input disabled={!unlocked} value={assignee} onChange={event => setAssignee(event.target.value)} placeholder="Assignee / team (only for escalation)" className="soft-input mt-3 w-full disabled:cursor-not-allowed" />
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <button disabled={busy} onClick={() => review('confirmed')} className="secondary-button">Confirm risk</button>
-          <button disabled={busy} onClick={() => review('false_positive')} className="secondary-button">False positive</button>
-          <button disabled={busy} onClick={() => review('needs_review')} className="secondary-button">Needs review</button>
-          <button disabled={busy} onClick={() => review('escalated')} className="secondary-button">Escalate</button>
+          <button disabled={busy || !unlocked} onClick={() => review('confirmed')} className="secondary-button disabled:opacity-40">Confirm risk</button>
+          <button disabled={busy || !unlocked} onClick={() => review('false_positive')} className="secondary-button disabled:opacity-40">False positive</button>
+          <button disabled={busy || !unlocked} onClick={() => review('needs_review')} className="secondary-button disabled:opacity-40">Needs review</button>
+          <button disabled={busy || !unlocked} onClick={() => review('escalated')} className="secondary-button disabled:opacity-40">Escalate</button>
         </div>
         <button disabled={busy} onClick={exportEvidence} className="workspace-chip mt-3 w-full">Export evidence</button>
         {message && <p className="mt-3 text-xs text-sky-200" role="status">{message}</p>}

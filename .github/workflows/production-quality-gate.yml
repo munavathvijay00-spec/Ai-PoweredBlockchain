@@ -58,6 +58,7 @@ jobs:
               payload = json.load(handle)
           assert payload.get('clustered') is True
           assert isinstance(payload.get('transactions'), list)
+          assert payload['transactions'], 'production queue returned no transactions'
           print('Hardened clustered queue is live.')
           PY
               exit 0
@@ -79,3 +80,55 @@ jobs:
           python scripts/review_queue_load_test.py
           https://ai-poweredblockchain-production.up.railway.app/api
           --requests 80 --concurrency 10 --chaos-rate 0.10 --max-p95-ms 3500 --min-success-rate 0.98
+      - name: Live security and evidence smoke
+        run: |
+          set -euo pipefail
+          BASE="https://ai-poweredblockchain-production.up.railway.app"
+          TX_HASH=$(python - <<'PY'
+          import json
+          with open('/tmp/queue.json') as handle:
+              print(json.load(handle)['transactions'][0]['hash'])
+          PY
+          )
+          ADDRESS=$(python - <<'PY'
+          import json
+          with open('/tmp/queue.json') as handle:
+              print(json.load(handle)['transactions'][0]['from_address'])
+          PY
+          )
+
+          docs_code=$(curl -sS -o /tmp/docs.out -w "%{http_code}" "$BASE/docs")
+          metrics_code=$(curl -sS -o /tmp/metrics.out -w "%{http_code}" "$BASE/metrics")
+          analyst_code=$(curl -sS -o /tmp/analyst.out -w "%{http_code}" \
+            -H 'Content-Type: application/json' \
+            -d '{"status":"needs_review","note":"unauthenticated production smoke"}' \
+            "$BASE/api/analyst/transactions/$TX_HASH")
+
+          test "$docs_code" = "404"
+          test "$metrics_code" = "404"
+          test "$analyst_code" = "401"
+
+          curl -fsSI "$BASE/app/" | grep -qi '^content-security-policy:'
+
+          curl -fsS "$BASE/api/wallets/$ADDRESS/fund-flow?depth=1&limit=20&per_hop_limit=20" > /tmp/fund-flow.json
+          python - <<'PY'
+          import json
+          with open('/tmp/fund-flow.json') as handle:
+              payload = json.load(handle)
+          assert payload.get('root')
+          assert 'flow_summary' in payload
+          assert 'coverage' in payload
+          assert 'methodology' in payload
+          PY
+
+          events_code=$(curl -sS -o /tmp/events.json -w "%{http_code}" "$BASE/api/transactions/$TX_HASH/events")
+          test "$events_code" = "200"
+          python - <<'PY'
+          import json
+          with open('/tmp/events.json') as handle:
+              payload = json.load(handle)
+          assert payload.get('rpc_retrieval') == 'success'
+          assert isinstance(payload.get('events'), list)
+          PY
+
+          echo "Live RBAC, internal-surface, CSP, fund-flow and receipt-event checks passed."

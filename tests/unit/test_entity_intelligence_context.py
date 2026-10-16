@@ -114,7 +114,7 @@ def test_official_registry_is_small_exact_and_source_cited():
         assert row["address"].startswith("0x") and len(row["address"]) == 42
         assert row["confidence"] == 1.0
         assert row["source_url"].startswith("https://")
-        assert row["entity_type"] in {"protocol", "contract", "token"}
+        assert row["entity_type"] in {"protocol", "contract", "token", "infrastructure"}
 
 
 @pytest.mark.asyncio

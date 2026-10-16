@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,6 +35,7 @@ from src.api.flagship_routes import router as flagship_router
 from src.api.browse_routes import router as browse_router
 from src.api.analyst_routes import router as analyst_router
 from src.api.address_routes import router as address_router
+from src.api.robustness_routes import router as robustness_router
 from src.api.security import AbuseProtectionMiddleware
 from src.api.models import HealthResponse
 from src.agents.ai_audit import ai_quality_summary, ensure_ai_audit_schema, provider_configuration, record_ai_run
@@ -50,6 +52,16 @@ from src.utils.config import get_settings
 
 TARGET_EXTERNAL_BENCHMARK = 500
 FRONTEND_DIST = Path("/app/frontend_dist")
+
+logger.remove()
+logger.add(
+    sys.stdout,
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    enqueue=True,
+    backtrace=False,
+    diagnose=False,
+    format="{time:YYYY-MM-DDTHH:mm:ss.SSSZ} | {level} | {name}:{function}:{line} | {message}",
+)
 
 
 async def _refresh_verified_intelligence(db):
@@ -186,11 +198,21 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Blockchain Intelligence API")
     db = await get_db()
     db_health_up.set(1)
-    background_tasks = [asyncio.create_task(_refresh_verified_intelligence(db)), asyncio.create_task(_prepare_ai_and_benchmark(db)), asyncio.create_task(_verify_grounded_ai_runtime(db)), asyncio.create_task(_prepare_independent_ml())]
+    current_settings = get_settings()
+    background_tasks = [
+        asyncio.create_task(_refresh_verified_intelligence(db)),
+        asyncio.create_task(_prepare_ai_and_benchmark(db)),
+        asyncio.create_task(_verify_grounded_ai_runtime(db)),
+    ]
+    if current_settings.run_ml_training_on_startup:
+        background_tasks.append(asyncio.create_task(_prepare_independent_ml()))
+        logger.info("Independent ML startup training enabled")
+    else:
+        logger.info("Independent ML startup training disabled; serving process will use existing registered model only")
     if os.getenv("RUN_FLAGSHIP_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes"}:
         background_tasks.append(asyncio.create_task(_run_flagship_once(db)))
         logger.info("Flagship startup execution enabled")
-    logger.success("API ready")
+    logger.info("API ready")
     try:
         yield
     finally:
@@ -208,10 +230,16 @@ async def lifespan(app: FastAPI):
         await close_db()
 
 
-app = FastAPI(title="Blockchain Intelligence API", description="Evidence-grounded Ethereum intelligence", version="1.10.1", lifespan=lifespan)
+app = FastAPI(title="Blockchain Intelligence API", description="Evidence-grounded Ethereum intelligence", version="1.11.0", lifespan=lifespan)
 settings = get_settings()
-allowed_origins = [origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()] or ["*"]
-app.add_middleware(CORSMiddleware, allow_origins=allowed_origins, allow_credentials=False, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "X-API-Key", "Authorization"])
+allowed_origins = [origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "Authorization", "X-Request-ID"],
+)
 app.add_middleware(AbuseProtectionMiddleware)
 
 
@@ -224,21 +252,36 @@ async def observe_http(request: Request, call_next):
         status = response.status_code
         return response
     finally:
+        elapsed = time.monotonic() - start
         route = request.scope.get("route")
         route_label = getattr(route, "path", None) or "unmatched"
         method = request.method
         api_requests_total.labels(method=method, route=route_label, status=str(status)).inc()
-        api_request_duration_seconds.labels(method=method, route=route_label).observe(time.monotonic() - start)
+        api_request_duration_seconds.labels(method=method, route=route_label).observe(elapsed)
+        request_id = getattr(request.state, "request_id", "unassigned")
+        log = logger.bind(request_id=request_id, method=method, route=route_label, status=status)
+        if status >= 500:
+            log.error("HTTP request completed status={} duration_ms={:.1f}", status, elapsed * 1000)
+        elif status >= 400:
+            log.warning("HTTP request completed status={} duration_ms={:.1f}", status, elapsed * 1000)
+        elif elapsed >= 1.0:
+            log.warning("Slow HTTP request status={} duration_ms={:.1f}", status, elapsed * 1000)
 
 
-for api_router in [router, agent_router, event_router, wallet_router, coverage_router, graph_router, indexed_transfer_router, observability_router, explanation_router, ai_router, historical_router, deep_history_router, entity_router, evaluation_router, ml_router, readiness_router, forensic_router, investigator_router, flagship_router, browse_router, analyst_router, address_router]:
+for api_router in [
+    router, agent_router, event_router, wallet_router, coverage_router, graph_router,
+    indexed_transfer_router, observability_router, explanation_router, ai_router,
+    historical_router, deep_history_router, entity_router, evaluation_router, ml_router,
+    readiness_router, forensic_router, investigator_router, flagship_router, browse_router,
+    analyst_router, address_router, robustness_router,
+]:
     app.include_router(api_router)
 
 
 @app.get("/", response_model=HealthResponse, tags=["health"])
 async def root():
-    settings = get_settings()
-    return HealthResponse(status="operational", service="Blockchain Intelligence Platform", version="1.10.1", database=settings.postgres_db, blockchain="ethereum-mainnet")
+    current = get_settings()
+    return HealthResponse(status="operational", service="Blockchain Intelligence Platform", version="1.11.0", database=current.postgres_db, blockchain="ethereum-mainnet")
 
 
 @app.get("/metrics", tags=["monitoring"])

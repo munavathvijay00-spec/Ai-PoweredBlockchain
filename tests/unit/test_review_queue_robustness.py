@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.api.analyst_routes import ReviewAction, _save_one
+from src.api.auth import Principal
 from src.api.browse_routes import _query_clusters
 
 
@@ -43,7 +44,7 @@ async def test_cluster_total_counts_clusters_not_transactions():
 
 
 @pytest.mark.asyncio
-async def test_review_action_appends_audit_event_with_previous_and_new_state():
+async def test_review_action_appends_authenticated_actor_and_state_transition():
     db = AsyncMock()
     db.fetchrow.side_effect = [
         {"status": "needs_review", "assignee": None, "note": "triage"},
@@ -56,22 +57,25 @@ async def test_review_action_appends_audit_event_with_previous_and_new_state():
         db=db,
         get_by_hash=AsyncMock(return_value={"hash": "0xabc"}),
     )
-    action = ReviewAction(
-        status="confirmed", actor="Vijay", assignee="fraud-team", note="evidence verified"
-    )
+    action = ReviewAction(status="confirmed", assignee="fraud-team", note="evidence verified")
+    principal = Principal(subject="analyst-team-a", role="analyst")
 
-    result = await _save_one(repo, "0xabc", action)
+    result = await _save_one(repo, "0xabc", action, principal)
 
     assert result["status"] == "confirmed"
+    assert result["actor"] == "analyst-team-a"
+    assert result["actor_role"] == "analyst"
     audit_call = db.execute.await_args
     audit_sql = audit_call.args[0]
     assert "INSERT INTO transaction_review_audit" in audit_sql
     assert audit_call.args[1:] == (
-        "0xabc", "Vijay", "review_status_changed", "needs_review",
+        "0xabc", "analyst-team-a", "needs_review",
         "confirmed", "fraud-team", "evidence verified",
     )
 
 
-def test_review_action_rejects_unknown_status():
+def test_review_action_does_not_accept_client_actor_and_rejects_unknown_status():
+    action = ReviewAction(status="confirmed", actor="spoofed-admin", note="test")
+    assert not hasattr(action, "actor")
     with pytest.raises(Exception):
-        ReviewAction(status="approved", actor="analyst")
+        ReviewAction(status="approved")

@@ -15,16 +15,27 @@ export default function StatsBar({ stats, coverage, onMetric }) {
     { key: 'evidence', label: 'Evidence records', value: formatNumber(evidenceSummaries), accent: 'text-[#45db83]', note: 'Retained evidence available for review' },
   ] : null;
 
+  const loadingCards = Array.from({ length: 5 }, (_, index) => ({ loading: true, key: `loading-${index}` }));
+
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-      {(cards || [0, 1, 2, 3, 4]).map((card, index) => card ? (
-        <button key={card.label} type="button" onClick={() => onMetric?.(card.key)} className="metric-card text-left transition hover:border-sky-400/30 hover:bg-white/[0.025] focus:outline-none focus:ring-2 focus:ring-sky-400/40">
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5" aria-busy={!cards}>
+      {(cards || loadingCards).map((card) => card.loading ? (
+        <div key={card.key} className="metric-card" aria-hidden="true">
+          <div className="h-3 w-28 animate-pulse rounded bg-slate-700" />
+          <div className="mt-4 h-8 w-24 animate-pulse rounded bg-slate-700" />
+        </div>
+      ) : (
+        <button
+          key={card.label}
+          type="button"
+          onClick={() => onMetric?.(card.key)}
+          aria-label={`${card.label}: ${card.value}. ${card.note}`}
+          className="metric-card text-left transition hover:border-sky-400/30 hover:bg-white/[0.025] focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+        >
           <p className="metric-label">{card.label}</p>
           <p className={`mt-2 text-[29px] font-semibold leading-none tracking-tight ${card.accent}`}>{card.value}</p>
           {card.note && <p className="mt-2 text-[11px] text-slate-500">{card.note}</p>}
         </button>
-      ) : (
-        <div key={index} className="metric-card"><div className="h-3 w-28 animate-pulse rounded bg-slate-700" /><div className="mt-4 h-8 w-24 animate-pulse rounded bg-slate-700" /></div>
       ))}
     </div>
   );

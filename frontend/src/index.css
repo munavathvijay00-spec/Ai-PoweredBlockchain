@@ -45,6 +45,16 @@ button { -webkit-tap-highlight-color: transparent; }
   .secondary-button { @apply inline-flex items-center justify-center rounded-lg border border-[#3b4960] bg-[#172236] px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-[#26354b]; }
 }
 
+/* The default Tailwind slate-500/600/700 values fall below WCAG AA at small
+   sizes on ChainScope's #202c40 / #0d1628 surfaces. Keep the muted hierarchy,
+   but use one accessible floor for secondary copy and placeholders. */
+.text-slate-500,
+.text-slate-600,
+.text-slate-700,
+.placeholder\:text-slate-600::placeholder {
+  color: #aab7ca !important;
+}
+
 .chain-mark { position: relative; width: 24px; height: 34px; flex: 0 0 24px; }
 .chain-mark > span { position: absolute; width: 11px; height: 22px; border: 1.8px solid #eef3fa; border-radius: 999px; transform: rotate(42deg); box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
 .chain-mark > span:first-child { left: 3px; top: 0; }

@@ -22,6 +22,11 @@ COPY scripts/ ./scripts/
 COPY evaluation/ ./evaluation/
 COPY --from=frontend-build /frontend/dist ./frontend_dist
 
+RUN addgroup --system chainscope \
+    && adduser --system --ingroup chainscope --home /app chainscope \
+    && chown -R chainscope:chainscope /app
+USER chainscope
+
 EXPOSE 8000
 
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

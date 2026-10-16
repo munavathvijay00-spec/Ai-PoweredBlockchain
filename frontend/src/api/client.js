@@ -4,6 +4,20 @@ const API_BASE = configuredBase
   ? `${configuredBase}${configuredBase.endsWith('/api') ? '' : '/api'}`
   : '/api';
 
+function analystCredential() {
+  return sessionStorage.getItem('chainscope_analyst_credential') || '';
+}
+
+export function setAnalystCredential(value) {
+  const token = String(value || '').trim();
+  if (token) sessionStorage.setItem('chainscope_analyst_credential', token);
+  else sessionStorage.removeItem('chainscope_analyst_credential');
+}
+
+export function hasAnalystCredential() {
+  return Boolean(analystCredential());
+}
+
 async function request(path, timeoutMs = 12000, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -22,15 +36,22 @@ async function request(path, timeoutMs = 12000, options = {}) {
     } catch {
       // Keep the HTTP fallback for non-JSON upstream failures.
     }
-    throw new Error(detail || `API error: ${response.status} ${response.statusText}`);
+    const error = new Error(detail || `API error: ${response.status} ${response.statusText}`);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
 
-function jsonOptions(payload) {
+function jsonOptions(payload, privileged = false) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (privileged) {
+    const credential = analystCredential();
+    if (credential) headers.Authorization = `Bearer ${credential}`;
+  }
   return {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   };
 }
@@ -72,9 +93,9 @@ export const api = {
   getAddressBrowser: options => request(`/address-browser?${addressParams(options)}`, 20000),
   getTransaction: hash => request(`/transactions/${encodeURIComponent(hash)}`),
   getAnalystReview: hash => request(`/analyst/transactions/${encodeURIComponent(hash)}`),
-  saveAnalystReview: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}`, 12000, jsonOptions(payload)),
-  saveClusterReview: payload => request('/analyst/clusters/review', 30000, jsonOptions(payload)),
-  recordAnalystEvent: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}/events`, 12000, jsonOptions(payload)),
+  saveAnalystReview: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}`, 12000, jsonOptions(payload, true)),
+  saveClusterReview: payload => request('/analyst/clusters/review', 30000, jsonOptions(payload, true)),
+  recordAnalystEvent: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}/events`, 12000, jsonOptions(payload, true)),
   getAnalystAudit: (hash, limit = 100) => request(`/analyst/transactions/${encodeURIComponent(hash)}/audit?limit=${limit}`),
   getTransactionEvents: hash => request(`/transactions/${encodeURIComponent(hash)}/events`),
   getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`, 15000),

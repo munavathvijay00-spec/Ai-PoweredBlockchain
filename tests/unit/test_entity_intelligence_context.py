@@ -1,100 +1,102 @@
-from types import SimpleNamespace
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 
-from src.api.routes import _format_tx
-from src.risk.intelligence_signals import enrich_with_verified_intelligence
+from src.api.routes import _format_tx, _public_entity_match
+from src.risk.evidence_v2 import assess_evidence
+from src.risk.intelligence_signals import apply_verified_intelligence
 from src.risk.official_entities import OFFICIAL_ENTITY_RECORDS, sync_official_entities
 
 
-def _row(**overrides):
-    base = {
+def _tx():
+    return {
         "hash": "0x" + "1" * 64,
-        "block_number": 1,
         "from_address": "0x" + "a" * 40,
         "to_address": "0x" + "b" * 40,
-        "value": "1",
-        "gas": 21000,
-        "gas_price": "1",
-        "nonce": 1,
-        "timestamp": None,
+        "value": 10**18,
+        "block_number": 123,
+        "timestamp": datetime.now(timezone.utc),
         "risk_score": 0,
         "risk_factors": [],
-        "risk_explanation": None,
+        "ai_explanation": None,
     }
-    base.update(overrides)
-    return base
 
 
 def test_protocol_entity_context_does_not_increase_risk():
-    tx = _row()
+    tx = _tx()
     matches = {
         tx["to_address"]: [{
-            "source": "uniswap_official_deployments",
-            "entity_id": "uniswap-v3-router",
-            "entity_name": "Uniswap V3 SwapRouter",
+            "source": "aave_official_docs",
+            "entity_id": "aave-v3-ethereum-market",
+            "entity_name": "Aave V3 Ethereum Market",
             "entity_type": "protocol",
             "confidence": 1.0,
-            "source_url": "https://github.com/Uniswap/v3-periphery/blob/main/deploys.md",
+            "source_url": "https://aave.com/docs/aave-v3/markets/data",
         }]
     }
 
-    result = enrich_with_verified_intelligence(tx, matches)
-    assert result["risk_score"] == 0
-    assert result["verified_entity_context"]["status"] == "source_attributed_matches"
-    assert result["verified_entity_context"]["recipient"][0]["entity_name"] == "Uniswap V3 SwapRouter"
+    result = apply_verified_intelligence({"score": 10, "factors": []}, tx, matches)
+
+    assert result["score"] == 10
+    assert result["factors"] == []
 
 
 def test_source_attributed_sanctions_match_is_provenance_rich_review_signal():
-    tx = _row()
+    tx = _tx()
     matches = {
-        tx["from_address"]: [{
+        tx["to_address"]: [{
             "source": "ofac_sdn",
-            "entity_id": "sdn-1",
-            "entity_name": "OFAC SDN Ethereum address",
+            "entity_id": "sdn-123",
+            "entity_name": "Source-listed entity",
             "entity_type": "sanctions",
             "confidence": 1.0,
             "source_url": "https://ofac.treasury.gov/",
+            "verified_at": datetime.now(timezone.utc),
         }]
     }
 
-    result = enrich_with_verified_intelligence(tx, matches)
-    factor = result["risk_factors"][-1]
-    assert factor["type"] == "verified_intelligence_match"
-    assert factor["evidence"]["source"] == "ofac_sdn"
-    assert factor["evidence"]["source_url"].startswith("https://")
-    assert factor["requires_review"] is True
+    result = apply_verified_intelligence({"score": 10, "factors": []}, tx, matches)
+
+    assert result["score"] == 100
+    factor = result["factors"][0]
+    assert factor["factor"] == "verified_sanctions_match"
+    assert factor["source"] == "ofac_sdn"
+    assert factor["source_url"].startswith("https://")
+    assert factor["matched_role"] == "recipient"
+    assert "not proof" in factor["reason"].lower()
 
 
 def test_verified_entity_factor_is_not_mixed_with_unverified_heuristics():
-    tx = _row(risk_factors=[{"type": "large_transfer", "score": 20}])
-    matches = {
-        tx["to_address"]: [{
-            "source": "circle_official_usdc",
-            "entity_id": "circle-usdc-ethereum",
-            "entity_name": "USDC on Ethereum",
-            "entity_type": "token",
-            "confidence": 1.0,
-            "source_url": "https://www.circle.com/multi-chain-usdc/ethereum",
-        }]
-    }
+    assessment = assess_evidence([{
+        "factor": "source_attributed_risk_entity_match",
+        "reason": "Exact source-attributed address match",
+        "source": "independent-source",
+        "source_url": "https://example.org/evidence",
+        "entity_name": "Example labelled address",
+        "entity_type": "phishing",
+        "matched_address": "0x" + "c" * 40,
+        "matched_role": "recipient",
+    }], "0x" + "2" * 64)
 
-    result = enrich_with_verified_intelligence(tx, matches)
-    assert result["risk_factors"][0]["type"] == "large_transfer"
-    assert result["verified_entity_context"]["recipient"][0]["entity_type"] == "token"
+    assert assessment["assessment"] == "review"
+    assert len(assessment["verified_entity_indicators"]) == 1
+    assert assessment["unverified_indicators"] == []
+    assert assessment["probability"] is None
 
 
 def test_transaction_response_exposes_current_entity_context_without_calling_it_ownership():
-    row = _row(to_address="0xae7ab96520de3a18e5e111b5eaab095312d7fe84")
-    match = {
+    row = _tx()
+    match = _public_entity_match({
         "source": "lido_official_docs",
         "entity_id": "lido-steth",
         "entity_name": "Lido stETH / staking pool",
         "entity_type": "protocol",
         "confidence": 1.0,
         "source_url": "https://docs.lido.fi/deployed-contracts/",
-    }
+        "attribution_scope": "address",
+        "evidence": {"publisher": "Lido"},
+    })
     entity_matches = {row["to_address"]: [match]}
 
     response = _format_tx(row, entity_matches)
@@ -112,9 +114,6 @@ def test_official_registry_is_small_exact_and_source_cited():
         assert row["address"].startswith("0x") and len(row["address"]) == 42
         assert row["confidence"] == 1.0
         assert row["source_url"].startswith("https://")
-        # Exact token contracts are valid first-party entity records too; the
-        # registry still requires exact addresses, first-party provenance, and
-        # confidence=1.0 rather than inferred ownership labels.
         assert row["entity_type"] in {"protocol", "contract", "token"}
 
 

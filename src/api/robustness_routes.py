@@ -1,14 +1,21 @@
-"""Production-hardening endpoints for evidence coverage and export integrity."""
+"""Production-hardening endpoints for evidence coverage, browser sessions, and export integrity."""
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from src.api.auth import Principal, require_viewer
+from src.api.auth import (
+    SESSION_COOKIE,
+    Principal,
+    authenticate,
+    issue_viewer_session,
+    require_viewer,
+)
 from src.api.dependencies import get_transaction_repo
 from src.api.analyst_routes import _ensure_schema
 from src.database.repositories import TransactionRepository
@@ -20,6 +27,50 @@ ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 def _canonical(value) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
+
+
+def _secure_cookie(request: Request) -> bool:
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return forwarded == "https" or request.url.scheme == "https"
+
+
+@router.post("/session/viewer")
+async def create_viewer_session(request: Request, response: Response):
+    """Issue or refresh a short-lived HttpOnly read-only browser session."""
+    if not os.getenv("VIEWER_SESSION_SIGNING_KEY", "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Viewer sessions are not configured",
+        )
+
+    try:
+        principal = authenticate(request)
+        if principal.role == "viewer" and principal.subject == "web-viewer":
+            response.headers["Cache-Control"] = "no-store"
+            return {"role": "viewer", "status": "active"}
+    except HTTPException:
+        pass
+
+    token, exp = issue_viewer_session(subject="web-viewer", ttl_seconds=1800)
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=1800,
+        expires=1800,
+        path="/api",
+        secure=_secure_cookie(request),
+        httponly=True,
+        samesite="strict",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return {"role": "viewer", "status": "issued", "expires_at": exp}
+
+
+@router.delete("/session/viewer", status_code=204)
+async def clear_viewer_session(response: Response):
+    response.delete_cookie(key=SESSION_COOKIE, path="/api")
+    response.headers["Cache-Control"] = "no-store"
+    return Response(status_code=204)
 
 
 @router.get("/wallets/{address}/coverage-summary")

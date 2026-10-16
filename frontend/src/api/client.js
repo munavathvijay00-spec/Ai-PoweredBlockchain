@@ -42,6 +42,15 @@ function browserParams(options = {}) {
   return params;
 }
 
+function addressParams(options = {}) {
+  const params = new URLSearchParams();
+  ['limit', 'offset', 'search', 'sort'].forEach(key => {
+    const value = options[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') params.set(key, String(value));
+  });
+  return params;
+}
+
 export const api = {
   getStats: () => request('/stats'),
   getCoverage: () => request('/coverage'),
@@ -56,6 +65,7 @@ export const api = {
     params.set('format', format);
     return `${API_BASE}/transaction-export?${params}`;
   },
+  getAddressBrowser: options => request(`/address-browser?${addressParams(options)}`, 20000),
   getTransaction: hash => request(`/transactions/${encodeURIComponent(hash)}`),
   getAnalystReview: hash => request(`/analyst/transactions/${encodeURIComponent(hash)}`),
   saveAnalystReview: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}`, 12000, {

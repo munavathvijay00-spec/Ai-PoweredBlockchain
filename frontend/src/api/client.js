@@ -40,6 +40,7 @@ async function request(path, timeoutMs = 12000, options = {}) {
     } catch {}
     const error = new Error(detail || `API error: ${response.status} ${response.statusText}`);
     error.status = response.status;
+    error.requestId = response.headers.get('x-request-id') || '';
     throw error;
   }
   return response.json();
@@ -117,6 +118,7 @@ export const api = {
   },
   getFundFlow: (address, depth = 3, limit = 300) => request(`/wallets/${encodeURIComponent(address)}/fund-flow?depth=${depth}&limit=${limit}&per_hop_limit=160`, 30000),
   getWalletReport: address => request(`/wallets/${encodeURIComponent(address)}/investigation-report`, 25000),
+  getWalletCoverageSummary: address => request(`/wallets/${encodeURIComponent(address)}/coverage-summary`, 15000),
   getCopilot: address => request(`/wallets/${encodeURIComponent(address)}/copilot`, 30000, viewerOptions('POST')),
   listCases: (status = '') => request(`/analyst/cases${status ? `?status=${encodeURIComponent(status)}` : ''}`, 15000, viewerOptions()),
   getCase: caseId => request(`/analyst/cases/${encodeURIComponent(caseId)}`, 15000, viewerOptions()),
@@ -124,4 +126,5 @@ export const api = {
   addCaseItem: (caseId, payload) => request(`/analyst/cases/${encodeURIComponent(caseId)}/items`, 15000, jsonOptions(payload, true)),
   updateCase: (caseId, payload) => request(`/analyst/cases/${encodeURIComponent(caseId)}/state`, 15000, jsonOptions(payload, true)),
   getCaseReport: caseId => request(`/analyst/cases/${encodeURIComponent(caseId)}/report`, 20000, viewerOptions()),
+  getCaseBundle: caseId => request(`/analyst/cases/${encodeURIComponent(caseId)}/bundle`, 25000, viewerOptions()),
 };

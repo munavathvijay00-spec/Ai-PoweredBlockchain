@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     cors_allowed_origins: str = ""
     public_rate_limit_per_minute: int = 120
     authenticated_rate_limit_per_minute: int = 240
+    # Interactive wallet reads (balance / transfers / indexed graph) are frequent by design.
+    # Keep them separately bounded so bubble balance prefetch cannot consume the deeper
+    # investigation/AI quota shared by fund-flow, coverage, reports, and copilot.
+    wallet_read_rate_limit_per_minute: int = 120
     expensive_rate_limit_per_minute: int = 20
     expensive_max_concurrency: int = 12
     expensive_queue_timeout_seconds: float = 2.0
@@ -86,6 +90,7 @@ if __name__ == "__main__":
     print(f"   Allowed origins: {settings.cors_allowed_origins or '(same-origin only)'}")
     print(f"   Public RPM: {settings.public_rate_limit_per_minute}")
     print(f"   Authenticated RPM: {settings.authenticated_rate_limit_per_minute}")
+    print(f"   Wallet read RPM: {settings.wallet_read_rate_limit_per_minute}")
     print(f"   Expensive max concurrency: {settings.expensive_max_concurrency}")
     print(f"   ML training on API startup: {settings.run_ml_training_on_startup}")
     print(f"   Alchemy key (masked): {settings.alchemy_api_key[:8]}...")

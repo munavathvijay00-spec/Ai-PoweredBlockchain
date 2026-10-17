@@ -23,13 +23,35 @@ from src.api.auth import authenticate
 from src.utils.config import get_settings
 
 _EXPENSIVE_PREFIXES = (
-    "/api/wallets/",
     "/api/ml/",
     "/api/evaluation/",
     "/api/entities",
     "/api/analyst/",
 )
+_WALLET_PREFIX = "/api/wallets/"
+_WALLET_READ_SUFFIXES = (
+    "/balance",
+    "/transfers",
+    "/indexed-graph",
+)
 _INTERNAL_PATHS = {"/metrics", "/docs", "/redoc", "/openapi.json"}
+
+
+def _wallet_interactive_read(path: str) -> bool:
+    return path.startswith(_WALLET_PREFIX) and any(path.endswith(suffix) for suffix in _WALLET_READ_SUFFIXES)
+
+
+def _rate_bucket(path: str, authenticated: bool) -> str:
+    """Keep interactive graph reads usable without weakening AI/deep-analysis protection."""
+    if _wallet_interactive_read(path):
+        return "wallet_read"
+    if path.startswith(_WALLET_PREFIX) or any(path.startswith(prefix) for prefix in _EXPENSIVE_PREFIXES):
+        return "expensive"
+    return "authenticated" if authenticated else "public"
+
+
+def _capacity_bounded(path: str) -> bool:
+    return path.startswith(_WALLET_PREFIX) or any(path.startswith(prefix) for prefix in _EXPENSIVE_PREFIXES)
 
 
 class AbuseProtectionMiddleware(BaseHTTPMiddleware):
@@ -47,12 +69,7 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
         return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
     def _identity(self, request: Request) -> tuple[str, bool]:
-        """Use credential identity for trusted users; keep anonymous viewer sessions IP-scoped.
-
-        Anonymous browser sessions exist only to remove secret handling from the UI. Treating
-        them as IP-scoped prevents cookie deletion/session re-issuance from multiplying the
-        expensive AI quota. Analyst/admin API credentials still avoid shared-NAT quotas.
-        """
+        """Use credential identity for trusted users; keep anonymous viewer sessions IP-scoped."""
         try:
             principal = authenticate(request)
             if principal.role == "viewer" and principal.subject == "web-viewer":
@@ -63,12 +80,12 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
             return f"ip:{self._ip_key(request)}", False
 
     def _bucket_name(self, path: str, authenticated: bool) -> str:
-        if any(path.startswith(prefix) for prefix in _EXPENSIVE_PREFIXES):
-            return "expensive"
-        return "authenticated" if authenticated else "public"
+        return _rate_bucket(path, authenticated)
 
     def _limit(self, bucket: str) -> int:
-        if bucket == "expensive":
+        if bucket == "wallet_read":
+            value = self.settings.wallet_read_rate_limit_per_minute
+        elif bucket == "expensive":
             value = self.settings.expensive_rate_limit_per_minute
         elif bucket == "authenticated":
             value = self.settings.authenticated_rate_limit_per_minute
@@ -162,7 +179,7 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Request body too large", "request_id": request_id},
                 ), request_id)
 
-        expensive = any(path.startswith(prefix) for prefix in _EXPENSIVE_PREFIXES)
+        capacity_bounded = _capacity_bounded(path)
         bucket = None
         if path != "/" and not path.startswith("/app") and path not in _INTERNAL_PATHS:
             client, authenticated = self._identity(request)
@@ -175,7 +192,7 @@ class AbuseProtectionMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Rate limit exceeded", "bucket": bucket, "limiter": limiter, "request_id": request_id},
                 ), request_id)
 
-        if expensive:
+        if capacity_bounded:
             response = await self._call_with_expensive_slot(request, call_next, request_id)
         else:
             response = await call_next(request)

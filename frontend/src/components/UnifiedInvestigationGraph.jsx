@@ -62,10 +62,12 @@ export default function UnifiedInvestigationGraph({ wallet, fundFlow }) {
       hash: edge.tx_hash,
       from_address: edge.source,
       to_address: edge.target,
-      value: edge.value,
-      asset: edge.asset || (edge.category === 'external' ? 'ETH' : undefined),
+      value: edge.value ?? edge.value_wei,
+      asset: edge.asset || 'ETH',
       category: edge.category || 'external',
       risk_score: edge.risk_score,
+      block_number: edge.block_number,
+      timestamp: edge.block_timestamp || edge.timestamp,
       evidence_url: edge.evidence_url,
     }));
     (fundFlow?.token_flow?.edges || []).forEach(edge => append({
@@ -76,6 +78,8 @@ export default function UnifiedInvestigationGraph({ wallet, fundFlow }) {
       asset: edge.asset,
       category: 'erc20',
       risk_score: edge.risk_score,
+      block_number: edge.block_number,
+      timestamp: edge.block_timestamp,
       evidence_url: edge.evidence_url,
     }));
     return records;

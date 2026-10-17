@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
-import BubbleInvestigationGraph from './BubbleInvestigationGraph';
+import ScalableBubbleInvestigationGraph from './ScalableBubbleInvestigationGraph';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
 
@@ -36,7 +36,6 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     }
     setLoading(true);
     setError('');
-    // Never leave an unrelated or previous graph visible while a different wallet is loading.
     setResult(null);
     setLoadedPages(1);
     setExpansions({});
@@ -198,7 +197,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
         {(result.next_page_keys?.outgoing || result.next_page_keys?.incoming) && <button onClick={loadMore} disabled={loadingMore} className="secondary-button mt-4">{loadingMore ? 'Loading older evidence…' : 'Load older transfers'}</button>}
       </section>
 
-      <BubbleInvestigationGraph
+      <ScalableBubbleInvestigationGraph
         transactions={records}
         rootAddress={result.root || ''}
         onExpandAddress={expandWallet}

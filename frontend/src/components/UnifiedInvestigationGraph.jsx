@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 
-const InvestigationGraph = lazy(() => import('./InvestigationGraph'));
+const BubbleInvestigationGraph = lazy(() => import('./BubbleInvestigationGraph'));
 const normalized = value => String(value || '').toLowerCase();
 const edgeKey = edge => [edge.tx_hash, normalized(edge.source), normalized(edge.target), edge.asset, edge.category, edge.value].join('|');
 
@@ -129,15 +129,15 @@ export default function UnifiedInvestigationGraph({ wallet, fundFlow }) {
         <div>
           <p className="eyebrow">Graph investigation</p>
           <h2 id="unified-graph-title" className="mt-2 text-lg font-semibold text-white">Follow the evidence visually</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Inspect loaded wallet relationships, select a counterparty, expand one bounded hop, and verify each connection without leaving the investigation.</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">The map now auto-fits around the investigated wallet, groups first-hop branches around the root, keeps loaded evidence on-screen, and lets you expand a counterparty without losing the investigation context.</p>
         </div>
         <span className="status-pill border-violet-400/20 bg-violet-400/[0.06] text-violet-200">{expandedAddresses.length}/5 expansions</span>
       </div>
       {loading && <p role="status" className="mt-4 text-sm text-slate-300">Loading indexed graph evidence…</p>}
       {error && <p role="alert" className="mt-4 text-sm text-amber-200">{error}</p>}
     </div>
-    {!loading && transactions.length > 0 && <Suspense fallback={<div className="panel p-6 text-sm text-slate-300" role="status">Loading GPU investigation engine…</div>}>
-      <InvestigationGraph
+    {!loading && transactions.length > 0 && <Suspense fallback={<div className="panel p-6 text-sm text-slate-300" role="status">Loading 3D bubble investigation map…</div>}>
+      <BubbleInvestigationGraph
         transactions={transactions}
         rootAddress={wallet}
         onExpandAddress={expandAddress}

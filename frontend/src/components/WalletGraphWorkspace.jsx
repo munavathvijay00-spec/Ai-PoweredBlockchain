@@ -3,9 +3,21 @@ import { api } from '../api/client';
 import BubbleInvestigationGraph from './BubbleInvestigationGraph';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
-const short = value => value ? value.slice(0, 8) + '…' + value.slice(-6) : '—';
+
+function graphError(failure, fallback) {
+  if (failure?.status === 429) {
+    const wait = Number(failure.retryAfter || 0);
+    return wait > 0
+      ? `Graph request limit reached. Retry in about ${wait} second${wait === 1 ? '' : 's'}.`
+      : 'Graph request limit reached. Retry shortly.';
+  }
+  if (failure?.status === 503) return 'Investigation capacity is busy. Retry in a few seconds.';
+  return failure?.message || fallback;
+}
 
 export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
+  void flagged;
+  void onSelect;
   const [address, setAddress] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -24,6 +36,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     }
     setLoading(true);
     setError('');
+    // Never leave an unrelated or previous graph visible while a different wallet is loading.
     setResult(null);
     setLoadedPages(1);
     setExpansions({});
@@ -31,7 +44,8 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
       const response = await api.getWalletGraph(wallet);
       setResult(response);
     } catch (failure) {
-      setError(failure.message || 'Unable to retrieve wallet graph.');
+      setResult(null);
+      setError(graphError(failure, 'Unable to retrieve wallet graph.'));
     } finally {
       setLoading(false);
     }
@@ -74,7 +88,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
       });
       setLoadedPages(count => count + 1);
     } catch (failure) {
-      setError(failure.message || 'Unable to load older transfers.');
+      setError(graphError(failure, 'Unable to load older transfers.'));
     } finally {
       setLoadingMore(false);
     }
@@ -112,7 +126,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
         verifiedEntityMatches: Number(page.verified_entity_matches || 0),
       } }));
     } catch (failure) {
-      setError(failure.message || 'Counterparty expansion failed.');
+      setError(graphError(failure, 'Counterparty expansion failed.'));
     } finally {
       setExpanding('');
     }
@@ -129,7 +143,7 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     timestamp: edge.block_timestamp || edge.timestamp,
     evidence_url: edge.evidence_url,
     risk_score: edge.risk_score ?? null,
-  })) : flagged;
+  })) : [];
 
   const nodeContext = useMemo(() => {
     const context = {};
@@ -183,17 +197,19 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
         </div>
         {(result.next_page_keys?.outgoing || result.next_page_keys?.incoming) && <button onClick={loadMore} disabled={loadingMore} className="secondary-button mt-4">{loadingMore ? 'Loading older evidence…' : 'Load older transfers'}</button>}
       </section>
+
+      <BubbleInvestigationGraph
+        transactions={records}
+        rootAddress={result.root || ''}
+        onExpandAddress={expandWallet}
+        expandingAddress={expanding}
+        expandedAddresses={Object.keys(expansions)}
+        nodeContext={nodeContext}
+      />
+
+      <p className="text-xs leading-5 text-slate-500">Graph expansion is deliberately bounded to five observed counterparties per investigation. It adds context without claiming complete history, ownership, taint, or intent.</p>
     </>}
 
-    <BubbleInvestigationGraph
-      transactions={records}
-      rootAddress={result?.root || ''}
-      onExpandAddress={result ? expandWallet : undefined}
-      expandingAddress={expanding}
-      expandedAddresses={Object.keys(expansions)}
-      nodeContext={nodeContext}
-    />
-
-    {result && <p className="text-xs leading-5 text-slate-500">Graph expansion is deliberately bounded to five observed counterparties per investigation. It adds context without claiming complete history, ownership, taint, or intent.</p>}
+    {!result && !loading && !error && <div className="panel p-6 text-sm text-slate-400">Build a wallet graph to load evidence-backed bubbles. No previous wallet graph is reused after a failed or cleared search.</div>}
   </div>;
 }

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
-import InvestigationGraph from './InvestigationGraph';
 
+const InvestigationGraph = lazy(() => import('./InvestigationGraph'));
 const normalized = value => String(value || '').toLowerCase();
 const edgeKey = edge => [edge.tx_hash, normalized(edge.source), normalized(edge.target), edge.asset, edge.category, edge.value].join('|');
 
@@ -136,14 +136,16 @@ export default function UnifiedInvestigationGraph({ wallet, fundFlow }) {
       {loading && <p role="status" className="mt-4 text-sm text-slate-300">Loading indexed graph evidence…</p>}
       {error && <p role="alert" className="mt-4 text-sm text-amber-200">{error}</p>}
     </div>
-    {!loading && transactions.length > 0 && <InvestigationGraph
-      transactions={transactions}
-      rootAddress={wallet}
-      onExpandAddress={expandAddress}
-      expandingAddress={expandingAddress}
-      expandedAddresses={expandedAddresses}
-      nodeContext={nodeContext}
-    />}
+    {!loading && transactions.length > 0 && <Suspense fallback={<div className="panel p-6 text-sm text-slate-300" role="status">Loading GPU investigation engine…</div>}>
+      <InvestigationGraph
+        transactions={transactions}
+        rootAddress={wallet}
+        onExpandAddress={expandAddress}
+        expandingAddress={expandingAddress}
+        expandedAddresses={expandedAddresses}
+        nodeContext={nodeContext}
+      />
+    </Suspense>}
     {!loading && !transactions.length && !error && <div className="panel p-6 text-sm text-slate-400">No graphable indexed transfers are currently available for this wallet.</div>}
   </section>;
 }

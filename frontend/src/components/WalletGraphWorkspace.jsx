@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
-import InvestigationGraph from './InvestigationGraph';
+import BubbleInvestigationGraph from './BubbleInvestigationGraph';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
 const short = value => value ? value.slice(0, 8) + '…' + value.slice(-6) : '—';
@@ -122,10 +122,11 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
     hash: edge.tx_hash,
     from_address: edge.source,
     to_address: edge.target,
-    value: edge.value,
-    asset: edge.asset,
-    category: edge.category,
+    value: edge.value ?? edge.value_wei,
+    asset: edge.asset || 'ETH',
+    category: edge.category || 'external',
     block_number_hex: edge.block_number_hex,
+    timestamp: edge.block_timestamp || edge.timestamp,
     evidence_url: edge.evidence_url,
     risk_score: edge.risk_score ?? null,
   })) : flagged;
@@ -145,14 +146,6 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
   const verifiedNodes = result ? (result.nodes || []).filter(node => Array.isArray(node.verified_entities) && node.verified_entities.length > 0) : [];
   const expansionCount = Object.keys(expansions).length;
   const observedWallets = result ? [...new Set((result.edges || []).flatMap(edge => [edge.source?.toLowerCase(), edge.target?.toLowerCase()]))].filter(Boolean) : [];
-
-  function selectTransaction(tx) {
-    if (result) {
-      window.open(tx.evidence_url || `https://etherscan.io/tx/${tx.hash}`, '_blank', 'noopener,noreferrer');
-    } else {
-      onSelect?.(tx);
-    }
-  }
 
   return <div className="space-y-5">
     <form onSubmit={investigate} className="panel-strong relative overflow-hidden p-5 sm:p-6">
@@ -192,10 +185,9 @@ export default function WalletGraphWorkspace({ flagged = [], onSelect }) {
       </section>
     </>}
 
-    <InvestigationGraph
+    <BubbleInvestigationGraph
       transactions={records}
       rootAddress={result?.root || ''}
-      onSelect={selectTransaction}
       onExpandAddress={result ? expandWallet : undefined}
       expandingAddress={expanding}
       expandedAddresses={Object.keys(expansions)}

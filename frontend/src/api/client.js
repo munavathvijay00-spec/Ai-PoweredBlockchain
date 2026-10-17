@@ -40,8 +40,9 @@ async function request(path, timeoutMs = 12000, options = {}) {
   }
   if (!response.ok) {
     let detail = '';
+    let payload = null;
     try {
-      const payload = await response.json();
+      payload = await response.json();
       detail = typeof payload?.detail === 'string' ? payload.detail : '';
     } catch (parseError) {
       void parseError;
@@ -49,6 +50,9 @@ async function request(path, timeoutMs = 12000, options = {}) {
     const error = new Error(detail || `API error: ${response.status} ${response.statusText}`);
     error.status = response.status;
     error.requestId = response.headers.get('x-request-id') || '';
+    error.retryAfter = Number(response.headers.get('retry-after') || 0) || 0;
+    error.rateLimit = Number(response.headers.get('x-ratelimit-limit') || 0) || 0;
+    error.rateBucket = payload?.bucket || '';
     throw error;
   }
   if (response.status === 204) return null;

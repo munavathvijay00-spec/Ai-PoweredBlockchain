@@ -1,6 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 const App = lazy(() => import('./App.jsx'));
-const CaseWorkspace = lazy(() => import('./components/CaseWorkspace.jsx'));
 const UnifiedInvestigationGraph = lazy(() => import('./components/UnifiedInvestigationGraph.jsx'));
 
 import { api } from './api/client';
@@ -18,7 +17,7 @@ const amount = value => {
   return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(value ?? '—');
 };
 
-function WorkflowRail({ ready, onCase }) {
+function WorkflowRail() {
   const sections = [
     ['Summary', '#brief-title'], ['Leads', '#explainable-findings-title'],
     ['Graph', '#unified-graph-title'], ['Timeline', '#timeline-title'],
@@ -26,7 +25,6 @@ function WorkflowRail({ ready, onCase }) {
   ];
   return <nav className="panel flex flex-wrap items-center gap-2 p-3" aria-label="Investigation sections">
     {sections.map(([label, target]) => <a key={label} href={target} className="rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-medium text-slate-200 hover:border-cyan-400/40 hover:text-cyan-200">{label}</a>)}
-    {ready && <button type="button" onClick={onCase} className="secondary-button ml-auto py-2 text-xs">Add to case</button>}
   </nav>;
 }
 
@@ -73,7 +71,7 @@ function Findings({ report, copilot }) {
   </section>;
 }
 
-function Investigation({ onSendToCase }) {
+function Investigation() {
   const [address, setAddress] = useState('');
   const [wallet, setWallet] = useState('');
   const [flow, setFlow] = useState(null);
@@ -82,21 +80,6 @@ function Investigation({ onSendToCase }) {
   const [copilot, setCopilot] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const caseNote = useMemo(() => {
-    if (!wallet) return '';
-    const highest = [...(flow?.directed_paths || [])].sort((a, b) => Number(b.max_risk_score || 0) - Number(a.max_risk_score || 0))[0];
-    return [
-      'Added from canonical ChainScope investigation.',
-      `Native flow: ${eth(flow?.flow_summary?.observed_incoming_wei)} ETH in / ${eth(flow?.flow_summary?.observed_outgoing_wei)} ETH out.`,
-      `Observed counterparties: ${flow?.top_counterparties?.length || report?.unique_counterparties || 0}.`,
-      `ERC-20 assets: ${flow?.token_flow?.assets?.length || 0}.`,
-      `Entity path exposures: ${flow?.entity_exposures?.length || 0}.`,
-      `Grounded AI claims: ${copilot?.claims?.length || 0}.`,
-      highest ? `Highest observed path risk: ${highest.max_risk_score} over ${highest.hop_count} hop(s).` : '',
-      'Coverage is bounded; this is not a fraud, ownership, or taint conclusion.',
-    ].filter(Boolean).join(' ');
-  }, [wallet, flow, report, copilot]);
 
   async function investigate(event) {
     event.preventDefault();
@@ -116,10 +99,9 @@ function Investigation({ onSendToCase }) {
     setLoading(false);
   }
 
-  const sendCase = () => wallet && onSendToCase(wallet, caseNote);
   return <div className="min-h-screen bg-[#0d1628] text-slate-100"><main className="platform-shell space-y-5 py-6">
-    <section className="panel-strong p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="eyebrow">Investigation</p><h1 className="mt-2 text-2xl font-semibold text-white">One wallet. One evidence trail.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Search once, understand the wallet, explore the graph, review findings, and preserve the evidence in a case.</p></div><span className="status-pill border-cyan-400/20 bg-cyan-400/[0.06] text-cyan-200">Evidence-first</span></div><form onSubmit={investigate} className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={address} onChange={event => setAddress(event.target.value)} className="soft-input min-w-0 flex-1 font-mono" placeholder="0x… Ethereum wallet address" aria-label="Ethereum wallet address" autoComplete="off" spellCheck="false" /><button className="primary-button sm:min-w-44" disabled={loading}>{loading ? 'Building intelligence…' : 'Investigate wallet'}</button></form>{error && <p role="alert" className="mt-3 text-sm text-amber-200">{error}</p>}</section>
-    <WorkflowRail ready={Boolean(wallet)} onCase={sendCase} />
+    <section className="panel-strong p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="eyebrow">Investigation</p><h1 className="mt-2 text-2xl font-semibold text-white">One wallet. One evidence trail.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Search once, inspect evidence, explore observed transfer paths, and review findings with explicit coverage limits.</p></div><span className="status-pill border-cyan-400/20 bg-cyan-400/[0.06] text-cyan-200">Evidence-first</span></div><form onSubmit={investigate} className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={address} onChange={event => setAddress(event.target.value)} className="soft-input min-w-0 flex-1 font-mono" placeholder="0x… Ethereum wallet address" aria-label="Ethereum wallet address" autoComplete="off" spellCheck="false" /><button className="primary-button sm:min-w-44" disabled={loading}>{loading ? 'Building intelligence…' : 'Investigate wallet'}</button></form>{error && <p role="alert" className="mt-3 text-sm text-amber-200">{error}</p>}</section>
+    <WorkflowRail />
     {wallet && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Investigation summary"><div className="panel p-4"><p className="eyebrow">Wallet</p><a href={`https://etherscan.io/address/${wallet}`} target="_blank" rel="noreferrer" className="mt-3 block font-mono text-sm text-cyan-300">{short(wallet)} ↗</a></div><div className="panel p-4"><p className="eyebrow">Native in</p><p className="mt-3 text-xl font-semibold text-emerald-300">{flow ? eth(flow.flow_summary?.observed_incoming_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Native out</p><p className="mt-3 text-xl font-semibold text-amber-200">{flow ? eth(flow.flow_summary?.observed_outgoing_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Token assets</p><p className="mt-3 text-xl font-semibold text-violet-200">{flow?.token_flow?.assets?.length ?? '—'}</p></div><div className="panel p-4"><p className="eyebrow">AI findings</p><p className="mt-3 text-xl font-semibold text-slate-100">{copilot?.claims?.length || 0}</p></div></section>}
     {wallet && <IntelligenceBrief wallet={wallet} flow={flow} report={report} coverage={coverage} copilot={copilot} />}
     {wallet && <Suspense fallback={<div className="panel p-6" role="status">Loading investigation graph…</div>}><UnifiedInvestigationGraph wallet={wallet} fundFlow={flow} /></Suspense>}
@@ -127,21 +109,14 @@ function Investigation({ onSendToCase }) {
     {flow && <TransactionSemanticEvidence findings={flow.transaction_semantics || []} />}
 
     <Findings report={report} copilot={copilot} />
-    {wallet && <section className="panel-strong flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="eyebrow text-cyan-300">Preserve evidence</p><h2 className="mt-2 text-lg font-semibold text-white">Continue in a case</h2><p className="mt-2 max-w-2xl text-sm text-slate-300">Carry the investigated wallet and evidence summary directly into Case Management.</p></div><button type="button" onClick={sendCase} className="primary-button whitespace-nowrap">Add investigation to case</button></section>}
   </main></div>;
 }
 
 export default function AppV4() {
-  const [workspace, setWorkspace] = useState('investigate');
-  const [caseEvidence, setCaseEvidence] = useState(null);
-  function sendWalletToCase(address, note) {
-    setCaseEvidence({ item_type: 'address', item_key: address, note });
-    setWorkspace('cases');
-  }
+  const [workspace, setWorkspace] = useState('monitor');
   return <div className="min-h-screen bg-[#0d1628]">
-    <div className="sticky top-0 z-[80] border-b border-slate-800 bg-[#09111f]/95 px-3 py-2 backdrop-blur"><div className="mx-auto flex max-w-[1540px] flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="text-sm font-semibold tracking-[0.15em] text-cyan-300">CHAINSCOPE</span><span className="hidden text-xs text-slate-400 sm:inline">Investigation OS</span></div><nav className="flex max-w-full gap-1 overflow-x-auto" aria-label="Product workspace"><button onClick={() => setWorkspace('investigate')} aria-current={workspace === 'investigate' ? 'page' : undefined} className={`workspace-chip ${workspace === 'investigate' ? 'workspace-chip-active' : ''}`}>Investigate</button><button onClick={() => setWorkspace('monitor')} aria-current={workspace === 'monitor' ? 'page' : undefined} className={`workspace-chip ${workspace === 'monitor' ? 'workspace-chip-active' : ''}`}>Monitor</button><button onClick={() => setWorkspace('cases')} aria-current={workspace === 'cases' ? 'page' : undefined} className={`workspace-chip ${workspace === 'cases' ? 'workspace-chip-active' : ''}`}>Cases</button></nav></div></div>
-    {workspace === 'investigate' && <Investigation onSendToCase={sendWalletToCase} />}
+    <div className="sticky top-0 z-[80] border-b border-slate-800 bg-[#09111f]/95 px-3 py-2 backdrop-blur"><div className="mx-auto flex max-w-[1540px] flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="text-sm font-semibold tracking-[0.15em] text-cyan-300">CHAINSCOPE</span><span className="hidden text-xs text-slate-400 sm:inline">Investigation OS</span></div><nav className="flex max-w-full gap-1 overflow-x-auto" aria-label="Product workspace"><button onClick={() => setWorkspace('investigate')} aria-current={workspace === 'investigate' ? 'page' : undefined} className={`workspace-chip ${workspace === 'investigate' ? 'workspace-chip-active' : ''}`}>Investigate</button><button onClick={() => setWorkspace('monitor')} aria-current={workspace === 'monitor' ? 'page' : undefined} className={`workspace-chip ${workspace === 'monitor' ? 'workspace-chip-active' : ''}`}>Monitor</button></nav></div></div>
+    {workspace === 'investigate' && <Investigation />}
     {workspace === 'monitor' && <Suspense fallback={<div className="platform-shell py-8" role="status">Loading Monitor…</div>}><App /></Suspense>}
-    {workspace === 'cases' && <div className="min-h-screen bg-[#0d1628] text-slate-100"><main className="platform-shell py-6"><Suspense fallback={<div className="panel p-6" role="status">Loading case workspace…</div>}><CaseWorkspace initialEvidence={caseEvidence} onEvidenceConsumed={() => setCaseEvidence(null)} /></Suspense></main></div>}
   </div>;
 }

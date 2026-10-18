@@ -39,6 +39,19 @@ export default function TransactionSemanticEvidence({ findings = [] }) {
           <p className="text-white">{String(event.kind).replaceAll('_',' ')}</p>
           <p className="mt-1 break-all">Contract {event.emitter_contract}</p><p className="break-all">{event.from_or_owner} → {event.to_or_spender}</p><p>Raw units: {event.raw_uint256}</p>
         </div>)}
+        {(receipt.swap_event_candidates || []).length > 0 && <div className="mt-4 space-y-3">
+          <h3 className="text-sm font-semibold text-white">Swap event ABI evidence ({receipt.swap_event_candidates.length})</h3>
+          {(receipt.swap_event_candidates || []).slice(0, 12).map((event, i) => <article key={i} className="rounded-xl border border-violet-400/20 bg-violet-400/[0.035] p-3 text-xs text-slate-300">
+            <p className="font-semibold text-violet-200">{event.abi_shape === 'v2_abi' ? 'Uniswap V2-style' : 'Uniswap V3-style'} Swap log</p>
+            <p className="mt-2 break-all">Emitter: {event.emitter_contract}</p>
+            <p className="break-all">Sender: {event.sender}</p>
+            <p className="break-all">Recipient: {event.recipient}</p>
+            <div className="mt-2 grid gap-1 sm:grid-cols-2">
+              {Object.entries(event.raw_amounts || {}).map(([key,value]) => <p className="break-all" key={key}>{key.replaceAll('_', ' ')}: <span className="text-white">{value}</span></p>)}
+            </div>
+            <p className="mt-2 text-amber-200">ABI signature matches; emitting pool and token identities are unverified. Raw token units are not normalized.</p>
+          </article>)}
+        </div>}
         <p className="mt-3 text-xs text-amber-200">{receipt.coverage} Swaps and bridges are not marked confirmed from a receipt alone.</p>
       </>}
     </div>}

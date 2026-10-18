@@ -4,7 +4,7 @@ test('investigation home, validation, and workspace navigation', async ({ page }
   await page.goto('/app/');
   await expect(page.getByRole('heading', { name: 'One wallet. One evidence trail.' })).toBeVisible();
   await page.getByRole('button', { name: 'Investigate wallet' }).click();
-  await expect(page.getByRole('alert')).toContainText('valid Ethereum');
+  await expect(page.getByRole('alert')).toContainText('valid Ethereum address');
   await page.getByRole('button', { name: 'Monitor', exact: true }).click();
   await expect(page.getByRole('navigation', { name: 'Product workspace' }).getByRole('button', { name: 'Monitor' })).toHaveAttribute('aria-current', 'page');
   await page.getByRole('button', { name: 'Cases', exact: true }).click();

@@ -49,7 +49,7 @@ class Database:
             return False
     
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(self, *, isolation=None, readonly=False):
         """Route all repository calls in this task through one atomic DB transaction."""
         if not self.pool:
             raise RuntimeError('Database not connected')
@@ -58,7 +58,7 @@ class Database:
         async with self.pool.acquire() as conn:
             token = self._transaction_connection.set(conn)
             try:
-                async with conn.transaction():
+                async with conn.transaction(isolation=isolation, readonly=readonly):
                     yield
             finally:
                 self._transaction_connection.reset(token)

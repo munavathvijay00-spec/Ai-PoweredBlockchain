@@ -14,7 +14,7 @@ function createRenderer(gl){
 }
 const headerClass='rounded-xl border border-slate-700 bg-[#0b1525] px-3 py-2 text-xs text-slate-200';
 export default function ScalableBubbleInvestigationGraph({transactions=[],rootAddress='',nodeContext={},expandedAddresses=[],onExpandAddress,expandingAddress=''}) {
- const canvasRef=useRef(null),sceneRef=useRef(null),camera=useRef({yaw:.1,pitch:-.12,zoom:1}),pointer=useRef(null),projected=useRef([]),labelRefs=useRef(new Map()),zoomTarget=useRef(null);
+ const canvasRef=useRef(null),sceneRef=useRef(null),camera=useRef({yaw:.1,pitch:-.12,zoom:1}),pointer=useRef(null),projected=useRef([]),lastFrame=useRef(0),labelRefs=useRef(new Map()),zoomTarget=useRef(null);
  const [motion,setMotion]=useState(()=>typeof window!=='undefined'?!window.matchMedia('(prefers-reduced-motion: reduce)').matches:false);
  const [layout,setLayout]=useState(null),[selected,setSelected]=useState(''),[search,setSearch]=useState(''),[asset,setAsset]=useState('ALL'),[error,setError]=useState(''),[balance,setBalance]=useState(null),[loading,setLoading]=useState(false),[isolate,setIsolate]=useState(false);
  const root=norm(rootAddress);
@@ -58,8 +58,12 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
    const dpr=Math.min(devicePixelRatio||1,2);
    const index=new Map(addresses.map((a,i)=>[a,i]));
    let stopped=false,raf;
-   const draw=()=>{
+   const draw=(timestamp)=>{
      if(stopped)return;
+     raf=requestAnimationFrame(draw);
+     // Limit redraws to roughly 30 fps on large graphs; interaction remains responsive.
+     if(timestamp-lastFrame.current<32)return;
+     lastFrame.current=timestamp;
      const w=canvas.clientWidth||1,h=canvas.clientHeight||1;
      const pw=Math.floor(w*dpr),ph=Math.floor(h*dpr);
      if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
@@ -69,12 +73,12 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
      const cy=Math.cos(cam.yaw),sy=Math.sin(cam.yaw),cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
      const pts=addresses.map((id,i)=>{
        const x=layout.positions[i*3],y=layout.positions[i*3+1],z=layout.positions[i*3+2],rx=x*cy+z*sy,rz=-x*sy+z*cy,ry=y*cp-rz*sp,pz=y*sp+rz*cp,scale=950/Math.max(400,950-pz);
-       return {id,x:w/2+rx*scale*cam.zoom,y:h/2+ry*scale*cam.zoom,scale};
+       return {id,x:w/2+rx*scale*cam.zoom,y:h/2+ry*scale*cam.zoom,scale,depth:pz};
      });projected.current=pts;
      for(const [id,element] of labelRefs.current){const point=pts[index.get(id)];const show=point&&visibleSet.has(id);element.style.display=show?'block':'none';if(show)element.style.transform=`translate3d(${point.x}px,${point.y}px,0) translate(-50%,-155%)`;}
      const lines=[];
      const particles=[];
-     const tick=performance.now()*0.00016;
+     const tick=timestamp*0.00016;
      for(const edge of scoped.slice(0,12000)){
        const a=pts[index.get(edge.from)],b=pts[index.get(edge.to)];
        if(!a||!b)continue;
@@ -92,23 +96,25 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
      const buf=renderer.buffer;
      if(lines.length){gl.useProgram(renderer.lines);gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(lines),gl.DYNAMIC_DRAW);const p=gl.getAttribLocation(renderer.lines,'xy'),c=gl.getAttribLocation(renderer.lines,'color');gl.enableVertexAttribArray(p);gl.vertexAttribPointer(p,2,gl.FLOAT,false,24,0);gl.enableVertexAttribArray(c);gl.vertexAttribPointer(c,4,gl.FLOAT,false,24,8);gl.drawArrays(gl.LINES,0,lines.length/6);}
      const values=particles;
-     for(let i=0;i<pts.length;i++){
-       const p=pts[i],id=p.id;
+     // Draw distant spheres first so nearer nodes remain clickable and visible.
+     const drawOrder=pts.map((point,i)=>({point,i})).sort((a,b)=>a.point.depth-b.point.depth);
+     for(const {point:p,i} of drawOrder){
+       const id=p.id;
        if(asset!=='ALL'&&!visibleSet.has(id))continue;
        if(isolate&&selected&&!visibleSet.has(id))continue;
        const color=id===selected?[1,.8,.25]:id===root?[.2,.85,1]:nodeContext[id]?.entityLabels?.length?[.2,.86,.6]:palette[i%palette.length];
        const activity=layout.degree[i]||0;
        const liveEth=id===selected&&balance&&!balance.unavailable?Number(balance.balance_eth??balance.eth??0):0;
        const size=clamp((17+Math.log2(activity+1)*5+(id===root?16:0)+(id===selected?10:0)+(liveEth>0?Math.min(10,Math.log10(1+liveEth)*4):0))*p.scale*cam.zoom,8,72)*dpr;
+       p.hitRadius=size/(2*dpr);
        values.push(p.x/w*2-1,1-p.y/h*2,size,...color);
      }
      if(values.length){gl.useProgram(renderer.points);gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(values),gl.DYNAMIC_DRAW);const p=gl.getAttribLocation(renderer.points,'xy'),s=gl.getAttribLocation(renderer.points,'size'),c=gl.getAttribLocation(renderer.points,'color');gl.enableVertexAttribArray(p);gl.vertexAttribPointer(p,2,gl.FLOAT,false,24,0);gl.enableVertexAttribArray(s);gl.vertexAttribPointer(s,1,gl.FLOAT,false,24,8);gl.enableVertexAttribArray(c);gl.vertexAttribPointer(c,3,gl.FLOAT,false,24,12);gl.drawArrays(gl.POINTS,0,values.length/6);}
-     raf=requestAnimationFrame(draw);
    };
    raf=requestAnimationFrame(draw);
    return()=>{stopped=true;cancelAnimationFrame(raf);gl.deleteBuffer(renderer.buffer);gl.deleteProgram(renderer.points);gl.deleteProgram(renderer.lines);};
  },[layout,addresses,scoped,root,selected,asset,isolate,nodeContext,visibleSet,balance,motion]);
- const selectAt=event=>{if(!pointer.current)return;const dx=event.clientX-pointer.current.x,dy=event.clientY-pointer.current.y;const p=pointer.current;pointer.current=null;if(Math.abs(dx)+Math.abs(dy)>5)return;const rect=event.currentTarget.getBoundingClientRect();const x=event.clientX-rect.left,y=event.clientY-rect.top;let match='',best=26;for(const node of projected.current){const dist=Math.hypot(node.x-x,node.y-y);if(dist<best){best=dist;match=node.id;}}if(match)setSelected(match);};
+ const selectAt=event=>{if(!pointer.current)return;const dx=event.clientX-pointer.current.x,dy=event.clientY-pointer.current.y;const p=pointer.current;pointer.current=null;if(Math.abs(dx)+Math.abs(dy)>5)return;const rect=event.currentTarget.getBoundingClientRect();const x=event.clientX-rect.left,y=event.clientY-rect.top;const visible=projected.current.filter(node=>visibleSet.has(node.id));const hits=visible.filter(node=>Math.hypot(node.x-x,node.y-y)<=Math.max(9,node.hitRadius||10)).sort((a,b)=>b.depth-a.depth);if(hits.length)setSelected(hits[0].id);};
  const focus=()=>{const q=norm(search);const match=addresses.find(a=>a.includes(q));if(q&&match)setSelected(match);};
  const selectedDetails=useMemo(()=>edges.filter(e=>e.from===selected||e.to===selected).slice(0,5),[edges,selected]);
  const metrics=useMemo(()=>({incoming:edges.filter(e=>e.to===selected).length,outgoing:edges.filter(e=>e.from===selected).length,peers:new Set(edges.filter(e=>e.from===selected||e.to===selected).flatMap(e=>[e.from,e.to]).filter(a=>a!==selected)).size}),[edges,selected]);

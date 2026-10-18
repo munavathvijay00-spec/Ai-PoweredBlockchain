@@ -289,5 +289,10 @@ async def transaction_export(
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=chainscope-transactions.csv"},
+        headers={
+            "Content-Disposition": "attachment; filename=chainscope-transactions.csv",
+            "X-Export-Matching-Transactions": str(int(aggregate.get("total") or 0)),
+            "X-Export-Returned-Transactions": str(len(items)),
+            "X-Export-Truncated": "true" if int(aggregate.get("total") or 0) > len(items) else "false",
+        },
     )

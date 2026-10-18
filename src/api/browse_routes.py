@@ -27,10 +27,10 @@ SORT_SQL = {
 CLUSTER_SORT_SQL = {
     "newest": "stats.newest_timestamp DESC, ranked.id DESC",
     "oldest": "stats.oldest_timestamp ASC, ranked.id ASC",
-    "risk_desc": "ranked.risk_score DESC, stats.cluster_count DESC, stats.newest_timestamp DESC",
-    "risk_asc": "ranked.risk_score ASC, stats.cluster_count DESC, stats.newest_timestamp DESC",
-    "value_desc": "ranked.value DESC, stats.newest_timestamp DESC",
-    "value_asc": "ranked.value ASC, stats.newest_timestamp DESC",
+    "risk_desc": "ranked.risk_score DESC, stats.cluster_count DESC, stats.newest_timestamp DESC, ranked.id DESC",
+    "risk_asc": "ranked.risk_score ASC, stats.cluster_count DESC, stats.newest_timestamp DESC, ranked.id DESC",
+    "value_desc": "ranked.value DESC, stats.newest_timestamp DESC, ranked.id DESC",
+    "value_asc": "ranked.value ASC, stats.newest_timestamp DESC, ranked.id DESC",
 }
 
 

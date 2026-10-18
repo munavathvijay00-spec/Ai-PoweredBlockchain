@@ -240,6 +240,10 @@ def validate_claims_payload(payload: Any, contract: dict[str, Any]) -> dict[str,
         )
     if not isinstance(uncertainty, str) or not uncertainty.strip():
         reasons.append("missing_uncertainty")
+    elif len(uncertainty) > 350:
+        reasons.append("uncertainty_too_long")
+    elif any(term in uncertainty.lower() for term in ("confirmed fraud", "proves wrongdoing", "definitely fraudulent", "certainly illicit")):
+        reasons.append("uncertainty_overclaim")
     if not isinstance(claims, list):
         reasons.append("claims_not_array")
         claims = []

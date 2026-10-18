@@ -42,9 +42,10 @@ export default function ClusterTriage({ transactions = [], onSelect, loading = f
       <div className="mt-4 space-y-3">{groups.map(group => {
         const open = !!expanded[group.key];
         const first = new Date(group.hour * 3600000).toISOString().slice(0, 16).replace('T', ' ');
+        const end = new Date((group.hour + 1) * 3600000).toISOString().slice(0, 16).replace('T', ' ');
         return <div key={group.key} className="rounded-lg border border-slate-700 bg-slate-900/40">
           <button type="button" aria-expanded={open} onClick={() => setExpanded(previous => ({ ...previous, [group.key]: !open }))} className="flex w-full flex-wrap items-center justify-between gap-3 p-4 text-left hover:bg-white/[0.025]">
-            <div><p className="font-mono text-sm font-semibold text-slate-100" title={group.address}>{short(group.address)}</p><p className="mt-1 text-xs text-slate-400">{group.items.length} observed page transactions · {first}–{first.slice(0, 11)}{String((group.hour + 1) % 24).padStart(2, '0')}:00 UTC</p></div>
+            <div><p className="font-mono text-sm font-semibold text-slate-100" title={group.address}>{short(group.address)}</p><p className="mt-1 text-xs text-slate-400">{group.items.length} observed page transactions · {first}–{end} UTC</p></div>
             <div className="flex items-center gap-3"><span className="text-xs font-medium text-amber-200">{scoreLabel(group.maxScore)} · {group.maxScore}</span><span className="text-sm text-sky-300">{open ? 'Collapse ▲' : 'Inspect ▼'}</span></div>
           </button>
           {open && <div className="border-t border-slate-700 p-4"><div className="space-y-2">{group.items.map(tx => {

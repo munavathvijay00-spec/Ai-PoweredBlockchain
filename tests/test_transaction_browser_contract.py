@@ -72,9 +72,9 @@ async def test_browser_uses_one_read_only_snapshot_and_consistent_distribution()
         assert db.entered and not db.exited
         return rows, 1
 
-    with patch.object(browse, "_aggregate_population", side_effect=aggregate_query), \\
-         patch.object(browse, "_query_clusters", side_effect=cluster_query), \\
-         patch.object(browse, "_load_entity_matches", new_callable=AsyncMock, return_value={}), \\
+    with patch.object(browse, "_aggregate_population", side_effect=aggregate_query), \
+         patch.object(browse, "_query_clusters", side_effect=cluster_query), \
+         patch.object(browse, "_load_entity_matches", new_callable=AsyncMock, return_value={}), \
          patch.object(browse, "_decorate_row", side_effect=lambda row, *_: row):
         result = await browse.transaction_browser(limit=10, offset=0, search=None,
               min_risk=None, max_risk=None, min_value_eth=None, max_value_eth=None,
@@ -99,8 +99,8 @@ async def test_export_reports_truncation_from_same_snapshot():
     async def query(*_args, **_kwargs):
         assert db.entered and not db.exited
         return rows, {"total": 5001}
-    with patch.object(browse, "_query_population", side_effect=query), \\
-         patch.object(browse, "_load_entity_matches", new_callable=AsyncMock, return_value={}), \\
+    with patch.object(browse, "_query_population", side_effect=query), \
+         patch.object(browse, "_load_entity_matches", new_callable=AsyncMock, return_value={}), \
          patch.object(browse, "_decorate_row", side_effect=lambda row, *_: row):
         result = await browse.transaction_export(format="csv", search=None,
               min_risk=None, max_risk=None, min_value_eth=None,

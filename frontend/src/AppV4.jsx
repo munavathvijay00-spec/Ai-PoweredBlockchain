@@ -5,6 +5,7 @@ const UnifiedInvestigationGraph = lazy(() => import('./components/UnifiedInvesti
 
 import { api } from './api/client';
 import TransactionSemanticEvidence from './components/TransactionSemanticEvidence.jsx';
+import InvestigationTimeline from './components/InvestigationTimeline.jsx';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
 const short = value => value ? `${value.slice(0, 9)}…${value.slice(-6)}` : '—';
@@ -20,8 +21,8 @@ const amount = value => {
 function WorkflowRail({ ready, onCase }) {
   const sections = [
     ['Summary', '#brief-title'], ['Leads', '#explainable-findings-title'],
-    ['Graph', '#unified-graph-title'], ['Timeline', '#semantic-title'],
-    ['Evidence', '#token-explorer-title'], ['Report', '#findings-title'],
+    ['Graph', '#unified-graph-title'], ['Timeline', '#timeline-title'],
+    ['Evidence', '#semantic-title'], ['Report', '#report-title'],
   ];
   return <nav className="panel flex flex-wrap items-center gap-2 p-3" aria-label="Investigation sections">
     {sections.map(([label, target]) => <a key={label} href={target} className="rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-medium text-slate-200 hover:border-cyan-400/40 hover:text-cyan-200">{label}</a>)}
@@ -66,7 +67,7 @@ function Findings({ report, copilot }) {
   const signals = report?.behavioral_signals || [];
   const claims = copilot?.claims || [];
   if (!signals.length && !copilot) return null;
-  return <section className="space-y-5">
+  return <section id="report-title" className="space-y-5" aria-label="Evidence and AI findings">
     {signals.length > 0 && <div className="panel p-5"><p className="eyebrow">Deterministic findings</p><h2 className="mt-2 text-lg font-semibold text-white">Behavior requiring review</h2><div className="mt-4 grid gap-3 lg:grid-cols-2">{signals.map((signal, index) => <article key={`${signal.code}-${index}`} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><p className="font-medium text-white">{signal.title || signal.code}</p><p className="mt-2 text-sm leading-6 text-slate-400">{signal.explanation}</p><div className="mt-3 flex flex-wrap gap-2">{(signal.evidence || []).slice(0, 5).map(item => <a key={item.tx_hash} href={item.url || `https://etherscan.io/tx/${item.tx_hash}`} target="_blank" rel="noreferrer" className="text-xs text-cyan-300 underline">Verify {short(item.tx_hash)} ↗</a>)}</div></article>)}</div></div>}
     {copilot && <div className="panel-strong p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow">Grounded AI</p><h2 className="mt-2 text-lg font-semibold text-white">Claims tied to evidence</h2></div><span className={`status-pill ${copilot.grounded ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-200' : 'border-amber-400/20 bg-amber-400/[0.06] text-amber-200'}`}>{copilot.grounded ? 'grounded' : 'fallback'}</span></div><div className="mt-5 grid gap-4 lg:grid-cols-2">{claims.map((claim, index) => <article key={index} className="rounded-xl border border-slate-700 bg-slate-950/35 p-4"><p className="text-sm leading-6 text-slate-100">{claim.text}</p><div className="mt-3 flex flex-wrap gap-2">{(claim.finding_ids || []).map(id => <span key={id} className="rounded border border-violet-400/20 bg-violet-400/[0.05] px-2 py-1 font-mono text-xs text-violet-200">{id}</span>)}</div>{(claim.citations || []).flatMap(citation => citation.evidence_urls || []).map(url => <a key={url} href={url} target="_blank" rel="noreferrer" className="mt-2 mr-3 inline-block text-xs text-sky-300 underline">Verify transaction ↗</a>)}</article>)}</div>{copilot.uncertainty && <p className="mt-5 rounded-lg border border-amber-400/15 bg-amber-400/[0.04] px-4 py-3 text-sm leading-6 text-amber-100">Uncertainty: {copilot.uncertainty}</p>}</div>}
   </section>;
@@ -122,6 +123,7 @@ function Investigation({ onSendToCase }) {
     {wallet && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Investigation summary"><div className="panel p-4"><p className="eyebrow">Wallet</p><a href={`https://etherscan.io/address/${wallet}`} target="_blank" rel="noreferrer" className="mt-3 block font-mono text-sm text-cyan-300">{short(wallet)} ↗</a></div><div className="panel p-4"><p className="eyebrow">Native in</p><p className="mt-3 text-xl font-semibold text-emerald-300">{flow ? eth(flow.flow_summary?.observed_incoming_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Native out</p><p className="mt-3 text-xl font-semibold text-amber-200">{flow ? eth(flow.flow_summary?.observed_outgoing_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Token assets</p><p className="mt-3 text-xl font-semibold text-violet-200">{flow?.token_flow?.assets?.length ?? '—'}</p></div><div className="panel p-4"><p className="eyebrow">AI findings</p><p className="mt-3 text-xl font-semibold text-slate-100">{copilot?.claims?.length || 0}</p></div></section>}
     {wallet && <IntelligenceBrief wallet={wallet} flow={flow} report={report} coverage={coverage} copilot={copilot} />}
     {wallet && <Suspense fallback={<div className="panel p-6" role="status">Loading investigation graph…</div>}><UnifiedInvestigationGraph wallet={wallet} fundFlow={flow} /></Suspense>}
+    {flow && <InvestigationTimeline tokenFlow={flow.token_flow} />}
     {flow && <TransactionSemanticEvidence findings={flow.transaction_semantics || []} />}
 
     <Findings report={report} copilot={copilot} />

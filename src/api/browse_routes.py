@@ -44,11 +44,16 @@ def _where(search: str | None, min_risk: int | None, max_risk: int | None,
         clauses.append(sql.replace("?", f"${len(args)}"))
 
     if search:
-        value = f"%{search.strip().lower()}%"
+        # Treat wallet hashes and addresses as literal substrings. Unescaped
+        # '%' and '_' would otherwise produce unexpectedly broad matches.
+        term = search.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        value = f"%{term}%"
         args.extend([value, value, value])
         n = len(args)
         clauses.append(
-            f"(lower(t.hash) LIKE ${n-2} OR lower(a_from.address) LIKE ${n-1} OR lower(a_to.address) LIKE ${n})"
+            f"(lower(t.hash) LIKE ${n-2} ESCAPE E'\\\\' OR "
+            f"lower(a_from.address) LIKE ${n-1} ESCAPE E'\\\\' OR "
+            f"lower(a_to.address) LIKE ${n} ESCAPE E'\\\\')"
         )
     if min_risk is not None:
         add("t.risk_score >= ?", int(min_risk))

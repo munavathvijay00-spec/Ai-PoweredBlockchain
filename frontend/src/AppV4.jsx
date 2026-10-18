@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import App from './App.jsx';
-import CaseWorkspace from './components/CaseWorkspace.jsx';
-import UnifiedInvestigationGraph from './components/UnifiedInvestigationGraph.jsx';
+import { lazy, Suspense, useMemo, useState } from 'react';
+const App = lazy(() => import('./App.jsx'));
+const CaseWorkspace = lazy(() => import('./components/CaseWorkspace.jsx'));
+const UnifiedInvestigationGraph = lazy(() => import('./components/UnifiedInvestigationGraph.jsx'));
+
 import { api } from './api/client';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
@@ -123,7 +124,7 @@ function Investigation({ onSendToCase }) {
     <WorkflowRail ready={Boolean(wallet)} onCase={sendCase} />
     {wallet && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Investigation summary"><div className="panel p-4"><p className="eyebrow">Wallet</p><a href={`https://etherscan.io/address/${wallet}`} target="_blank" rel="noreferrer" className="mt-3 block font-mono text-sm text-cyan-300">{short(wallet)} ↗</a></div><div className="panel p-4"><p className="eyebrow">Native in</p><p className="mt-3 text-xl font-semibold text-emerald-300">{flow ? eth(flow.flow_summary?.observed_incoming_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Native out</p><p className="mt-3 text-xl font-semibold text-amber-200">{flow ? eth(flow.flow_summary?.observed_outgoing_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Token assets</p><p className="mt-3 text-xl font-semibold text-violet-200">{flow?.token_flow?.assets?.length ?? '—'}</p></div><div className="panel p-4"><p className="eyebrow">AI findings</p><p className="mt-3 text-xl font-semibold text-slate-100">{copilot?.claims?.length || 0}</p></div></section>}
     {wallet && <IntelligenceBrief wallet={wallet} flow={flow} report={report} coverage={coverage} copilot={copilot} />}
-    {wallet && <UnifiedInvestigationGraph wallet={wallet} fundFlow={flow} />}
+    {wallet && <Suspense fallback={<div className="panel p-6" role="status">Loading investigation graph…</div>}><UnifiedInvestigationGraph wallet={wallet} fundFlow={flow} /></Suspense>}
     {flow && <AssetIntelligence tokenFlow={flow.token_flow} />}
     {flow?.directed_paths?.length > 0 && <section className="panel p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow">Native path evidence</p><h2 className="mt-2 text-lg font-semibold text-white">Directed paths</h2></div><span className="text-sm text-slate-300">{flow.directed_paths.length} paths</span></div><p className="mt-2 text-sm text-amber-200">Path floor is the minimum observed ETH transfer on a path. It is not taint attribution.</p><div className="mt-4 grid gap-3 lg:grid-cols-2">{flow.directed_paths.slice(0, 30).map((path, index) => <div key={`${index}-${path.tx_hashes?.join('-')}`} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><div className="flex flex-wrap gap-2 text-xs text-slate-300"><span>{path.hop_count} hop{path.hop_count === 1 ? '' : 's'}</span><span>·</span><span>{eth(path.path_min_value_wei)} ETH floor</span><span>·</span><span>max risk {path.max_risk_score}</span></div><div className="mt-3 flex flex-wrap items-center gap-1.5 font-mono text-xs">{(path.addresses || []).map((item, i) => <span key={`${item}-${i}`} className="flex items-center gap-1.5"><a href={`https://etherscan.io/address/${item}`} target="_blank" rel="noreferrer" className="text-cyan-300">{short(item)}</a>{i < path.addresses.length - 1 && <span className="text-slate-600">→</span>}</span>)}</div></div>)}</div></section>}
     <Findings report={report} copilot={copilot} />
@@ -141,7 +142,7 @@ export default function AppV4() {
   return <div className="min-h-screen bg-[#0d1628]">
     <div className="sticky top-0 z-[80] border-b border-slate-800 bg-[#09111f]/95 px-3 py-2 backdrop-blur"><div className="mx-auto flex max-w-[1540px] flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="text-sm font-semibold tracking-[0.15em] text-cyan-300">CHAINSCOPE</span><span className="hidden text-xs text-slate-400 sm:inline">Investigation OS</span></div><nav className="flex max-w-full gap-1 overflow-x-auto" aria-label="Product workspace"><button onClick={() => setWorkspace('investigate')} aria-current={workspace === 'investigate' ? 'page' : undefined} className={`workspace-chip ${workspace === 'investigate' ? 'workspace-chip-active' : ''}`}>Investigate</button><button onClick={() => setWorkspace('monitor')} aria-current={workspace === 'monitor' ? 'page' : undefined} className={`workspace-chip ${workspace === 'monitor' ? 'workspace-chip-active' : ''}`}>Monitor</button><button onClick={() => setWorkspace('cases')} aria-current={workspace === 'cases' ? 'page' : undefined} className={`workspace-chip ${workspace === 'cases' ? 'workspace-chip-active' : ''}`}>Cases</button></nav></div></div>
     {workspace === 'investigate' && <Investigation onSendToCase={sendWalletToCase} />}
-    {workspace === 'monitor' && <App />}
-    {workspace === 'cases' && <div className="min-h-screen bg-[#0d1628] text-slate-100"><main className="platform-shell py-6"><CaseWorkspace initialEvidence={caseEvidence} onEvidenceConsumed={() => setCaseEvidence(null)} /></main></div>}
+    {workspace === 'monitor' && <Suspense fallback={<div className="platform-shell py-8" role="status">Loading Monitor…</div>}><App /></Suspense>}
+    {workspace === 'cases' && <div className="min-h-screen bg-[#0d1628] text-slate-100"><main className="platform-shell py-6"><Suspense fallback={<div className="panel p-6" role="status">Loading case workspace…</div>}><CaseWorkspace initialEvidence={caseEvidence} onEvidenceConsumed={() => setCaseEvidence(null)} /></Suspense></main></div>}
   </div>;
 }

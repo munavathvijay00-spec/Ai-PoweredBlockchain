@@ -20,7 +20,7 @@ test('graceful investigation failure never claims completed evidence', async ({ 
   await page.goto('/app/');
   await page.getByRole('textbox', { name: 'Ethereum wallet address' }).fill('0x1111111111111111111111111111111111111111');
   await page.getByRole('button', { name: 'Investigate wallet' }).click();
-  await expect(page.getByRole('alert')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByRole('alert').first()).toBeVisible({ timeout: 20000 });
 });
 
 test('rate limiting surfaces an error rather than a success report', async ({ page }) => {
@@ -31,7 +31,7 @@ test('rate limiting surfaces an error rather than a success report', async ({ pa
   await page.goto('/app/');
   await page.getByRole('textbox',{name:'Ethereum wallet address'}).fill('0x1111111111111111111111111111111111111111');
   await page.getByRole('button',{name:'Investigate wallet'}).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('alert').first()).toBeVisible();
   await expect(page.getByRole('heading',{name:'What matters first'})).toHaveCount(1);
 });
 
@@ -44,7 +44,7 @@ test('slow backend keeps an explicit loading state', async ({ page }) => {
   await page.getByRole('textbox',{name:'Ethereum wallet address'}).fill('0x1111111111111111111111111111111111111111');
   await page.getByRole('button',{name:'Investigate wallet'}).click();
   await expect(page.getByRole('button',{name:'Building intelligence…'})).toBeDisabled();
-  await expect(page.getByRole('alert')).toBeVisible({timeout:20000});
+  await expect(page.getByRole('alert').first()).toBeVisible({timeout:20000});
 });
 
 test('bounded empty evidence remains an explicit empty state', async ({ page }) => {

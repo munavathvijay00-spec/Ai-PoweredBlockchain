@@ -1,0 +1,32 @@
+name: Transaction browser regression
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/api/browse_routes.py"
+      - "src/database/connection.py"
+      - "tests/test_transaction_browser_contract.py"
+      - ".github/workflows/transaction-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  browser-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ALCHEMY_API_KEY: ci-placeholder
+      ETHEREUM_RPC_URL: http://127.0.0.1:8545
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      API_KEY: ci-local-secret-not-for-deployment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install pinned application and test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run browser regression contracts
+        run: python -m pytest tests/test_transaction_browser_contract.py -q --no-cov

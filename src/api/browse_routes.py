@@ -199,22 +199,23 @@ async def transaction_browser(
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
     where_sql, where_args = _where(search, min_risk, max_risk, min_value_eth, max_value_eth)
-    aggregate = await _aggregate_population(repo, where_sql, where_args)
-    transaction_total = int(aggregate.get("total") or 0)
+    async with repo.db.transaction(isolation="repeatable_read", readonly=True):
+        aggregate = await _aggregate_population(repo, where_sql, where_args)
+        transaction_total = int(aggregate.get("total") or 0)
 
-    if clustered:
-        rows, queue_total = await _query_clusters(
-            repo, search=search, min_risk=min_risk, max_risk=max_risk,
-            min_value_eth=min_value_eth, max_value_eth=max_value_eth,
-            limit=limit, offset=offset, sort=sort,
-        )
-    else:
-        rows, _ = await _query_population(
-            repo, search=search, min_risk=min_risk, max_risk=max_risk,
-            min_value_eth=min_value_eth, max_value_eth=max_value_eth,
-            limit=limit, offset=offset, sort=sort,
-        )
-        queue_total = transaction_total
+        if clustered:
+            rows, queue_total = await _query_clusters(
+                repo, search=search, min_risk=min_risk, max_risk=max_risk,
+                min_value_eth=min_value_eth, max_value_eth=max_value_eth,
+                limit=limit, offset=offset, sort=sort,
+            )
+        else:
+            rows, _ = await _query_population(
+                repo, search=search, min_risk=min_risk, max_risk=max_risk,
+                min_value_eth=min_value_eth, max_value_eth=max_value_eth,
+                limit=limit, offset=offset, sort=sort,
+            )
+            queue_total = transaction_total
 
     matches = await _load_entity_matches(repo, rows)
     formatted = [_decorate_row(row, matches, clustered) for row in rows]
@@ -262,11 +263,12 @@ async def transaction_export(
     sort: Literal["newest", "oldest", "risk_desc", "risk_asc", "value_desc", "value_asc"] = "risk_desc",
     repo: TransactionRepository = Depends(get_transaction_repo),
 ):
-    rows, aggregate = await _query_population(
-        repo, search=search, min_risk=min_risk, max_risk=max_risk,
-        min_value_eth=min_value_eth, max_value_eth=max_value_eth,
-        limit=5000, offset=0, sort=sort,
-    )
+    async with repo.db.transaction(isolation="repeatable_read", readonly=True):
+        rows, aggregate = await _query_population(
+            repo, search=search, min_risk=min_risk, max_risk=max_risk,
+            min_value_eth=min_value_eth, max_value_eth=max_value_eth,
+            limit=5000, offset=0, sort=sort,
+        )
     matches = await _load_entity_matches(repo, rows)
     items = [_decorate_row(row, matches, False) for row in rows]
     if format == "json":

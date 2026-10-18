@@ -21,6 +21,7 @@ jobs:
       - run: npm ci
       - run: npm install --no-save @playwright/test
       - run: npx playwright install --with-deps chromium
+      - run: node tests/graph-layout-stress.mjs
       - run: npm run build
       - run: npx playwright test --config=playwright.config.js
       - uses: actions/upload-artifact@v4

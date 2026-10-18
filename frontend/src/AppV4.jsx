@@ -4,6 +4,8 @@ const CaseWorkspace = lazy(() => import('./components/CaseWorkspace.jsx'));
 const UnifiedInvestigationGraph = lazy(() => import('./components/UnifiedInvestigationGraph.jsx'));
 
 import { api } from './api/client';
+import TransactionSemanticEvidence from './components/TransactionSemanticEvidence.jsx';
+import InvestigationTimeline from './components/InvestigationTimeline.jsx';
 
 const VALID = /^0x[a-fA-F0-9]{40}$/;
 const short = value => value ? `${value.slice(0, 9)}…${value.slice(-6)}` : '—';
@@ -17,19 +19,15 @@ const amount = value => {
 };
 
 function WorkflowRail({ ready, onCase }) {
-  const steps = [['1', 'Search'], ['2', 'Brief'], ['3', 'Graph'], ['4', 'Findings'], ['5', 'Case']];
-  return <div className="panel overflow-x-auto p-3" role="region" tabIndex={0} aria-label="Investigation workflow">
-    <div className="flex min-w-[620px] items-center gap-2">
-      {steps.map(([number, label], index) => <div key={label} className="flex flex-1 items-center gap-2">
-        <div className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 ${ready || index === 0 ? 'border-cyan-400/20 bg-cyan-400/[0.04]' : 'border-slate-800 bg-slate-950/25'}`}>
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-600 text-[11px] text-slate-300">{number}</span>
-          <span className="truncate text-xs font-medium text-slate-200">{label}</span>
-        </div>
-        {index < steps.length - 1 && <span className="text-slate-600">→</span>}
-      </div>)}
-      {ready && <button type="button" onClick={onCase} className="secondary-button ml-2 whitespace-nowrap py-2 text-xs">Add to case</button>}
-    </div>
-  </div>;
+  const sections = [
+    ['Summary', '#brief-title'], ['Leads', '#explainable-findings-title'],
+    ['Graph', '#unified-graph-title'], ['Timeline', '#timeline-title'],
+    ['Evidence', '#semantic-title'], ['Report', '#report-title'],
+  ];
+  return <nav className="panel flex flex-wrap items-center gap-2 p-3" aria-label="Investigation sections">
+    {sections.map(([label, target]) => <a key={label} href={target} className="rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-medium text-slate-200 hover:border-cyan-400/40 hover:text-cyan-200">{label}</a>)}
+    {ready && <button type="button" onClick={onCase} className="secondary-button ml-auto py-2 text-xs">Add to case</button>}
+  </nav>;
 }
 
 function IntelligenceBrief({ wallet, flow, report, coverage, copilot }) {
@@ -69,7 +67,7 @@ function Findings({ report, copilot }) {
   const signals = report?.behavioral_signals || [];
   const claims = copilot?.claims || [];
   if (!signals.length && !copilot) return null;
-  return <section className="space-y-5">
+  return <section id="report-title" className="space-y-5" aria-label="Evidence and AI findings">
     {signals.length > 0 && <div className="panel p-5"><p className="eyebrow">Deterministic findings</p><h2 className="mt-2 text-lg font-semibold text-white">Behavior requiring review</h2><div className="mt-4 grid gap-3 lg:grid-cols-2">{signals.map((signal, index) => <article key={`${signal.code}-${index}`} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><p className="font-medium text-white">{signal.title || signal.code}</p><p className="mt-2 text-sm leading-6 text-slate-400">{signal.explanation}</p><div className="mt-3 flex flex-wrap gap-2">{(signal.evidence || []).slice(0, 5).map(item => <a key={item.tx_hash} href={item.url || `https://etherscan.io/tx/${item.tx_hash}`} target="_blank" rel="noreferrer" className="text-xs text-cyan-300 underline">Verify {short(item.tx_hash)} ↗</a>)}</div></article>)}</div></div>}
     {copilot && <div className="panel-strong p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow">Grounded AI</p><h2 className="mt-2 text-lg font-semibold text-white">Claims tied to evidence</h2></div><span className={`status-pill ${copilot.grounded ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-200' : 'border-amber-400/20 bg-amber-400/[0.06] text-amber-200'}`}>{copilot.grounded ? 'grounded' : 'fallback'}</span></div><div className="mt-5 grid gap-4 lg:grid-cols-2">{claims.map((claim, index) => <article key={index} className="rounded-xl border border-slate-700 bg-slate-950/35 p-4"><p className="text-sm leading-6 text-slate-100">{claim.text}</p><div className="mt-3 flex flex-wrap gap-2">{(claim.finding_ids || []).map(id => <span key={id} className="rounded border border-violet-400/20 bg-violet-400/[0.05] px-2 py-1 font-mono text-xs text-violet-200">{id}</span>)}</div>{(claim.citations || []).flatMap(citation => citation.evidence_urls || []).map(url => <a key={url} href={url} target="_blank" rel="noreferrer" className="mt-2 mr-3 inline-block text-xs text-sky-300 underline">Verify transaction ↗</a>)}</article>)}</div>{copilot.uncertainty && <p className="mt-5 rounded-lg border border-amber-400/15 bg-amber-400/[0.04] px-4 py-3 text-sm leading-6 text-amber-100">Uncertainty: {copilot.uncertainty}</p>}</div>}
   </section>;
@@ -125,8 +123,9 @@ function Investigation({ onSendToCase }) {
     {wallet && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Investigation summary"><div className="panel p-4"><p className="eyebrow">Wallet</p><a href={`https://etherscan.io/address/${wallet}`} target="_blank" rel="noreferrer" className="mt-3 block font-mono text-sm text-cyan-300">{short(wallet)} ↗</a></div><div className="panel p-4"><p className="eyebrow">Native in</p><p className="mt-3 text-xl font-semibold text-emerald-300">{flow ? eth(flow.flow_summary?.observed_incoming_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Native out</p><p className="mt-3 text-xl font-semibold text-amber-200">{flow ? eth(flow.flow_summary?.observed_outgoing_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Token assets</p><p className="mt-3 text-xl font-semibold text-violet-200">{flow?.token_flow?.assets?.length ?? '—'}</p></div><div className="panel p-4"><p className="eyebrow">AI findings</p><p className="mt-3 text-xl font-semibold text-slate-100">{copilot?.claims?.length || 0}</p></div></section>}
     {wallet && <IntelligenceBrief wallet={wallet} flow={flow} report={report} coverage={coverage} copilot={copilot} />}
     {wallet && <Suspense fallback={<div className="panel p-6" role="status">Loading investigation graph…</div>}><UnifiedInvestigationGraph wallet={wallet} fundFlow={flow} /></Suspense>}
-    {flow && <AssetIntelligence tokenFlow={flow.token_flow} />}
-    {flow?.directed_paths?.length > 0 && <section className="panel p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow">Native path evidence</p><h2 className="mt-2 text-lg font-semibold text-white">Directed paths</h2></div><span className="text-sm text-slate-300">{flow.directed_paths.length} paths</span></div><p className="mt-2 text-sm text-amber-200">Path floor is the minimum observed ETH transfer on a path. It is not taint attribution.</p><div className="mt-4 grid gap-3 lg:grid-cols-2">{flow.directed_paths.slice(0, 30).map((path, index) => <div key={`${index}-${path.tx_hashes?.join('-')}`} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><div className="flex flex-wrap gap-2 text-xs text-slate-300"><span>{path.hop_count} hop{path.hop_count === 1 ? '' : 's'}</span><span>·</span><span>{eth(path.path_min_value_wei)} ETH floor</span><span>·</span><span>max risk {path.max_risk_score}</span></div><div className="mt-3 flex flex-wrap items-center gap-1.5 font-mono text-xs">{(path.addresses || []).map((item, i) => <span key={`${item}-${i}`} className="flex items-center gap-1.5"><a href={`https://etherscan.io/address/${item}`} target="_blank" rel="noreferrer" className="text-cyan-300">{short(item)}</a>{i < path.addresses.length - 1 && <span className="text-slate-600">→</span>}</span>)}</div></div>)}</div></section>}
+    {flow && <InvestigationTimeline tokenFlow={flow.token_flow} />}
+    {flow && <TransactionSemanticEvidence findings={flow.transaction_semantics || []} />}
+
     <Findings report={report} copilot={copilot} />
     {wallet && <section className="panel-strong flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="eyebrow text-cyan-300">Preserve evidence</p><h2 className="mt-2 text-lg font-semibold text-white">Continue in a case</h2><p className="mt-2 max-w-2xl text-sm text-slate-300">Carry the investigated wallet and evidence summary directly into Case Management.</p></div><button type="button" onClick={sendCase} className="primary-button whitespace-nowrap">Add investigation to case</button></section>}
   </main></div>;

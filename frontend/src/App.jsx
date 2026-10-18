@@ -9,14 +9,12 @@ import WalletGraphWorkspace from './components/WalletGraphWorkspace';
 import WalletInvestigator from './components/WalletInvestigator';
 import AddressDirectory from './components/AddressDirectory';
 import ClusterTriage from './components/ClusterTriage';
-import CaseManagement from './components/CaseManagement';
 
 const NAV = [
   { id: 'transactions', label: 'Live monitor' },
   { id: 'addresses', label: 'Addresses' },
   { id: 'wallet', label: 'Wallet intelligence' },
   { id: 'investigate', label: 'Flow workspace' },
-  { id: 'cases', label: 'Cases' },
   { id: 'system', label: 'System coverage' },
 ];
 
@@ -224,7 +222,6 @@ export default function App() {
         {view === 'addresses' && <AddressDirectory onFilterTransactions={filterByAddress} />}
         {view === 'wallet' && <WalletInvestigator />}
         {view === 'investigate' && <WalletGraphWorkspace flagged={flagged} onSelect={inspectTransaction} />}
-        {view === 'cases' && <CaseManagement />}
         {view === 'system' && <SystemCoverage coverage={coverage} />}
       </main>
 

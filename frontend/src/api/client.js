@@ -123,6 +123,7 @@ export const api = {
   recordAnalystEvent: (hash, payload) => request(`/analyst/transactions/${encodeURIComponent(hash)}/events`, 12000, jsonOptions(payload, true)),
   getAnalystAudit: (hash, limit = 100) => request(`/analyst/transactions/${encodeURIComponent(hash)}/audit?limit=${limit}`),
   getTransactionEvents: hash => request(`/transactions/${encodeURIComponent(hash)}/events`),
+  getReceiptEvidence: hash => request(`/wallets/tx/${encodeURIComponent(hash)}/receipt-evidence`, 20000),
   getWalletBalance: address => request(`/wallets/${encodeURIComponent(address)}/balance`, 15000),
   getWalletTransfers: (address, cursors = {}, directions = { outgoing: true, incoming: true }) => {
     const params = new URLSearchParams({ per_direction: '25' });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-const code=readFileSync(new URL('../../src/workers/graphLayout.worker.js',import.meta.url),'utf8');
+const code=readFileSync(new URL('../src/workers/graphLayout.worker.js',import.meta.url),'utf8');
 const host={postMessage(message){host.message=message;}};
 const context={self:host,Float32Array,Uint32Array,Map,Set,Math,Number,String};
 vm.runInNewContext(code,context);

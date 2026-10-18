@@ -21,6 +21,7 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
  const addresses=useMemo(()=>[...new Set([...edges.flatMap(e=>[e.from,e.to]),...(root?[root]:[])])],[edges,root]);
  const assets=useMemo(()=>['ALL',...[...new Set(edges.map(e=>e.asset))].sort()],[edges]);
  const scoped=useMemo(()=>edges.filter(e=>(asset==='ALL'||e.asset===asset)&&(!isolate||!selected||e.from===selected||e.to===selected)),[edges,asset,isolate,selected]);
+ const visibleSet=useMemo(()=>new Set([...scoped.flatMap(e=>[e.from,e.to]),root]),[scoped,root]);
  const addressesKey=addresses.join(',');
  const edgeKey=edges.map(e=>e.from+e.to).join(',');
  useEffect(()=>{
@@ -78,11 +79,12 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
      const values=[];
      for(let i=0;i<pts.length;i++){
        const p=pts[i],id=p.id;
-       if(asset!=='ALL'&&!scoped.some(e=>e.from===id||e.to===id)&&id!==root)continue;
-       if(isolate&&selected&&id!==selected&&!scoped.some(e=>e.from===id||e.to===id))continue;
+       if(asset!=='ALL'&&!visibleSet.has(id))continue;
+       if(isolate&&selected&&!visibleSet.has(id))continue;
        const color=id===selected?[1,.8,.25]:id===root?[.2,.85,1]:nodeContext[id]?.entityLabels?.length?[.2,.86,.6]:palette[i%palette.length];
        const activity=layout.degree[i]||0;
-       const size=clamp((15+Math.log2(activity+1)*5+(id===root?13:0))*p.scale*cam.zoom,7,60)*dpr;
+       const liveEth=id===selected&&balance&&!balance.unavailable?Number(balance.balance_eth??balance.eth??0):0;
+       const size=clamp((15+Math.log2(activity+1)*5+(id===root?13:0)+(liveEth>0?Math.min(10,Math.log10(1+liveEth)*4):0))*p.scale*cam.zoom,7,60)*dpr;
        values.push(p.x/w*2-1,1-p.y/h*2,size,...color);
      }
      if(values.length){gl.useProgram(renderer.points);gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(values),gl.DYNAMIC_DRAW);const p=gl.getAttribLocation(renderer.points,'xy'),s=gl.getAttribLocation(renderer.points,'size'),c=gl.getAttribLocation(renderer.points,'color');gl.enableVertexAttribArray(p);gl.vertexAttribPointer(p,2,gl.FLOAT,false,24,0);gl.enableVertexAttribArray(s);gl.vertexAttribPointer(s,1,gl.FLOAT,false,24,8);gl.enableVertexAttribArray(c);gl.vertexAttribPointer(c,3,gl.FLOAT,false,24,12);gl.drawArrays(gl.POINTS,0,values.length/6);}
@@ -90,7 +92,7 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
    };
    raf=requestAnimationFrame(draw);
    return()=>{stopped=true;cancelAnimationFrame(raf);gl.deleteBuffer(renderer.buffer);gl.deleteProgram(renderer.points);gl.deleteProgram(renderer.lines);};
- },[layout,addresses,scoped,root,selected,asset,isolate,nodeContext]);
+ },[layout,addresses,scoped,root,selected,asset,isolate,nodeContext,visibleSet,balance]);
  const selectAt=event=>{if(!pointer.current)return;const dx=event.clientX-pointer.current.x,dy=event.clientY-pointer.current.y;const p=pointer.current;pointer.current=null;if(Math.abs(dx)+Math.abs(dy)>5)return;const rect=event.currentTarget.getBoundingClientRect();const x=event.clientX-rect.left,y=event.clientY-rect.top;let match='',best=26;for(const node of projected.current){const dist=Math.hypot(node.x-x,node.y-y);if(dist<best){best=dist;match=node.id;}}if(match)setSelected(match);};
  const focus=()=>{const q=norm(search);const match=addresses.find(a=>a.includes(q));if(q&&match)setSelected(match);};
  const metrics=useMemo(()=>({incoming:edges.filter(e=>e.to===selected).length,outgoing:edges.filter(e=>e.from===selected).length,peers:new Set(edges.filter(e=>e.from===selected||e.to===selected).flatMap(e=>[e.from,e.to]).filter(a=>a!==selected)).size}),[edges,selected]);

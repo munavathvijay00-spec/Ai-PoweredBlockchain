@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.dependencies import get_transaction_repo
 from src.database.repositories import TransactionRepository
+from src.risk.tx_semantics import summarize_transfer_semantics
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet intelligence"])
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -463,6 +464,7 @@ async def fund_flow_investigation(
         "directed_paths": paths,
         "entity_exposures": exposures,
         "token_flow": token_flow,
+        "transaction_semantics": summarize_transfer_semantics(edges, token_flow.get("edges", [])),
         "motifs": _motifs(edges),
         "coverage": {"truncated": truncated, "hop_stats": hop_stats, "historical_completeness": False, "edge_limit": limit},
         "methodology": {
@@ -470,6 +472,7 @@ async def fund_flow_investigation(
             "token_flow": "one-hop provider-indexed cached ERC-20 evidence, aggregated per token contract without cross-asset conversion",
             "entity_matching": "source-attributed exact-address labels only; no inferred beneficial ownership",
             "scope": "bounded retained native ETH graph plus separately scoped cached ERC-20 evidence",
+            "transaction_semantics": "co-occurring evidence only; no swap/bridge confirmation without decoded receipts, logs and execution traces",
         },
         "warning": (
             "Exposure means an observed bounded path reaches a source-labeled address. It is not proof that the root controls "

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 
-const BubbleInvestigationGraph = lazy(() => import('./BubbleInvestigationGraph'));
+const BubbleInvestigationGraph = lazy(() => import('./ScalableBubbleInvestigationGraph'));
 const normalized = value => String(value || '').toLowerCase();
 const short = value => value ? `${value.slice(0, 8)}…${value.slice(-5)}` : '—';
 const edgeKey = edge => [edge.tx_hash, normalized(edge.source), normalized(edge.target), edge.asset, edge.category, edge.value].join('|');

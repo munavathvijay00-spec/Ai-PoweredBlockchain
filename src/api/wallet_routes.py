@@ -96,3 +96,31 @@ async def wallet_live_balance(address: str):
         raise HTTPException(status_code=502, detail="Could not retrieve verified Ethereum balance") from exc
     finally:
         await client.close()
+
+
+@router.get("/tx/{tx_hash}/receipt-evidence")
+async def transaction_receipt_evidence(tx_hash: str):
+    """Read-only mainnet transaction evidence pinned to its confirmed receipt."""
+    from src.blockchain.client import BlockchainClient
+    from src.risk.receipt_semantics import HASH, decode_receipt_evidence
+
+    if not HASH.fullmatch(tx_hash):
+        raise HTTPException(status_code=422, detail="Invalid Ethereum transaction hash")
+
+    client = BlockchainClient()
+    try:
+        if not await client.connect():
+            raise HTTPException(status_code=503, detail="Ethereum mainnet RPC unavailable")
+        transaction = await client.w3.eth.get_transaction(tx_hash)
+        receipt = await client.w3.eth.get_transaction_receipt(tx_hash)
+        return decode_receipt_evidence(tx_hash, dict(transaction), dict(receipt))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        kind = type(exc).__name__
+        logger.warning("Receipt evidence lookup failed error_type={}", kind)
+        if kind in {"TransactionNotFound", "TransactionNotFoundError"}:
+            raise HTTPException(status_code=404, detail="Transaction receipt not found") from exc
+        raise HTTPException(status_code=502, detail="Verified transaction receipt unavailable") from exc
+    finally:
+        await client.close()

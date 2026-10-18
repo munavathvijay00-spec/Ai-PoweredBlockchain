@@ -48,7 +48,7 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
  },[layout]);
  useEffect(()=>{
    const canvas=canvasRef.current;if(!canvas||!layout)return undefined;
-   const gl=canvas.getContext('webgl',{alpha:false,antialias:true});
+   const gl=canvas.getContext('webgl',{alpha:true,antialias:true});
    if(!gl){setError('WebGL unavailable in this browser');return undefined;}
    let renderer;try{renderer=createRenderer(gl);}catch(e){setError('WebGL shader failed: '+e.message);return undefined;}
    gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
@@ -60,7 +60,7 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
      const w=canvas.clientWidth||1,h=canvas.clientHeight||1;
      const pw=Math.floor(w*dpr),ph=Math.floor(h*dpr);
      if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
-     gl.viewport(0,0,pw,ph);gl.clearColor(.014,.031,.058,1);gl.clear(gl.COLOR_BUFFER_BIT);
+     gl.viewport(0,0,pw,ph);gl.clearColor(.014,.031,.058,0);gl.clear(gl.COLOR_BUFFER_BIT);
      const cam=camera.current,cy=Math.cos(cam.yaw),sy=Math.sin(cam.yaw),cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
      const pts=addresses.map((id,i)=>{
        const x=layout.positions[i*3],y=layout.positions[i*3+1],z=layout.positions[i*3+2],rx=x*cy+z*sy,rz=-x*sy+z*cy,ry=y*cp-rz*sp,pz=y*sp+rz*cp,scale=950/Math.max(400,950-pz);

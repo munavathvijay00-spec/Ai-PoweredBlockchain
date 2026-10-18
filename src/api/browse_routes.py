@@ -43,7 +43,7 @@ def _where(search: str | None, min_risk: int | None, max_risk: int | None,
         args.append(value)
         clauses.append(sql.replace("?", f"${len(args)}"))
 
-    if search:
+    if search and search.strip():
         # Treat wallet hashes and addresses as literal substrings. Unescaped
         # '%' and '_' would otherwise produce unexpectedly broad matches.
         term = search.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

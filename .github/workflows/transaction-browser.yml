@@ -19,6 +19,8 @@ jobs:
       ETHEREUM_RPC_URL: http://127.0.0.1:8545
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       API_KEY: ci-local-secret-not-for-deployment
+      # Web3 exposes an incompatible optional pytest plugin; load only pytest.ini plugins.
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

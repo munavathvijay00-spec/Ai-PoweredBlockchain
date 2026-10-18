@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from src.risk.tx_semantics import selector_candidate
+from src.risk.swap_event_evidence import decode_swap_event_candidate, V2_SWAP_TOPIC, V3_SWAP_TOPIC
 
 HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
 ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -35,10 +36,18 @@ def decode_receipt_evidence(tx_hash: str, transaction, receipt) -> dict:
     success = status == 1 if status is not None else None
     events = []
     skipped = 0
+    swap_candidates = []
     logs = receipt.get("logs") or []
     for log in logs[:2000]:
         topics = [_hex(value) for value in (log.get("topics") or [])]
         first = topics[0] if topics else ""
+        if first in (V2_SWAP_TOPIC, V3_SWAP_TOPIC):
+            candidate = decode_swap_event_candidate(log)
+            if candidate is not None:
+                swap_candidates.append(candidate)
+            else:
+                skipped += 1
+            continue
         if first not in (ERC20_TRANSFER_TOPIC, ERC20_APPROVAL_TOPIC):
             continue
         if len(topics) != 3:
@@ -80,6 +89,7 @@ def decode_receipt_evidence(tx_hash: str, transaction, receipt) -> dict:
         "gas_used": str(int(receipt.get("gasUsed") or 0)),
         "method_selector": method,
         "decoded_event_candidates": events,
+        "swap_event_candidates": swap_candidates,
         "skipped_ambiguous_events": skipped,
         "logs_examined": min(len(logs), 2000),
         "logs_truncated": len(logs) > 2000,
@@ -87,5 +97,5 @@ def decode_receipt_evidence(tx_hash: str, transaction, receipt) -> dict:
         "bridge_confirmed": False,
         "internal_transfers_complete": False,
         "coverage": "Live RPC transaction and receipt only; no full EVM trace or independently verified token ABI metadata.",
-        "interpretation": "Receipt status and emitted event evidence, not a verified economic swap or bridge reconstruction.",
+        "interpretation": "Receipt status, transfer logs and swap-shaped event ABI evidence; emitting pool identity, token metadata, economic swap and bridge execution are not verified.",
     }

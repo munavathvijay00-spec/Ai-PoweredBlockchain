@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Literal
 from uuid import uuid4
 
@@ -18,6 +19,8 @@ ReviewStatus = Literal["unreviewed", "confirmed", "false_positive", "escalated",
 CaseStatus = Literal["open", "in_progress", "escalated", "closed"]
 CasePriority = Literal["low", "medium", "high", "critical"]
 CaseItemType = Literal["transaction", "address", "entity"]
+TX_HASH_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
+ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
 class ReviewAction(BaseModel):
@@ -310,7 +313,20 @@ async def add_case_item(
 ):
     await _ensure_schema(repo)
     await _case(repo, case_id)
-    key = payload.item_key.strip().lower() if payload.item_type == "address" else payload.item_key.strip()
+    key = payload.item_key.strip()
+    if payload.item_type == "transaction":
+        if not TX_HASH_RE.fullmatch(key):
+            raise HTTPException(status_code=422, detail="Transaction evidence requires a valid 32-byte transaction hash")
+        key = key.lower()
+        # Do not record arbitrary user input as a verified transaction.
+        if not await repo.get_by_hash(key):
+            raise HTTPException(status_code=422, detail="Transaction not found in retained evidence; fetch and verify it before attaching")
+    elif payload.item_type == "address":
+        if not ADDRESS_RE.fullmatch(key):
+            raise HTTPException(status_code=422, detail="Address evidence requires a valid Ethereum address")
+        key = key.lower()
+    else:
+        key = key.strip()
     async with repo.db.transaction():
         row = await repo.db.fetchrow("""
             INSERT INTO investigation_case_items(case_id,item_type,item_key,note,added_by)

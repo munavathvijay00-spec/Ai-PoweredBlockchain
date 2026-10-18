@@ -117,6 +117,20 @@ export default function App() {
     return () => { active = false; clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
+  // Keep the transaction browser aligned with live checkpoint updates without
+  // resetting the analyst's filters or page. Hidden tabs do not poll.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') setBrowserRefresh(value => value + 1);
+    };
+    const interval = setInterval(refresh, 15000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+
   useEffect(() => {
     let active = true;
     const timer = setTimeout(async () => {

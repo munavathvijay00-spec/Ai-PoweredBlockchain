@@ -129,12 +129,14 @@ class RiskScorer:
                     "comparison_count": len(values),
                 })
 
+        # A zero-value native transaction is common for contract calls and
+        # ERC-20 interactions. Record the context without automatically raising
+        # review priority; no malicious behavior follows from zero ETH alone.
         if value_wei == 0:
-            score += 5
             factors.append({
                 "factor": "zero_value",
-                "points": 5,
-                "reason": "Zero native-ETH value transaction; may be a contract call",
+                "points": 0,
+                "reason": "Zero native ETH; contract interaction is possible, token movement requires event evidence",
             })
 
         return {"score": min(score, 100), "factors": factors}

@@ -33,6 +33,15 @@ async function runViewport(name, viewport) {
     if (dimensions.scrollWidth > dimensions.innerWidth + 2) {
       throw new Error(`${name}: horizontal overflow ${dimensions.scrollWidth}px > ${dimensions.innerWidth}px`);
     }
+    const pause = page.getByRole('button', { name: 'Pause while reviewing' });
+    await pause.waitFor({ state: 'visible', timeout: 30000 });
+    await pause.click();
+    const resume = page.getByRole('button', { name: 'Resume live updates' });
+    await resume.waitFor({ state: 'visible' });
+    if (await resume.getAttribute('aria-pressed') !== 'true') throw new Error(name + ': pause did not activate');
+    await resume.click();
+    await pause.waitFor({ state: 'visible' });
+    if (await pause.getAttribute('aria-pressed') !== 'false') throw new Error(name + ': resume did not activate');
     const axe = await new AxeBuilder({ page }).analyze();
     const critical = axe.violations.filter(v => ['critical', 'serious'].includes(v.impact));
     const result = {

@@ -10,8 +10,9 @@ function formatEth(tx) {
     const text = `${whole}${fraction ? `.${fraction.slice(0, 6)}` : ''} ETH`;
     return { text, title: text };
   }
+  if (tx.value_eth == null || tx.value_eth === '') return { text: 'Value unavailable', title: 'No native-ETH value supplied by the data source' };
   const value = Number(tx.value_eth);
-  if (!Number.isFinite(value)) return { text: '—', title: 'Amount unavailable' };
+  if (!Number.isFinite(value)) return { text: 'Value unavailable', title: 'Invalid native-ETH value supplied by the data source' };
   if (value === 0) return { text: '0 ETH · possible contract call', title: 'No native ETH transferred; token activity requires event evidence' };
   const text = `${value.toPrecision(6)} ETH`;
   return { text, title: text };
@@ -55,6 +56,7 @@ function factorReason(tx) {
   const named = factors.map(item => item?.factor || item?.name).filter(Boolean).filter(name => name !== 'bursty_activity');
   const labels = { whale_transaction: 'Whale-sized ETH', large_transaction: 'Large ETH transfer', notable_transaction: 'Notable ETH transfer', medium_transaction: 'ETH value', ping_pong_pattern: 'Bidirectional repeats', repeated_counterparty: 'Counterparty concentration', new_wallet: 'Recently first-observed wallet', unusual_value: 'Unusual transfer size', zero_value: 'Contract call / zero ETH', blacklisted_address: 'Verified blocklist match' };
   if (named.length) return named.slice(0, 2).map(name => labels[name] || name.replaceAll('_', ' ')).join(' + ');
+  if (first?.factor === 'bursty_activity') return `Velocity: ${Number(first.observed_transfer_count || 0)} transfers / ${Number(first.window_minutes || 60)}m`;
   return first?.reason || first?.name || first?.type || null;
 }
 
@@ -91,7 +93,7 @@ export default function TransactionList({ transactions = [], onSelect, totalMatc
         const risk = riskMeta(score);
         const amount = formatEth(tx);
         const reason = factorReason(tx);
-        return <tr key={tx.hash} className="hover:bg-white/[0.025]"><td className="whitespace-nowrap px-4 py-3 text-xs text-slate-300">{timeLabel(tx.timestamp)}</td><td className="px-4 py-3 font-mono text-xs text-slate-300" title={tx.hash}>{shortHash(tx.hash)}</td><td className="px-4 py-3"><AddressCell address={tx.from_address} matches={tx.entity_context?.sender} /></td><td className="px-4 py-3"><AddressCell address={tx.to_address} matches={tx.entity_context?.recipient} /></td><td className="whitespace-nowrap px-4 py-3 font-medium text-white">{amount.text}</td><td className="px-4 py-3"><button type="button" aria-expanded={openScore === tx.hash} onClick={() => setOpenScore(openScore === tx.hash ? null : tx.hash)} className={`inline-flex rounded border px-2 py-1 text-xs font-semibold hover:underline ${risk.cls}`} title="Show recorded score factors">{risk.symbol} {risk.label} · {score} ▾</button>{openScore === tx.hash && <div className="mt-2 max-w-xs text-xs text-slate-300">{Array.isArray(tx.risk_factors) && tx.risk_factors.length ? tx.risk_factors.map((factor, i) => <div key={i}>+{Number(factor.points) || 0}: {factor.reason || factor.factor || 'Recorded signal'}</div>) : 'No recorded score factors'}<div className="mt-1 text-slate-500">Recorded score {score}/100 · review priority, not fraud probability</div></div>}</td><td className="max-w-[240px] px-4 py-3 text-xs text-slate-300">{reason || 'No recorded signal'}</td><td className="px-4 py-3"><button type="button" onClick={() => onSelect(tx)} className="workspace-chip">View details</button></td></tr>;
+        return <tr key={tx.hash} className="hover:bg-white/[0.025]"><td className="whitespace-nowrap px-4 py-3 text-xs text-slate-300">{timeLabel(tx.timestamp)}</td><td className="px-4 py-3 font-mono text-xs text-slate-300" title={tx.hash}>{shortHash(tx.hash)}</td><td className="px-4 py-3"><AddressCell address={tx.from_address} matches={tx.entity_context?.sender} /></td><td className="px-4 py-3"><AddressCell address={tx.to_address} matches={tx.entity_context?.recipient} /></td><td className="whitespace-nowrap px-4 py-3 font-medium text-white">{amount.text}</td><td className="px-4 py-3"><button type="button" aria-expanded={openScore === tx.hash} onClick={() => setOpenScore(openScore === tx.hash ? null : tx.hash)} className={`inline-flex rounded border px-2 py-1 text-xs font-semibold hover:underline ${risk.cls}`} title="Show recorded score factors">{risk.symbol} {risk.label} · {score} ▾</button>{openScore === tx.hash && <div className="mt-2 max-w-xs text-xs text-slate-300">{Array.isArray(tx.risk_factors) && tx.risk_factors.length ? tx.risk_factors.map((factor, i) => <div key={i}>+{Number(factor.points) || 0}: {factor.reason || factor.factor || 'Recorded signal'}</div>) : 'No recorded score factors'}<div className="mt-1 text-slate-500">Recorded score {score}/100 · raw factor total {tx.risk_factors.reduce((sum, f) => sum + (Number(f?.points) || 0), 0)} (capped at 100) · review priority, not fraud probability</div></div>}</td><td className="max-w-[240px] px-4 py-3 text-xs text-slate-300">{reason || 'No recorded signal'}</td><td className="px-4 py-3"><button type="button" onClick={() => onSelect(tx)} className="workspace-chip">View details</button></td></tr>;
       })}</tbody></table></div>
 
       <div className="divide-y divide-[#39475d] md:hidden">{transactions.map(tx => {

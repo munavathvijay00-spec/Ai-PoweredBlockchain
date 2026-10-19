@@ -14,7 +14,8 @@ async def load_recent_activity(db, addresses, before_block: int, *, minutes: int
     normalized = sorted({str(a).lower() for a in addresses if a})
     # Bound rows returned by SQL before per-address Python filtering.
     # This safety cap does not establish complete history coverage.
-    query_limit = min(50000, max(1000, len(normalized) * per_address * 2))\n    rows = await db.fetch(
+    query_limit = min(50000, max(1000, len(normalized) * per_address * 2))
+    rows = await db.fetch(
         """
         SELECT t.hash, t.value, t.timestamp, t.block_number,
                af.address AS from_address, at.address AS to_address

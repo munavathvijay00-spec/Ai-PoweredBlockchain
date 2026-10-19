@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client';
 import StatsBar from './components/StatsBar';
 import TransactionList from './components/TransactionList';
@@ -93,6 +93,8 @@ export default function App() {
   const [browserError, setBrowserError] = useState(null);
   const [browserRefresh, setBrowserRefresh] = useState(0);
   const [reviewPaused, setReviewPaused] = useState(false);
+  // Invalidate outstanding browser responses when the review snapshot is paused.
+  const queueRequestEpoch = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -134,16 +136,17 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    const epoch = ++queueRequestEpoch.current;
     const timer = setTimeout(async () => {
       setBrowserLoading(true);
       setBrowserError(null);
       try {
         const data = await api.getTransactionBrowser({ limit: pageSize, offset: (page - 1) * pageSize, search, min_risk: minRisk, max_risk: maxRisk, min_value_eth: minValue, max_value_eth: maxValue, sort });
-        if (active) { setBrowser(data); setLastUpdate(new Date()); }
+        if (active && epoch === queueRequestEpoch.current) { setBrowser(data); setLastUpdate(new Date()); }
       } catch (error) {
-        if (active) setBrowserError(error?.message || 'Unable to load transactions.');
+        if (active && epoch === queueRequestEpoch.current) setBrowserError(error?.message || 'Unable to load transactions.');
       } finally {
-        if (active) setBrowserLoading(false);
+        if (active && epoch === queueRequestEpoch.current) setBrowserLoading(false);
       }
     }, 250);
     return () => { active = false; clearTimeout(timer); };
@@ -228,7 +231,7 @@ export default function App() {
             <RiskChart distribution={browser.distribution} asOf={lastUpdate} />
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-xs"><span className="text-slate-300">{reviewPaused ? 'Review snapshot held: automatic queue refresh paused to keep visible evidence stable.' : 'Live queue refreshes approximately every 15 seconds while this tab is visible.'}</span><button type="button" className="workspace-chip" aria-pressed={reviewPaused} onClick={() => { if (reviewPaused) setBrowserRefresh(value => value + 1); setReviewPaused(value => !value); }}>{reviewPaused ? 'Resume live updates' : 'Pause while reviewing'}</button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-xs"><span className="text-slate-300">{reviewPaused ? 'Review snapshot held: automatic queue refresh paused to keep visible evidence stable.' : 'Live queue refreshes approximately every 15 seconds while this tab is visible.'}</span><button type="button" className="workspace-chip" aria-pressed={reviewPaused} onClick={() => { queueRequestEpoch.current += 1; setBrowserLoading(false); if (reviewPaused) setBrowserRefresh(value => value + 1); setReviewPaused(value => !value); }}>{reviewPaused ? 'Resume live updates' : 'Pause while reviewing'}</button></div>
           <ClusterTriage transactions={browser.transactions || []} onSelect={inspectTransaction} loading={browserLoading} sort={sort} page={page} onReviewFirst={() => { setSort('risk_desc'); setPage(1); }} />
           <TransactionList transactions={browser.transactions || []} onSelect={inspectTransaction} totalMatches={browser.total} loading={browserLoading} error={browserError} onRetry={() => setBrowserRefresh(value => value + 1)} offset={(page - 1) * pageSize} sort={sort} onSort={value => updateFilter(setSort, value)} />
           <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-500"><span>Ethereum mainnet · Latest indexed block {latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</span><span>CSV/JSON exports preserve active filters and are bounded to 5,000 rows.</span></div>

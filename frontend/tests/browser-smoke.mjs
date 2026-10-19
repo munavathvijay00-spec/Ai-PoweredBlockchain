@@ -18,6 +18,54 @@ function compactViolation(v) {
   };
 }
 
+// A delayed response that finishes after Pause must not replace the held queue.
+async function assertLateResponseIgnored(name, viewport) {
+  const context = await browser.newContext({ viewport });
+  const page = await context.newPage();
+  let release;
+  let signal;
+  const started = new Promise(resolve => { signal = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  try {
+    await page.route('**/api/transaction-browser?**', async route => {
+      signal();
+      await gate;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          transactions: [{
+            hash: '0x' + 'f'.repeat(64),
+            from_address: '0x' + '1'.repeat(40),
+            to_address: '0x' + '2'.repeat(40),
+            value_wei: '1000000000000000000',
+            risk_score: 65, risk_factors: [],
+            timestamp: '2026-10-19T00:00:00Z',
+            block_number: 1,
+            cluster: { count: 4, hashes: [], distinct_blocks: 1 }
+          }],
+          total: 1, matching_transactions: 4, clustered: true,
+          distribution: { population: 4, minimal: 0, review: 0, high_review: 4, critical: 0 }
+        })
+      });
+    });
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await started;
+    const pause = page.getByRole('button', { name: 'Pause while reviewing' });
+    await pause.waitFor({ state: 'visible', timeout: 30000 });
+    await pause.click();
+    await page.getByRole('button', { name: 'Resume live updates' }).waitFor();
+    release();
+    await page.waitForTimeout(700);
+    const queue = page.getByRole('heading', { name: 'Cluster review queue' }).locator('..').locator('..');
+    const leaked = await queue.getByText('4 matching', { exact: false }).count();
+    if (leaked) throw new Error(name + ': in-flight API response replaced paused evidence');
+  } finally {
+    release?.();
+    await context.close();
+  }
+}
+
 async function runViewport(name, viewport) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
@@ -64,7 +112,9 @@ async function runViewport(name, viewport) {
 
 try {
   await runViewport('mobile-375', { width: 375, height: 812 });
+  await assertLateResponseIgnored('mobile-375', { width: 375, height: 812 });
   await runViewport('desktop-1440', { width: 1440, height: 1000 });
+  await assertLateResponseIgnored('desktop-1440', { width: 1440, height: 1000 });
   console.log(JSON.stringify({ passed: true, results }, null, 2));
 } finally {
   await browser.close();

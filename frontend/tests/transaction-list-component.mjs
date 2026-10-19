@@ -40,7 +40,10 @@ try {
   }));
   assert.match(rendered, /Transactions/);
   assert.match(rendered, /High review/);
-  assert.match(rendered, /100 ETH transfer/);
+  assert.match(rendered, /Large ETH transfer/);
+  assert.match(rendered, /65/);
+  assert.match(rendered, /Show recorded score factors/);
+  assert.match(rendered, /etherscan\\.io\\/address/);
   assert.match(rendered, /View details/);
   assert.doesNotMatch(rendered, /Confirm Risk|False Positive|Needs Review|Escalate|Export evidence/);
 

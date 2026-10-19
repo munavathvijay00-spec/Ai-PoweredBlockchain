@@ -12,7 +12,7 @@ async def load_recent_activity(db, addresses, before_block: int, *, minutes: int
     if minutes < 1 or minutes > 1440 or per_address < 1 or per_address > 500:
         raise ValueError("invalid recent-activity bounds")
     normalized = sorted({str(a).lower() for a in addresses if a})
-    rows = await db.fetch(
+    # Bound the SQL result itself: the previous implementation fetched every\n    # matching retained row and only applied per-address limits in Python.\n    # This is a safety cap, not a guarantee of complete history per address.\n    query_limit = min(50000, max(1000, len(normalized) * per_address * 2))\n    rows = await db.fetch(
         """
         SELECT t.hash, t.value, t.timestamp, t.block_number,
                af.address AS from_address, at.address AS to_address
@@ -23,8 +23,9 @@ async def load_recent_activity(db, addresses, before_block: int, *, minutes: int
           AND t.timestamp >= NOW() - ($3::int * INTERVAL '1 minute')
           AND (af.address = ANY($1::text[]) OR at.address = ANY($1::text[]))
         ORDER BY t.timestamp DESC, t.id DESC
+        LIMIT $4
         """,
-        normalized, int(before_block), int(minutes),
+        normalized, int(before_block), int(minutes), query_limit,
     )
     histories = defaultdict(list)
     targets = set(normalized)

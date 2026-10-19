@@ -22,7 +22,8 @@ class FakeConnection:
         self.rolled_back = False
         self.committed = False
 
-    def transaction(self):
+    def transaction(self, *, isolation=None, readonly=False):
+        self.last_transaction_options = {'isolation': isolation, 'readonly': readonly}
         return FakeTransaction(self)
 
     async def execute(self, sql, *args):

@@ -139,8 +139,9 @@ async def _query_clusters(repo: TransactionRepository, *, search=None, min_risk=
                    MIN(timestamp) AS oldest_timestamp,
                    MAX(timestamp) AS newest_timestamp,
                    COUNT(DISTINCT block_number) AS cluster_blocks,
-                   ARRAY_AGG(hash ORDER BY timestamp DESC, id DESC) AS cluster_hashes
-            FROM filtered
+                   ARRAY_AGG(hash ORDER BY timestamp DESC, id DESC)
+                       FILTER (WHERE cluster_rank <= 100) AS cluster_hashes
+            FROM ranked
             GROUP BY from_address_id, to_address_id
         )
         SELECT ranked.id AS representative_id, ranked.hash, ranked.from_address, ranked.to_address,
@@ -183,6 +184,7 @@ def _decorate_row(row: dict, matches, clustered: bool):
             "kind": "address_pair",
             "count": count,
             "hashes": list(row.get("cluster_hashes") or []),
+            "hashes_truncated": count > len(row.get("cluster_hashes") or []),
             "oldest_timestamp": row.get("oldest_timestamp"),
             "newest_timestamp": row.get("newest_timestamp"),
             "distinct_blocks": int(row.get("cluster_blocks") or 0),

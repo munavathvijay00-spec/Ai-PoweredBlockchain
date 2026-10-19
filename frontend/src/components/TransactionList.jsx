@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import { bestAddressLabel } from '../utils/knownContracts';
 
 function formatEth(tx) {
   if (tx.value_wei != null && /^\d+$/.test(String(tx.value_wei))) {
     const amount = BigInt(String(tx.value_wei));
-    if (amount === 0n) return { text: '—', title: '0 ETH' };
+    if (amount === 0n) return { text: '0 ETH · possible contract call', title: 'No native ETH transferred; token activity requires event evidence' };
     const whole = amount / 1000000000000000000n;
     const fraction = (amount % 1000000000000000000n).toString().padStart(18, '0').replace(/0+$/, '');
     const text = `${whole}${fraction ? `.${fraction.slice(0, 6)}` : ''} ETH`;
@@ -11,7 +12,7 @@ function formatEth(tx) {
   }
   const value = Number(tx.value_eth);
   if (!Number.isFinite(value)) return { text: '—', title: 'Amount unavailable' };
-  if (value === 0) return { text: '—', title: '0 ETH' };
+  if (value === 0) return { text: '0 ETH · possible contract call', title: 'No native ETH transferred; token activity requires event evidence' };
   const text = `${value.toPrecision(6)} ETH`;
   return { text, title: text };
 }
@@ -51,12 +52,15 @@ function timeLabel(timestamp) {
 function factorReason(tx) {
   const factors = Array.isArray(tx.risk_factors) ? tx.risk_factors : [];
   const first = factors.find(item => item && typeof item === 'object');
+  const named = factors.map(item => item?.factor || item?.name).filter(Boolean).filter(name => name !== 'bursty_activity');
+  const labels = { whale_transaction: 'Whale-sized ETH', large_transaction: 'Large ETH transfer', notable_transaction: 'Notable ETH transfer', medium_transaction: 'ETH value', ping_pong_pattern: 'Bidirectional repeats', repeated_counterparty: 'Counterparty concentration', new_wallet: 'Recently first-observed wallet', unusual_value: 'Unusual transfer size', zero_value: 'Contract call / zero ETH', blacklisted_address: 'Verified blocklist match' };
+  if (named.length) return named.slice(0, 2).map(name => labels[name] || name.replaceAll('_', ' ')).join(' + ');
   return first?.reason || first?.name || first?.type || null;
 }
 
 function AddressCell({ address, matches = [] }) {
   const label = bestAddressLabel(address, matches);
-  return <div className="min-w-0"><div className="font-mono text-xs text-slate-300" title={address}>{shortAddress(address)}</div>{label && <div className="mt-1 max-w-[180px] truncate text-xs font-medium text-sky-300" title={`${label.label} · ${label.type}`}>{label.label} · {label.type}</div>}</div>;
+  return <div className="min-w-0"><div className="font-mono text-xs text-slate-300" title={address}>{shortAddress(address)}</div>{address && <a href={`https://etherscan.io/address/${encodeURIComponent(address)}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-sky-400 underline-offset-2 hover:underline" aria-label={`Inspect ${address} on Etherscan`}>Explorer ↗</a>}{label && <div className="mt-1 max-w-[180px] truncate text-xs font-medium text-sky-300" title={`${label.label} · ${label.type}`}>{label.label} · {label.type}</div>}</div>;
 }
 
 function SortHeader({ label, field, sort, onSort, className = '' }) {
@@ -68,13 +72,14 @@ function SortHeader({ label, field, sort, onSort, className = '' }) {
 }
 
 export default function TransactionList({ transactions = [], onSelect, totalMatches = 0, loading = false, error = null, onRetry, offset = 0, sort = 'risk_desc', onSort = () => {} }) {
+  const [openScore, setOpenScore] = useState(null);
   const shown = transactions.length;
   const total = Number(totalMatches || 0);
   const start = shown ? Number(offset) + 1 : 0;
   const end = shown ? Number(offset) + shown : 0;
 
   return <section className="transaction-panel" aria-labelledby="transactions-heading">
-    <div className="transaction-panel-head"><div><h2 id="transactions-heading" className="text-lg font-semibold text-white">Transactions</h2><p className="mt-1 text-sm text-slate-400">Showing {start.toLocaleString()}–{end.toLocaleString()} of {total.toLocaleString()} matching records</p></div><span className="hidden text-sm text-slate-400 sm:inline">Simple review · open only when needed</span></div>
+    <div className="transaction-panel-head"><div><h2 id="transactions-heading" className="text-lg font-semibold text-white">Transactions</h2><p className="mt-1 text-sm text-slate-400">Showing {start.toLocaleString()}–{end.toLocaleString()} of {total.toLocaleString()} matching records</p></div><span className="hidden text-sm text-slate-400 sm:inline">Evidence-backed review · inspect score factors</span></div>
 
     {loading && <div className="space-y-3 p-6" aria-live="polite" aria-label="Loading transactions">{[0,1,2,3].map(i => <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-800/70" />)}</div>}
     {!loading && error && <div className="py-14 text-center"><p className="text-sm text-rose-300">{error}</p>{onRetry && <button type="button" onClick={onRetry} className="workspace-chip mt-4">Retry</button>}</div>}
@@ -86,7 +91,7 @@ export default function TransactionList({ transactions = [], onSelect, totalMatc
         const risk = riskMeta(score);
         const amount = formatEth(tx);
         const reason = factorReason(tx);
-        return <tr key={tx.hash} className="hover:bg-white/[0.025]"><td className="whitespace-nowrap px-4 py-3 text-xs text-slate-300">{timeLabel(tx.timestamp)}</td><td className="px-4 py-3 font-mono text-xs text-slate-300" title={tx.hash}>{shortHash(tx.hash)}</td><td className="px-4 py-3"><AddressCell address={tx.from_address} matches={tx.entity_context?.sender} /></td><td className="px-4 py-3"><AddressCell address={tx.to_address} matches={tx.entity_context?.recipient} /></td><td className="whitespace-nowrap px-4 py-3 font-medium text-white">{amount.text}</td><td className="px-4 py-3"><span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${risk.cls}`}>{risk.symbol} {risk.label}{score ? ` · ${score}` : ''}</span></td><td className="max-w-[240px] px-4 py-3 text-xs text-slate-300">{reason || 'No recorded signal'}</td><td className="px-4 py-3"><button type="button" onClick={() => onSelect(tx)} className="workspace-chip">View details</button></td></tr>;
+        return <tr key={tx.hash} className="hover:bg-white/[0.025]"><td className="whitespace-nowrap px-4 py-3 text-xs text-slate-300">{timeLabel(tx.timestamp)}</td><td className="px-4 py-3 font-mono text-xs text-slate-300" title={tx.hash}>{shortHash(tx.hash)}</td><td className="px-4 py-3"><AddressCell address={tx.from_address} matches={tx.entity_context?.sender} /></td><td className="px-4 py-3"><AddressCell address={tx.to_address} matches={tx.entity_context?.recipient} /></td><td className="whitespace-nowrap px-4 py-3 font-medium text-white">{amount.text}</td><td className="px-4 py-3"><button type="button" aria-expanded={openScore === tx.hash} onClick={() => setOpenScore(openScore === tx.hash ? null : tx.hash)} className={`inline-flex rounded border px-2 py-1 text-xs font-semibold hover:underline ${risk.cls}`} title="Show recorded score factors">{risk.symbol} {risk.label} · {score} ▾</button>{openScore === tx.hash && <div className="mt-2 max-w-xs text-xs text-slate-300">{Array.isArray(tx.risk_factors) && tx.risk_factors.length ? tx.risk_factors.map((factor, i) => <div key={i}>+{Number(factor.points) || 0}: {factor.reason || factor.factor || 'Recorded signal'}</div>) : 'No recorded score factors'}<div className="mt-1 text-slate-500">Recorded score {score}/100 · review priority, not fraud probability</div></div>}</td><td className="max-w-[240px] px-4 py-3 text-xs text-slate-300">{reason || 'No recorded signal'}</td><td className="px-4 py-3"><button type="button" onClick={() => onSelect(tx)} className="workspace-chip">View details</button></td></tr>;
       })}</tbody></table></div>
 
       <div className="divide-y divide-[#39475d] md:hidden">{transactions.map(tx => {

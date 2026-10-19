@@ -7,6 +7,11 @@ on:
       - "src/api/browse_routes.py"
       - "src/database/connection.py"
       - "tests/test_transaction_browser_contract.py"
+      - "tests/test_scoring_checkpoint_guard.py"
+      - "tests/test_zero_value_risk.py"
+      - "src/risk/scorer.py"
+      - "src/ingest/worker.py"
+      - "scripts/audit_legacy_zero_value_scores.py"
       - ".github/workflows/transaction-browser.yml"
   workflow_dispatch:
 
@@ -31,4 +36,6 @@ jobs:
       - name: Install pinned application and test dependencies
         run: python -m pip install -r requirements.txt
       - name: Run browser regression contracts
-        run: python -m pytest tests/test_transaction_browser_contract.py -q --no-cov
+        run: python -m compileall -q scripts/audit_legacy_zero_value_scores.py src/ingest/worker.py src/risk/scorer.py
+      - name: Run browser and scoring regression contracts
+        run: python -m pytest tests/test_transaction_browser_contract.py tests/test_scoring_checkpoint_guard.py tests/test_zero_value_risk.py -q --no-cov

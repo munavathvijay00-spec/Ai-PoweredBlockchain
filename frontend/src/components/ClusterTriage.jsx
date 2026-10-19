@@ -31,7 +31,7 @@ function Identity({ address, matches }) {
   </span>;
 }
 
-export default function ClusterTriage({ transactions = [], onSelect, loading = false }) {
+export default function ClusterTriage({ transactions = [], onSelect, loading = false, sort = 'risk_desc', page = 1, onReviewFirst }) {
   const [expanded, setExpanded] = useState({});
   const [includeLow, setIncludeLow] = useState(false);
   const [showAllHashes, setShowAllHashes] = useState({});
@@ -41,6 +41,7 @@ export default function ClusterTriage({ transactions = [], onSelect, loading = f
   const reviewable = repeated.filter(tx => Number(tx.risk_score || 0) >= 20);
   const low = repeated.filter(tx => Number(tx.risk_score || 0) < 20);
   const visible = includeLow ? [...reviewable, ...low] : reviewable;
+  const prioritized = sort === 'risk_desc';
   return <section className="platform-card p-5" aria-labelledby="cluster-triage-title">
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 id="cluster-triage-title" className="text-lg font-semibold text-white">Cluster review queue</h2>
@@ -51,11 +52,12 @@ export default function ClusterTriage({ transactions = [], onSelect, loading = f
         <span className="rounded-md border border-slate-600 px-3 py-2 text-slate-300">{low.length} low-signal on this page</span>
       </div>
     </header>
+    {!prioritized && <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3 text-xs text-amber-100" role="status"><span>Page {page} follows the active {sort.replaceAll('_', ' ')} sort; high-risk clusters can appear on other pages. This page is not a globally prioritized queue.</span><button type="button" className="workspace-chip" onClick={onReviewFirst}>Show highest risk first</button></div>}
     {low.length > 0 && <div className="mt-4">
       <button type="button" className="workspace-chip" aria-pressed={includeLow} onClick={() => setIncludeLow(value => !value)}>{includeLow ? 'Hide low-signal groups' : `Show ${low.length} low-signal groups`}</button>
     </div>}
     {loading ? <p className="mt-5 text-sm text-slate-400" role="status">Loading retained-population clusters…</p>
-    : visible.length === 0 ? <p className="mt-5 rounded-lg border border-slate-700 bg-slate-900/40 p-4 text-sm text-slate-400" role="status">{repeated.length ? 'No review-priority clusters on this page. Low-signal repeats are available above.' : 'No repeated sender–recipient pairs on this page. Other pages may contain them.'}</p>
+    : visible.length === 0 ? <p className="mt-5 rounded-lg border border-slate-700 bg-slate-900/40 p-4 text-sm text-slate-400" role="status">{repeated.length ? 'No review-priority clusters on this page. Low-signal repeats are available above; higher-priority clusters may exist on other pages.' : 'No repeated sender–recipient pairs on this page. Other pages may contain them.'}</p>
     : <div className="mt-4 space-y-2">{visible.map(tx => {
       const key = `${tx.from_address?.toLowerCase() || ''}:${tx.to_address?.toLowerCase() || ''}`;
       const score = Number(tx.risk_score || 0);

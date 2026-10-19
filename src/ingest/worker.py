@@ -180,7 +180,13 @@ async def process_one_block(
                     risk_flagged_total.inc()
             except Exception as exc:
                 ingest_errors_total.labels(error_type=type(exc).__name__).inc()
-                logger.warning(f"Scoring error {tx.get('hash', '?')[:20]}: {exc}")
+                logger.exception(f"Scoring error {tx.get('hash', '?')[:20]}; refusing incomplete block checkpoint")
+                # The caller holds a database transaction for the whole block.
+                # Never commit a canonical checkpoint with unscored transactions.
+                raise RuntimeError("Incomplete block risk scoring; transaction rolled back") from exc
+
+        if len(scores) != len(normalized):
+            raise RuntimeError("Incomplete block risk scoring; refusing checkpoint")
 
         if scores:
             await transactions.bulk_update_risk_scores(scores)

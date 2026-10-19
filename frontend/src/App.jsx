@@ -227,7 +227,7 @@ export default function App() {
             <RiskChart distribution={browser.distribution} asOf={lastUpdate} />
           </div>
 
-          <ClusterTriage transactions={browser.transactions || []} onSelect={inspectTransaction} loading={browserLoading} />
+          <ClusterTriage transactions={browser.transactions || []} onSelect={inspectTransaction} loading={browserLoading} sort={sort} page={page} onReviewFirst={() => { setSort('risk_desc'); setPage(1); }} />
           <TransactionList transactions={browser.transactions || []} onSelect={inspectTransaction} totalMatches={browser.total} loading={browserLoading} error={browserError} onRetry={() => setBrowserRefresh(value => value + 1)} offset={(page - 1) * pageSize} sort={sort} onSort={value => updateFilter(setSort, value)} />
           <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-500"><span>Ethereum mainnet · Latest indexed block {latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</span><span>CSV/JSON exports preserve active filters and are bounded to 5,000 rows.</span></div>
         </div>}

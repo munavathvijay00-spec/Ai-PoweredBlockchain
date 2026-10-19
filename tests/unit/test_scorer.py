@@ -45,16 +45,16 @@ class TestRiskScorer:
         assert result['score'] >= 20
         assert any('large_transaction' in f['factor'] for f in result['factors'])
 
-    async def test_zero_value_adds_5(self, sample_tx):
-        """Zero-value tx (contract call) adds 5 points."""
+    async def test_zero_value_is_context_not_risk(self, sample_tx):
+        """Zero native ETH alone is not evidence of risky behavior."""
         sample_tx['value'] = 0
         result = await self.scorer.score_transaction(
             tx=sample_tx,
             address_history=[],
             is_blacklisted=False,
         )
-        assert result['score'] >= 5
-        assert any('zero_value' in f['factor'] for f in result['factors'])
+        assert result['score'] == 0
+        assert any(f['factor'] == 'zero_value' and f['points'] == 0 for f in result['factors'])
 
     async def test_clean_transaction_low_score(self, sample_tx):
         """A small, normal transaction should have a low score."""

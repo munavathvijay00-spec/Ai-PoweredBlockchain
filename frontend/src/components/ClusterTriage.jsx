@@ -33,11 +33,11 @@ export default function ClusterTriage({ transactions = [], onSelect, loading = f
           {open && <div className="mt-3 border-t border-slate-700 pt-3 text-xs text-slate-300">
             {factors.length ? factors.map((factor, i) => <p key={i} className="mt-1">+{Number(factor.points) || 0} · {factor.reason || factor.factor || 'Recorded signal'}</p>) : <p>No recorded factors available.</p>}
             <p className="mt-2 text-slate-400">Representative score: {Number(tx.risk_score) || 0}/100 · recorded factor sum {rawFactorTotal} (capped at 100). This is not a fraud probability or an aggregate cluster score.</p>
-            <p className="mt-3 font-medium text-slate-200">Observed group transactions ({hashes.length.toLocaleString()} retained hashes)</p>
+            <p className="mt-3 font-medium text-slate-200">Observed group transactions ({hashes.length.toLocaleString()} evidence hashes loaded)</p>
             {hashes.length === 0 ? <p className="mt-1 text-slate-400">Individual transaction hashes unavailable.</p> :
               <ul className="mt-2 space-y-1" aria-label="Cluster transaction evidence">{visibleHashes.map(hash => <li key={hash} className="flex items-center justify-between gap-2"><span className="min-w-0 truncate font-mono" title={hash}>{short(hash)}</span><a className="shrink-0 text-sky-300 hover:underline focus-visible:underline" href={`https://etherscan.io/tx/${encodeURIComponent(hash)}`} target="_blank" rel="noopener noreferrer" aria-label={`View transaction ${hash} on Etherscan`}>Evidence ↗</a></li>)}</ul>}
             {hashes.length > 10 && <button type="button" className="mt-2 text-sky-300 underline-offset-2 hover:underline" onClick={() => setShowAllHashes(old => ({...old, [key]: !old[key]}))}>{showAllHashes[key] ? 'Show fewer hashes' : `Show up to 100 hashes (${hashes.length} total)`}</button>}
-            {hashes.length > 100 && showAllHashes[key] && <p className="mt-2 text-slate-400">Showing the first 100 retained hashes to keep this panel responsive. Group count remains {count}.</p>}
+            {hashes.length > 100 && showAllHashes[key] && <p className="mt-2 text-slate-400">Showing up to 100 evidence hashes to keep this panel responsive. Group count remains {count}.</p>}
           </div>}
         </article>;
       })}</div>}

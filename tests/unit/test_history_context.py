@@ -5,7 +5,8 @@ from src.risk.history_context import load_recent_activity
 
 
 class FakeDb:
-    async def fetch(self, query, addresses, before_block, minutes):
+    async def fetch(self, query, addresses, before_block, minutes, limit):
+        assert 0 < limit <= 50000
         assert before_block == 100
         assert minutes == 30
         return [

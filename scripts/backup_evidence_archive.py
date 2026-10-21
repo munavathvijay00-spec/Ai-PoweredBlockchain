@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from scripts.evidence_archive import MAX_BUNDLES, MAX_TOTAL_BYTES
@@ -21,7 +22,7 @@ def verify_archive(path: Path) -> dict:
         raise ValueError("Expected a regular archive database")
     # Verify without creating tables, writing WAL or changing source permissions.
     uri = path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True) as db:
+    with closing(sqlite3.connect(uri, uri=True)) as db:
         integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
             raise ValueError("SQLite database integrity check failed")
@@ -63,8 +64,9 @@ def backup_archive(source: Path, destination: Path) -> dict:
     os.close(fd)
     staging = Path(staging_name)
     try:
-        with sqlite3.connect(source) as live, sqlite3.connect(staging) as saved:
+        with closing(sqlite3.connect(source)) as live, closing(sqlite3.connect(staging)) as saved:
             live.backup(saved)
+            saved.execute('PRAGMA wal_checkpoint(TRUNCATE)')
         result = verify_archive(staging)
         # Flush the completed backup file before making it discoverable.
         with staging.open("rb") as saved_file:
@@ -81,6 +83,8 @@ def backup_archive(source: Path, destination: Path) -> dict:
         return result
     finally:
         staging.unlink(missing_ok=True)
+        Path(str(staging) + '-wal').unlink(missing_ok=True)
+        Path(str(staging) + '-shm').unlink(missing_ok=True)
 
 
 def restore_archive(source: Path, destination: Path) -> dict:

@@ -5,7 +5,25 @@ window for monitoring and a bounded, normalized cache for investigated wallets.
 Deep history remains provider-backed and can be re-fetched on demand.
 """
 
-LIVE_RETENTION_MINUTES = 5
+import os
+
+
+def bounded_retention_minutes(value: str | None) -> int:
+    """Reject unsafe settings rather than silently expanding the hot database."""
+    if value is None or not value.strip():
+        return 5
+    try:
+        minutes = int(value)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("CHAINSCOPE_LIVE_RETENTION_MINUTES must be an integer") from exc
+    if not 5 <= minutes <= 60:
+        raise ValueError("Live retention must remain within the 5–60 minute safety range")
+    return minutes
+
+
+# This governs the monitoring hot table, not durable investigation evidence.
+# Longer retention requires a measured PostgreSQL capacity and recovery plan.
+LIVE_RETENTION_MINUTES = bounded_retention_minutes(os.getenv("CHAINSCOPE_LIVE_RETENTION_MINUTES"))
 LINEAGE_RETENTION_BLOCKS = 128
 HISTORY_MAX_ROWS_PER_WALLET = 2_500
 HISTORY_MAX_WALLETS = 10

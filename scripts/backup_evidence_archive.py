@@ -66,9 +66,18 @@ def backup_archive(source: Path, destination: Path) -> dict:
         with sqlite3.connect(source) as live, sqlite3.connect(staging) as saved:
             live.backup(saved)
         result = verify_archive(staging)
+        # Flush the completed backup file before making it discoverable.
+        with staging.open("rb") as saved_file:
+            os.fsync(saved_file.fileno())
         # Hard-link publication is exclusive: refuse replacing existing files
         # even if another process created the destination in the meantime.
         os.link(staging, destination, follow_symlinks=False)
+        # Persist the newly published directory entry when supported.
+        directory_fd = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
         return result
     finally:
         staging.unlink(missing_ok=True)

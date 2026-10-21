@@ -1,6 +1,7 @@
 """Verify SQLite backup and restore of preserved evidence."""
 import hashlib
 import json
+import sqlite3
 import pytest
 from scripts.evidence_archive import EvidenceArchive
 from scripts.backup_evidence_archive import backup_archive, restore_archive, verify_archive
@@ -43,3 +44,23 @@ def test_corrupted_archive_fails_verification(tmp_path):
     source.write_bytes(b"not a sqlite archive")
     with pytest.raises(Exception):
         verify_archive(source)
+
+
+def test_missing_archive_schema_is_rejected_without_mutation(tmp_path):
+    path = tmp_path / "empty.db"
+    with sqlite3.connect(path):
+        pass
+    original = path.read_bytes()
+    with pytest.raises(ValueError, match="table missing"):
+        verify_archive(path)
+    assert path.read_bytes() == original
+
+
+def test_record_size_mismatch_is_rejected(tmp_path):
+    path = tmp_path / "archive.db"
+    with EvidenceArchive(path) as archive:
+        identifier = archive.preserve(bundle())
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE preserved_bundles SET size_bytes = size_bytes + 1 WHERE digest = ?", (identifier,))
+    with pytest.raises(ValueError, match="size mismatch"):
+        verify_archive(path)

@@ -37,6 +37,10 @@ def test_modified_transaction_is_rejected():
 def test_count_mismatch_is_rejected():
     bundle = fixture_bundle()
     bundle["coverage"]["exported_transactions"] = 2
+    bundle["integrity"]["manifest_digest"] = hashlib.sha256(json.dumps(
+        {key: value for key, value in bundle.items() if key != "integrity"},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
     with pytest.raises(ValueError, match="count"):
         verify_bundle(bundle)
 

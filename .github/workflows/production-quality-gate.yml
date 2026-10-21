@@ -8,6 +8,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  python-source-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile application and test sources
+        run: python -m compileall -q src scripts tests
+      - name: Verify bounded retention configuration
+        run: |
+          python - <<'PY'
+          from src.storage_budget import bounded_retention_minutes
+          assert bounded_retention_minutes(None) == 5
+          assert bounded_retention_minutes("60") == 60
+          for invalid in ("0", "61", "garbage"):
+              try:
+                  bounded_retention_minutes(invalid)
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError(f"unsafe retention accepted: {invalid}")
+          PY
+
   browser-quality:
     runs-on: ubuntu-latest
     defaults:

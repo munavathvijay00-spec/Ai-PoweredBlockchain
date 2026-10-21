@@ -64,3 +64,38 @@ def test_record_size_mismatch_is_rejected(tmp_path):
         db.execute("UPDATE preserved_bundles SET size_bytes = size_bytes + 1 WHERE digest = ?", (identifier,))
     with pytest.raises(ValueError, match="size mismatch"):
         verify_archive(path)
+
+
+def test_failed_backup_never_publishes_partial_destination(tmp_path, monkeypatch):
+    import scripts.backup_evidence_archive as module
+    source, destination = tmp_path / "source.db", tmp_path / "backup.db"
+    with EvidenceArchive(source) as archive:
+        archive.preserve(bundle())
+    original = module.verify_archive
+    def reject_stage(path):
+        if path != source:
+            raise ValueError("Injected verification failure")
+        return original(path)
+    monkeypatch.setattr(module, "verify_archive", reject_stage)
+    with pytest.raises(ValueError, match="Injected"):
+        module.backup_archive(source, destination)
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".chainscope-backup-*"))
+
+
+def test_backup_destination_race_cannot_overwrite(tmp_path, monkeypatch):
+    import scripts.backup_evidence_archive as module
+    source, destination = tmp_path / "source.db", tmp_path / "backup.db"
+    with EvidenceArchive(source) as archive:
+        archive.preserve(bundle())
+    original = module.verify_archive
+    def occupy_destination(path):
+        result = original(path)
+        if path != source:
+            destination.write_text("existing data")
+        return result
+    monkeypatch.setattr(module, "verify_archive", occupy_destination)
+    with pytest.raises(FileExistsError):
+        module.backup_archive(source, destination)
+    assert destination.read_text() == "existing data"
+    assert not list(tmp_path.glob(".chainscope-backup-*"))

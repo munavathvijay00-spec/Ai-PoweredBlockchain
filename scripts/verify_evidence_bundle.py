@@ -22,7 +22,7 @@ def verify_bundle(bundle):
         raise ValueError("Unexpected Ethereum chain ID")
     integrity = bundle.get("integrity", {})
     expected_manifest = hashlib.sha256(json.dumps(
-        {key: value for key, value in bundle.items() if key != "integrity"},
+        {key: value for key, value in bundle.items() if key not in {"integrity", "signature"}},
         sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False,
     ).encode("utf-8")).hexdigest()
     if integrity.get("manifest_algorithm") != "sha256" or integrity.get("manifest_digest") != expected_manifest:

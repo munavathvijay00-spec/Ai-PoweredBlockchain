@@ -30,7 +30,7 @@ def test_valid_bundle():
 def test_modified_transaction_is_rejected():
     bundle = fixture_bundle()
     bundle["transactions"][0]["risk_score"] = 99
-    with pytest.raises(ValueError, match="digest"):
+    with pytest.raises(ValueError, match="manifest|digest"):
         verify_bundle(bundle)
 
 

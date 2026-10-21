@@ -7,32 +7,46 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import sqlite3
 from pathlib import Path
 
-from scripts.evidence_archive import EvidenceArchive, MAX_BUNDLES, MAX_TOTAL_BYTES
+from scripts.evidence_archive import MAX_BUNDLES, MAX_TOTAL_BYTES
+from scripts.verify_evidence_bundle import verify_bundle
 
 
 def verify_archive(path: Path) -> dict:
     if not path.is_file() or path.is_symlink():
         raise ValueError("Expected a regular archive database")
-    with EvidenceArchive(path) as archive:
-        integrity = archive.db.execute("PRAGMA integrity_check").fetchone()[0]
+    # Verify without creating tables, writing WAL or changing source permissions.
+    uri = path.resolve().as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as db:
+        integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
             raise ValueError("SQLite database integrity check failed")
-        rows = archive.db.execute(
-            "SELECT digest, size_bytes FROM preserved_bundles ORDER BY digest"
+        schema = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='preserved_bundles'"
+        ).fetchone()
+        if schema is None:
+            raise ValueError("Not a ChainScope evidence archive: table missing")
+        rows = db.execute(
+            "SELECT digest, payload, size_bytes FROM preserved_bundles ORDER BY digest"
         ).fetchall()
-        total = sum(size for _, size in rows)
-        if len(rows) > MAX_BUNDLES or total > MAX_TOTAL_BYTES:
+        total = 0
+        if len(rows) > MAX_BUNDLES:
             raise ValueError("Archive exceeds supported capacity")
-        for digest, size in rows:
-            if size < 0:
-                raise ValueError("Invalid saved record length")
-            archive.retrieve(digest)
+        for digest, payload, declared_size in rows:
+            raw = bytes(payload)
+            if declared_size != len(raw):
+                raise ValueError("Archive record size mismatch")
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise ValueError("Stored evidence checksum mismatch")
+            verify_bundle(json.loads(raw))
+            total += len(raw)
+            if total > MAX_TOTAL_BYTES:
+                raise ValueError("Archive exceeds supported capacity")
         return {"bundles_verified": len(rows), "payload_bytes": total}
-
 
 def backup_archive(source: Path, destination: Path) -> dict:
     if not source.is_file() or source.is_symlink():

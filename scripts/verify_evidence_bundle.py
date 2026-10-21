@@ -16,10 +16,17 @@ def digest_rows(rows):
 
 
 def verify_bundle(bundle):
-    if bundle.get("schema_version") != "chainscope-evidence-bundle-v1":
+    if bundle.get("schema_version") != "chainscope-evidence-bundle-v2":
         raise ValueError("Unsupported evidence bundle format")
     if bundle.get("chain_id") != 1:
         raise ValueError("Unexpected Ethereum chain ID")
+    integrity = bundle.get("integrity", {})
+    expected_manifest = hashlib.sha256(json.dumps(
+        {key: value for key, value in bundle.items() if key != "integrity"},
+        sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    if integrity.get("manifest_algorithm") != "sha256" or integrity.get("manifest_digest") != expected_manifest:
+        raise ValueError("Evidence manifest mismatch: metadata or records were modified")
     rows = bundle.get("transactions")
     if not isinstance(rows, list):
         raise ValueError("Transactions must be a list")

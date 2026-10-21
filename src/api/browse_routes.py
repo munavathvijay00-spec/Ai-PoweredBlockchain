@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 from decimal import Decimal
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -279,7 +280,7 @@ def _evidence_digest(items: list[dict]) -> str:
 
 @router.get("/transaction-export")
 async def transaction_export(
-    format: Literal["csv", "json"] = "csv",
+    format: Literal["csv", "json", "bundle"] = "csv",
     search: str | None = Query(None, max_length=100),
     min_risk: int | None = Query(None, ge=0, le=100),
     max_risk: int | None = Query(None, ge=0, le=100),
@@ -297,6 +298,46 @@ async def transaction_export(
     matches = await _load_entity_matches(repo, rows)
     items = [_decorate_row(row, matches, False) for row in rows]
     evidence_sha256 = _evidence_digest(items)
+    if format == "bundle":
+        # A self-contained export that can be preserved offline. The digest
+        # covers the evidence rows, not this envelope or unverifiable claims.
+        return Response(
+            content=json.dumps({
+                "schema_version": "chainscope-evidence-bundle-v1",
+                "chain_id": 1,
+                "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+                "collection": "retained native Ethereum transactions matching export filters",
+                "source": "chainscope-retained-postgresql-snapshot",
+                "filters": {
+                    "search": search, "min_risk": min_risk, "max_risk": max_risk,
+                    "min_value_eth": min_value_eth, "max_value_eth": max_value_eth,
+                    "sort": sort,
+                },
+                "coverage": {
+                    "matching_transactions": int(aggregate.get("total") or 0),
+                    "exported_transactions": len(items),
+                    "truncated": int(aggregate.get("total") or 0) > len(items),
+                    "oldest_block": aggregate.get("oldest_block"),
+                    "newest_block": aggregate.get("newest_block"),
+                    "historical_completeness": False,
+                    "limitations": [
+                        "The hot-table retention window excludes older chain history.",
+                        "Block canonicality and chain finality are not established by this export.",
+                        "A digest proves byte-equivalent evidence fields, not authenticity.",
+                        "No server-side archival or legal chain of custody is claimed.",
+                    ],
+                },
+                "integrity": {
+                    "algorithm": "sha256",
+                    "digest": evidence_sha256,
+                    "canonicalization": "fields in _evidence_digest; sorted keys; compact UTF-8 JSON; original row order",
+                },
+                "transactions": items,
+            }, default=str, separators=(",", ":"), ensure_ascii=False),
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=chainscope-evidence-bundle.json",
+                     "Cache-Control": "no-store"},
+        )
     if format == "json":
         return {
             "transactions": items,

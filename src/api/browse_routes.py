@@ -301,9 +301,8 @@ async def transaction_export(
     if format == "bundle":
         # A self-contained export that can be preserved offline. The digest
         # covers the evidence rows, not this envelope or unverifiable claims.
-        return Response(
-            content=json.dumps({
-                "schema_version": "chainscope-evidence-bundle-v1",
+        payload = {
+                "schema_version": "chainscope-evidence-bundle-v2",
                 "chain_id": 1,
                 "captured_at_utc": datetime.now(timezone.utc).isoformat(),
                 "collection": "retained native Ethereum transactions matching export filters",
@@ -323,7 +322,7 @@ async def transaction_export(
                     "limitations": [
                         "The hot-table retention window excludes older chain history.",
                         "Block canonicality and chain finality are not established by this export.",
-                        "A digest proves byte-equivalent evidence fields, not authenticity.",
+                        "Unsigned digests reveal accidental changes, but cannot authenticate the publisher.",
                         "No server-side archival or legal chain of custody is claimed.",
                     ],
                 },
@@ -333,7 +332,15 @@ async def transaction_export(
                     "canonicalization": "fields in _evidence_digest; sorted keys; compact UTF-8 JSON; original row order",
                 },
                 "transactions": items,
-            }, default=str, separators=(",", ":"), ensure_ascii=False),
+            }
+        payload["integrity"]["manifest_digest"] = hashlib.sha256(
+            json.dumps({key: value for key, value in payload.items() if key != "integrity"},
+                       sort_keys=True, separators=(",", ":"), default=str,
+                       ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        payload["integrity"]["manifest_algorithm"] = "sha256"
+        return Response(
+            content=json.dumps(payload, default=str, separators=(",", ":"), ensure_ascii=False),
             media_type="application/json",
             headers={"Content-Disposition": "attachment; filename=chainscope-evidence-bundle.json",
                      "Cache-Control": "no-store"},

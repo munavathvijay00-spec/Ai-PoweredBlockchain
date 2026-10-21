@@ -56,16 +56,22 @@ def backup_archive(source: Path, destination: Path) -> dict:
     if not destination.parent.is_dir():
         raise ValueError("Backup directory must already exist")
     verify_archive(source)
-    # Exclusive create prevents replacing an existing artifact.
-    fd = os.open(destination, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    # First build and verify a private staging file; never expose a partial
+    # backup under the requested final pathname.
+    import tempfile
+    fd, staging_name = tempfile.mkstemp(prefix=".chainscope-backup-", suffix=".db", dir=destination.parent)
     os.close(fd)
+    staging = Path(staging_name)
     try:
-        with sqlite3.connect(source) as live, sqlite3.connect(destination) as saved:
+        with sqlite3.connect(source) as live, sqlite3.connect(staging) as saved:
             live.backup(saved)
-        return verify_archive(destination)
-    except BaseException:
-        destination.unlink(missing_ok=True)
-        raise
+        result = verify_archive(staging)
+        # Hard-link publication is exclusive: refuse replacing existing files
+        # even if another process created the destination in the meantime.
+        os.link(staging, destination, follow_symlinks=False)
+        return result
+    finally:
+        staging.unlink(missing_ok=True)
 
 
 def restore_archive(source: Path, destination: Path) -> dict:

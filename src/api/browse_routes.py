@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 from decimal import Decimal
@@ -259,6 +260,23 @@ async def transaction_browser(
     }
 
 
+def _evidence_digest(items: list[dict]) -> str:
+    """Fingerprint exported record contents independent of JSON/CSV formatting.
+
+    This is an integrity checksum, not proof of chain finality, completeness
+    or permanent evidence retention. The verifier must retain the export.
+    """
+    fields = ("hash", "from_address", "to_address", "value_wei",
+              "block_number", "timestamp", "risk_score", "risk_factors")
+    normalized = [
+        {field: item.get(field) for field in fields}
+        for item in items
+    ]
+    canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":"),
+                           default=str, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 @router.get("/transaction-export")
 async def transaction_export(
     format: Literal["csv", "json"] = "csv",
@@ -278,12 +296,16 @@ async def transaction_export(
         )
     matches = await _load_entity_matches(repo, rows)
     items = [_decorate_row(row, matches, False) for row in rows]
+    evidence_sha256 = _evidence_digest(items)
     if format == "json":
         return {
             "transactions": items,
             "count": len(items),
             "matching_transactions": int(aggregate.get("total") or 0),
             "truncated": int(aggregate.get("total") or 0) > len(items),
+            "evidence_sha256": evidence_sha256,
+            "hash_algorithm": "sha256",
+            "evidence_scope": "exported rows only; not a durable archive or complete chain history",
         }
 
     output = io.StringIO()
@@ -303,5 +325,6 @@ async def transaction_export(
             "X-Export-Matching-Transactions": str(int(aggregate.get("total") or 0)),
             "X-Export-Returned-Transactions": str(len(items)),
             "X-Export-Truncated": "true" if int(aggregate.get("total") or 0) > len(items) else "false",
+            "X-Evidence-SHA256": evidence_sha256,
         },
     )

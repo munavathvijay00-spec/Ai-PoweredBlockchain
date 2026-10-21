@@ -351,12 +351,13 @@ async def transaction_export(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["hash", "from_address", "to_address", "value_wei", "value_eth", "block_number", "timestamp", "risk_score", "explanation_status"])
+    writer.writerow(["hash", "from_address", "to_address", "value_wei", "value_eth", "block_number", "timestamp", "risk_score", "explanation_status", "risk_factors_json"])
     for item in items:
         writer.writerow([
             item.get("hash"), item.get("from_address"), item.get("to_address"),
             item.get("value_wei"), item.get("value_eth"), item.get("block_number"),
             item.get("timestamp"), item.get("risk_score"), item.get("explanation_status"),
+            json.dumps(item.get("risk_factors") or [], sort_keys=True, separators=(",", ":"), ensure_ascii=False),
         ])
     return Response(
         content=output.getvalue(),

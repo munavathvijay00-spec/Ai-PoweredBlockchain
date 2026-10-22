@@ -18,6 +18,7 @@ import httpx
 from loguru import logger
 
 from src.risk.evaluation import evaluate_predictions
+from src.risk.threshold_diagnostics import threshold_diagnostics
 from src.risk.evidence_v2 import assess_evidence
 
 DATASET_ID = "Stepan4545/tx_scam"
@@ -352,3 +353,49 @@ async def evaluate_external_benchmark(db, scorer, threshold: int = 20) -> Dict[s
         "scope": "Transaction-native rule evidence only; address-history/entity signals are unavailable in this external corpus.",
     })
     return metrics
+
+async def external_threshold_sensitivity(db, scorer) -> Dict[str, Any]:
+    """Score independent benchmark once, compare fixed thresholds without tuning.
+
+    The external corpus contains no transaction history or authoritative address
+    attribution, so native transaction amount-only evidence abstains by design.
+    Do not report these figures as deployment precision or fraud probability.
+    """
+    await ensure_external_benchmark_schema(db)
+    rows = await db.fetch(
+        """
+        SELECT source_row_idx, tx_hash, label, value_wei_text, gas,
+               gas_price_text, block_number
+        FROM external_detection_benchmark_cases
+        WHERE source=$1
+        ORDER BY source_row_idx
+        """, SOURCE_NAME,
+    )
+    cases = []
+    for row in rows:
+        tx = {
+            "hash": row["tx_hash"],
+            "value": int(row["value_wei_text"] or 0),
+            "gas": int(row["gas"] or 0),
+            "gas_price": int(row["gas_price_text"] or 0),
+            "block_number": int(row["block_number"] or 0),
+        }
+        result = await scorer.score_transaction(
+            tx, [], is_blacklisted=False, address_age_days=None
+        )
+        assessment = assess_evidence(result.get("factors") or [], tx_hash=row["tx_hash"])
+        cases.append({
+            "case_id": f"{SOURCE_NAME}:{row['source_row_idx']}",
+            "label": int(row["label"]),
+            "score": int(result.get("score") or 0),
+            "usable_evidence": assessment.get("assessment") != "insufficient_evidence",
+        })
+    report = threshold_diagnostics(cases)
+    report.update({
+        "source": SOURCE_NAME,
+        "source_reference": SOURCE_REFERENCE,
+        "representative": False,
+        "live_thresholds_modified": False,
+        "scope": "Retained external labels, native transaction rules only; no historical or attribution context.",
+    })
+    return report

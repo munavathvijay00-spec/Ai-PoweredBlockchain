@@ -204,6 +204,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_prepare_ai_and_benchmark(db)),
         asyncio.create_task(_verify_grounded_ai_runtime(db)),
     ]
+    if os.getenv("CHAINSCOPE_DEMO_REFRESH_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes"}:
+        from src.ingest.demo_refresh import safe_startup_demo_refresh
+        background_tasks.append(asyncio.create_task(safe_startup_demo_refresh(db)))
+        logger.info("One-block demo refresh scheduled; no continuous ingestion worker")
     if current_settings.run_ml_training_on_startup:
         background_tasks.append(asyncio.create_task(_prepare_independent_ml()))
         logger.info("Independent ML startup training enabled")

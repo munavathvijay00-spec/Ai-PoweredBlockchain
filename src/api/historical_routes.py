@@ -349,6 +349,11 @@ async def cached_wallet_history(
            ORDER BY updated_at DESC LIMIT 1""",
         wallet,
     )
+    # A completed provider cursor is not sufficient if retention has removed
+    # cached records; never claim the locally replayable subset is exhaustive.
+    complete = bool(sync and sync.get("outgoing_complete") and sync.get("incoming_complete"))
+    if complete and sync.get("records_cached") is not None and int(sync["records_cached"]) != total:
+        complete = False
     return {
         "address": wallet,
         "records": rows,
@@ -356,9 +361,10 @@ async def cached_wallet_history(
         "limit": limit,
         "offset": offset,
         "sync": sync,
-        "historical_complete_for_selected_categories": bool(
-            sync and sync.get("outgoing_complete") and sync.get("incoming_complete")
-        ),
+        "historical_complete_for_selected_categories": complete,
+        "cache_consistent_with_sync": bool(sync and int(sync.get("records_cached") or 0) == total),
+        "evidence_replayable_without_provider": bool(total),
+        "coverage_disclaimer": "Only normalized locally cached rows are replayable; provider-wide and EVM trace completeness are not guaranteed.",
         "cache_policy": {
             "max_rows_per_wallet": HISTORY_MAX_ROWS_PER_WALLET,
             "max_wallets": HISTORY_MAX_WALLETS,

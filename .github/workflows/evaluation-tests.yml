@@ -5,6 +5,8 @@ on:
       - 'scripts/evaluate_rule_baseline.py'
       - 'tests/test_external_baseline.py'
       - 'tests/test_ingestion_resilience_regression.py'
+      - 'tests/test_historical_evidence_regression.py'
+      - 'src/api/historical_routes.py'
       - 'src/ingest/cursor.py'
       - 'src/ingest/loop.py'
       - '.github/workflows/evaluation-tests.yml'
@@ -21,4 +23,4 @@ jobs:
       - name: Install focused test dependencies
         run: pip install -r requirements.txt
       - name: Run baseline regression tests
-        run: python -m pytest tests/test_external_baseline.py tests/test_ingestion_resilience_regression.py -q
+        run: python -m pytest tests/test_external_baseline.py tests/test_ingestion_resilience_regression.py tests/test_historical_evidence_regression.py -q

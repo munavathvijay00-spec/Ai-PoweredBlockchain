@@ -1,0 +1,21 @@
+name: Evaluation regression tests
+on:
+  push:
+    paths:
+      - 'scripts/evaluate_rule_baseline.py'
+      - 'tests/test_external_baseline.py'
+      - '.github/workflows/evaluation-tests.yml'
+  workflow_dispatch:
+jobs:
+  evaluation-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install focused test dependencies
+        run: pip install numpy scikit-learn pytest asyncpg loguru httpx
+      - name: Run baseline regression tests
+        run: python -m pytest tests/test_external_baseline.py -q

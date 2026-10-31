@@ -204,7 +204,11 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_prepare_ai_and_benchmark(db)),
         asyncio.create_task(_verify_grounded_ai_runtime(db)),
     ]
-    if os.getenv("CHAINSCOPE_DEMO_REFRESH_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes"}:
+    if os.getenv("CHAINSCOPE_LIVE_INGESTION", "false").strip().lower() in {"1", "true", "yes"}:
+        from src.ingest.loop import ingest_loop
+        background_tasks.append(asyncio.create_task(ingest_loop(interval_seconds=15)))
+        logger.info("Live ingestion scheduled while API instance is awake; free instances may sleep")
+    if not os.getenv("CHAINSCOPE_LIVE_INGESTION", "false").strip().lower() in {"1", "true", "yes"} and os.getenv("CHAINSCOPE_DEMO_REFRESH_ON_STARTUP", "false").strip().lower() in {"1", "true", "yes"}:
         from src.ingest.demo_refresh import safe_startup_demo_refresh
         background_tasks.append(asyncio.create_task(safe_startup_demo_refresh(db)))
         logger.info("One-block demo refresh scheduled; no continuous ingestion worker")

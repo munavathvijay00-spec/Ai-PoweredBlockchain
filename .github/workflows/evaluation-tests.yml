@@ -16,6 +16,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install focused test dependencies
-        run: pip install numpy scikit-learn pytest asyncpg loguru httpx
+        run: pip install numpy scikit-learn pytest asyncpg loguru httpx pydantic pydantic-settings
       - name: Run baseline regression tests
         run: python -m pytest tests/test_external_baseline.py -q

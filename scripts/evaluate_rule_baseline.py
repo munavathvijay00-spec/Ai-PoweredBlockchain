@@ -24,6 +24,8 @@ from sklearn.model_selection import GroupShuffleSplit
 
 from src.database.connection import get_db, close_db
 from src.risk.external_benchmark import SOURCE_NAME, ensure_external_benchmark_schema
+from src.risk.scorer import get_scorer
+from src.risk.evidence_v2 import assess_evidence
 
 
 def extract_features(row):
@@ -84,6 +86,24 @@ async def evaluate():
         baseline.fit(features[train], labels[train])
         lr = LogisticRegression(max_iter=2000, class_weight="balanced", random_state=42)
         lr.fit(features[train], labels[train])
+        scorer = get_scorer()
+        rule_predictions = []
+        abstentions = 0
+        for index in test:
+            row = rows[int(index)]
+            tx = {
+                "hash": row["tx_hash"],
+                "value": int(row["value_wei_text"] or 0),
+                "gas": int(row["gas"] or 0),
+                "gas_price": int(row["gas_price_text"] or 0),
+            }
+            scored = await scorer.score_transaction(tx, [], is_blacklisted=False, address_age_days=None)
+            insufficient = assess_evidence(scored.get("factors") or [], row["tx_hash"]).get("assessment") == "insufficient_evidence"
+            if insufficient:
+                abstentions += 1
+            rule_predictions.append(None if insufficient else int(int(scored.get("score") or 0) >= 20))
+        selected = [i for i, p in enumerate(rule_predictions) if p is not None]
+        rule_metrics = metrics(labels[test][selected], [rule_predictions[i] for i in selected]) if selected else None
         report = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "dataset": SOURCE_NAME,
@@ -94,6 +114,13 @@ async def evaluate():
             "random_seed": 42,
             "feature_names": ["log1p(value_wei)", "log1p(gas)", "log1p(gas_price_wei)"],
             "majority_class_baseline": metrics(labels[test], baseline.predict(features[test])),
+            "chainscope_rules": {
+                "threshold": 20,
+                "cases_evaluated": len(selected),
+                "abstentions": abstentions,
+                "coverage_fraction": len(selected) / len(test),
+                "metrics_on_non_abstained": rule_metrics,
+            },
             "logistic_regression": metrics(
                 labels[test], lr.predict(features[test]),
                 lr.predict_proba(features[test])[:, 1],

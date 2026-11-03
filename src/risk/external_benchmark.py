@@ -211,7 +211,6 @@ async def _fetch_balanced_rows(per_class: int) -> tuple[dict[int, list[Dict[str,
     total_rows = int(total_rows or len(first_page))
     max_offset = max(0, total_rows - 100)
 
-    # Sample more pages as the requested corpus grows while keeping startup work bounded.
     page_budget = min(48, max(16, int(per_class / 20) + 8))
     offsets = [max_offset]
     if max_offset:

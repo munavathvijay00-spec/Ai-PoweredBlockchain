@@ -218,3 +218,141 @@ html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
 @media (prefers-reduced-motion: reduce) {
   .cs-studio *, .cs-studio *::before, .cs-studio *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+
+/* Second-pass workstation refinement: predictable density and strong hierarchy. */
+.cs-workspace { overflow-wrap: anywhere; }
+.cs-workspace .font-mono, .cs-workspace code { overflow-wrap: anywhere; }
+.cs-workspace section, .cs-workspace article { min-width: 0; }
+.cs-workspace button:disabled { opacity: .48; cursor: not-allowed; }
+.cs-workspace button:not(:disabled):focus-visible,
+.cs-workspace a:focus-visible,
+.cs-mobile-navigation button:focus-visible,
+.cs-workspace input:focus-visible,
+.cs-workspace select:focus-visible {
+  outline: 2px solid #a0e0d1 !important;
+  outline-offset: 2px;
+}
+.cs-sidebar { z-index: 10; }
+.cs-topbar { z-index: 5; }
+.cs-page-intro h1 { max-width: 22ch; }
+.cs-page-intro > div > p:last-child { max-width: 67ch; }
+.cs-page-intro { padding-top: 2px; }
+.cs-investigate-main > section:first-child { margin-top: 0; }
+.cs-investigate-main { scroll-margin-top: 28px; }
+.cs-investigate-main > section:first-child h2 { color: var(--cs-primary); letter-spacing: -.025em; }
+.cs-investigate-main > section:first-child .soft-input { max-width: none; }
+.cs-workspace nav[aria-label="Investigation sections"] {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  gap: 4px !important;
+  border-radius: 8px !important;
+  backdrop-filter: blur(12px);
+}
+.cs-workspace nav[aria-label="Investigation sections"] a {
+  font-weight: 550;
+  letter-spacing: 0;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 13px;
+}
+.cs-workspace [id$="-title"] { scroll-margin-top: 88px; }
+.cs-workspace .panel, .cs-workspace .panel-strong { min-width: 0; }
+.cs-workspace .panel h2, .cs-workspace .panel-strong h2 {
+  letter-spacing: -.025em;
+}
+.cs-workspace input, .cs-workspace select, .cs-workspace textarea {
+  max-width: 100%;
+}
+.cs-workspace .soft-input { border-radius: 7px; }
+.cs-workspace .metric-card:focus-visible { outline: 2px solid var(--cs-accent); }
+.cs-stat-grid { margin-bottom: 2px; }
+.cs-stat-card {
+  position: relative;
+  padding: 20px 18px !important;
+  border-color: var(--cs-border) !important;
+  background: var(--cs-surface) !important;
+  transition: background 140ms ease, border-color 140ms ease !important;
+}
+.cs-stat-card:hover {
+  background: var(--cs-surface-raised) !important;
+  border-color: #526862 !important;
+}
+.cs-stat-card .metric-label { color: #aebfba !important; }
+.cs-stat-value {
+  color: #e9f2ee !important;
+  letter-spacing: -.045em;
+  font-variant-numeric: tabular-nums;
+}
+.cs-stat-value.cs-stat-warning { color: var(--cs-warning) !important; }
+.cs-stat-note { color: #98a9a4 !important; line-height: 1.45; }
+.cs-filter-panel { margin-top: 4px; }
+.cs-filter-panel h2 { font-size: 15px !important; letter-spacing: -.025em; }
+.cs-filter-panel label {
+  display: block;
+  color: #c4d1cb;
+  line-height: 1.5;
+}
+.cs-filter-panel .cs-filter-input {
+  min-height: 42px;
+  background: #171e20 !important;
+  border: 1px solid #445452 !important;
+  color: #e8efec !important;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+.cs-filter-panel .cs-filter-input:focus { border-color: #9bd1c5 !important; background: #1b2527 !important; }
+.cs-filter-panel .cs-filter-input::placeholder { color: #99aaa4; }
+.cs-queue-pill {
+  background: #222a2b;
+  border-color: #43504e;
+  color: #d3dfda;
+  white-space: nowrap;
+}
+.cs-queue-pill:hover { background: #2d3938; border-color: #71847b; }
+.cs-queue-review { border-left: 2px solid #c4a976; }
+.cs-queue-high { border-left: 2px solid #d9a479; }
+.cs-queue-critical { border-left: 2px solid #d58f8b; }
+.cs-export-button {
+  color: #d8e5df !important;
+  background: #242f2e !important;
+  border-color: #4a625d !important;
+}
+.cs-export-button:hover { background: #33413e !important; border-color: #729a8e !important; }
+.cs-page-count { background: #202a29; border: 1px solid #3c4c49; white-space: nowrap; }
+.cs-monitor-subnav {
+  scrollbar-width: thin;
+  scrollbar-color: #526a63 transparent;
+}
+.cs-monitor-tab { min-height: 46px; }
+.cs-monitor-tab-active { font-weight: 650; }
+.cs-workspace .transaction-panel-head,
+.cs-workspace .transaction-row { border-color: #34403f !important; }
+.cs-workspace .transaction-row:hover { background: #263331 !important; }
+.cs-workspace table th { font-size: 11px; letter-spacing: .025em; font-weight: 620; }
+.cs-workspace table td { vertical-align: middle; }
+.cs-workspace .panel :is(h2,h3), .cs-workspace .panel-strong :is(h2,h3) { text-wrap: pretty; }
+.cs-workspace :is(p, li) { line-height: 1.55; }
+.cs-main-foot { margin-top: auto; }
+@media (min-width: 851px) {
+  .cs-topbar { position: sticky; top: 0; }
+}
+@media (max-width: 1180px) and (min-width: 851px) {
+  .cs-stat-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
+@media (max-width: 640px) {
+  .cs-workspace { padding: 20px 14px 40px; }
+  .cs-page-intro { margin-bottom: 18px; }
+  .cs-page-intro h1 { font-size: 27px; }
+  .cs-stat-card { padding: 16px 14px !important; }
+  .cs-stat-value { font-size: 25px !important; }
+  .cs-filter-panel { padding: 16px !important; }
+  .cs-monitor-tab { padding: 12px 10px; font-size: 11px; }
+  .cs-intro-tag { white-space: normal; }
+  .cs-topbar { padding-left: 15px; padding-right: 15px; }
+  .cs-workspace nav[aria-label="Investigation sections"] {
+    position: static;
+    padding: 8px !important;
+  }
+}

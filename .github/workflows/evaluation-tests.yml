@@ -28,4 +28,4 @@ jobs:
       - name: Run baseline regression tests
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-        run: python -m pytest -p pytest_asyncio.plugin tests/test_external_baseline.py tests/test_ingestion_resilience_regression.py tests/test_historical_evidence_regression.py tests/test_expired_catchup.py -q
+        run: python -m pytest -c /dev/null --noconftest -p pytest_asyncio.plugin tests/test_external_baseline.py tests/test_ingestion_resilience_regression.py tests/test_historical_evidence_regression.py tests/test_expired_catchup.py -q

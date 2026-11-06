@@ -88,15 +88,53 @@ export default function TransactionList({ transactions = [], onSelect, totalMatc
     {!loading && !error && !shown && <div className="py-14 text-center text-sm text-slate-400">No transactions match the active filters.</div>}
 
     {!loading && !error && shown > 0 && <>
-      <div className="hidden overflow-x-auto md:block"><table className="w-full border-collapse text-left text-sm"><thead className="border-y border-[#39475d] bg-[#111d31] text-xs uppercase tracking-wide text-slate-400"><tr><SortHeader label="Time" field="time" sort={sort === 'newest' ? 'time_desc' : sort === 'oldest' ? 'time_asc' : sort} onSort={value => onSort(value === 'time_desc' ? 'newest' : 'oldest')} /><th className="px-4 py-3">Hash</th><th className="px-4 py-3">From</th><th className="px-4 py-3">To</th><SortHeader label="Value" field="value" sort={sort} onSort={onSort} /><SortHeader label="Risk" field="risk" sort={sort} onSort={onSort} /><th className="px-4 py-3">Signal</th><th className="px-4 py-3">Action</th></tr></thead><tbody className="divide-y divide-[#39475d]">{transactions.map(tx => {
-        const score = Number(tx.risk_score) || 0;
-        const risk = riskMeta(score);
-        const amount = formatEth(tx);
-        const reason = factorReason(tx);
-        return <tr key={tx.hash} className="hover:bg-white/[0.025]"><td className="whitespace-nowrap px-4 py-3 text-xs text-slate-300">{timeLabel(tx.timestamp)}</td><td className="px-4 py-3 font-mono text-xs text-slate-300" title={tx.hash}>{shortHash(tx.hash)}</td><td className="px-4 py-3"><AddressCell address={tx.from_address} matches={tx.entity_context?.sender} /></td><td className="px-4 py-3"><AddressCell address={tx.to_address} matches={tx.entity_context?.recipient} /></td><td className="whitespace-nowrap px-4 py-3 font-medium text-white">{amount.text}</td><td className="px-4 py-3"><button type="button" aria-expanded={openScore === tx.hash} onClick={() => setOpenScore(openScore === tx.hash ? null : tx.hash)} className={`inline-flex rounded border px-2 py-1 text-xs font-semibold hover:underline ${risk.cls}`} title="Show recorded score factors">{risk.symbol} {risk.label} · {score} ▾</button>{openScore === tx.hash && <div className="mt-2 max-w-xs text-xs text-slate-300">{Array.isArray(tx.risk_factors) && tx.risk_factors.length ? tx.risk_factors.map((factor, i) => <div key={i}>+{Number(factor.points) || 0}: {factor.reason || factor.factor || 'Recorded signal'}</div>) : 'No recorded score factors'}<div className="mt-1 text-slate-500">Recorded score {score}/100 · raw factor total {tx.risk_factors.reduce((sum, f) => sum + (Number(f?.points) || 0), 0)} (capped at 100) · review priority, not fraud probability</div></div>}</td><td className="max-w-[240px] px-4 py-3 text-xs text-slate-300">{reason || 'No recorded signal'}</td><td className="px-4 py-3"><button type="button" onClick={() => onSelect(tx)} className="workspace-chip">View details</button></td></tr>;
-      })}</tbody></table></div>
+      <div className="cs-transaction-scroll hidden xl:block" role="region" aria-label="Transactions table" tabIndex={0}>
+        <table className="cs-transaction-table w-full border-collapse text-left text-sm">
+          <thead>
+            <tr>
+              <SortHeader label="Time" field="time" sort={sort === 'newest' ? 'time_desc' : sort === 'oldest' ? 'time_asc' : sort} onSort={value => onSort(value === 'time_desc' ? 'newest' : 'oldest')} />
+              <th scope="col">Transaction</th>
+              <th scope="col">Transfer path</th>
+              <SortHeader label="Amount" field="value" sort={sort} onSort={onSort} />
+              <SortHeader label="Review score" field="risk" sort={sort} onSort={onSort} />
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {transactions.map(tx => {
+              const score = Number(tx.risk_score) || 0;
+              const risk = riskMeta(score);
+              const amount = formatEth(tx);
+              const reason = factorReason(tx);
+              return <tr key={tx.hash}>
+                <td className="cs-transaction-time" title={timeLabel(tx.timestamp)}>{timeLabel(tx.timestamp)}</td>
+                <td className="cs-transaction-hash" title={tx.hash}>
+                  <span className="font-mono text-xs">{shortHash(tx.hash)}</span>
+                  <a href={`https://etherscan.io/tx/${encodeURIComponent(tx.hash)}`} target="_blank" rel="noopener noreferrer" className="cs-transaction-link" aria-label={`Inspect transaction ${tx.hash} on Etherscan`}>View on Etherscan ↗</a>
+                </td>
+                <td className="cs-transaction-path">
+                  <div className="cs-path-pair">
+                    <span className="cs-path-direction">From</span>
+                    <AddressCell address={tx.from_address} matches={tx.entity_context?.sender} />
+                    <span className="cs-path-arrow" aria-hidden="true">→</span>
+                    <span className="cs-path-direction">To</span>
+                    <AddressCell address={tx.to_address} matches={tx.entity_context?.recipient} />
+                  </div>
+                </td>
+                <td className="cs-transaction-value" title={amount.title}>{amount.text}</td>
+                <td className="cs-transaction-risk">
+                  <button type="button" aria-expanded={openScore === tx.hash} onClick={() => setOpenScore(openScore === tx.hash ? null : tx.hash)} className={`cs-score-button inline-flex items-center rounded border px-2 py-1.5 text-xs font-semibold ${risk.cls}`} title="Show recorded score factors">{risk.label} · {score} <span aria-hidden="true">{openScore === tx.hash ? '▴' : '▾'}</span></button>
+                  <p className="cs-signal-summary" title={reason || 'No recorded signal'}>{reason || 'No recorded signal'}</p>
+                  {openScore === tx.hash && <div className="cs-factor-popout text-xs text-slate-300">{Array.isArray(tx.risk_factors) && tx.risk_factors.length ? tx.risk_factors.map((factor, i) => <div key={i}>+{Number(factor.points) || 0}: {factor.reason || factor.factor || 'Recorded signal'}</div>) : 'No recorded score factors'}<p className="mt-2">Review score {score}/100 — not a fraud probability.</p></div>}
+                </td>
+                <td className="cs-transaction-action"><button type="button" onClick={() => onSelect(tx)} className="workspace-chip cs-details-button">View details <span aria-hidden="true">↗</span></button></td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
 
-      <div className="divide-y divide-[#39475d] md:hidden">{transactions.map(tx => {
+      <div className="cs-transaction-mobile divide-y divide-[#39475d] xl:hidden">{transactions.map(tx => {
         const score = Number(tx.risk_score) || 0;
         const risk = riskMeta(score);
         const amount = formatEth(tx);

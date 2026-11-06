@@ -437,6 +437,6 @@ export default function UnifiedInvestigationGraph({ wallet, fundFlow }) {
         nodeContext={nodeContext}
       />
     </Suspense>}
-    {!loading && !transactions.length && !error && <div className="panel p-6 text-sm text-slate-400">No graphable indexed transfers are currently available for this wallet. The live table retains only recent transactions; historical transfer coverage depends on the address-indexed provider. Try another wallet or check System Coverage.</div>}
+    {!loading && !transactions.length && !error && <div className="panel p-6 text-sm text-slate-400"><p>No graphable indexed transfers are currently available for this wallet.</p><p className="mt-2">The live table retains only recent transactions; historical transfer coverage depends on the address-indexed provider. Try another wallet or check System Coverage.</p></div>}
   </section>;
 }

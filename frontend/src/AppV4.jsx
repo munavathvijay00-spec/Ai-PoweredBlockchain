@@ -17,11 +17,11 @@ const amount = value => {
   return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(value ?? '—');
 };
 
-function WorkflowRail() {
+function WorkflowRail({ hasEvidence = false }) {
   const sections = [
-    ['Summary', '#brief-title'], ['Leads', '#explainable-findings-title'],
-    ['Graph', '#unified-graph-title'], ['Timeline', '#timeline-title'],
-    ['Evidence', '#semantic-title'], ['Report', '#report-title'],
+    ['Overview', '#brief-title'], ['Flow graph', '#unified-graph-title'],
+    ['Findings', '#explainable-findings-title'],
+    ...(hasEvidence ? [['Timeline', '#timeline-title'], ['Evidence', '#semantic-title']] : []),
   ];
   return <nav className="panel flex flex-wrap items-center gap-2 p-3" aria-label="Investigation sections">
     {sections.map(([label, target]) => <a key={label} href={target} className="rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-medium text-slate-200 hover:border-cyan-400/40 hover:text-cyan-200">{label}</a>)}
@@ -99,9 +99,9 @@ function Investigation() {
     setLoading(false);
   }
 
-  return <div className="min-h-screen bg-[#0d1628] text-slate-100"><main className="platform-shell space-y-5 py-6">
-    <section className="panel-strong p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="eyebrow">Investigation</p><h1 className="mt-2 text-2xl font-semibold text-white">One wallet. One evidence trail.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Search once, inspect evidence, explore observed transfer paths, and review findings with explicit coverage limits.</p></div><span className="status-pill border-cyan-400/20 bg-cyan-400/[0.06] text-cyan-200">Evidence-first</span></div><form onSubmit={investigate} className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={address} onChange={event => setAddress(event.target.value)} className="soft-input min-w-0 flex-1 font-mono" placeholder="0x… Ethereum wallet address" aria-label="Ethereum wallet address" autoComplete="off" spellCheck="false" /><button className="primary-button sm:min-w-44" disabled={loading}>{loading ? 'Building intelligence…' : 'Investigate wallet'}</button></form>{error && <p role="alert" className="mt-3 text-sm text-amber-200">{error}</p>}</section>
-    <WorkflowRail />
+  return <div className="min-h-screen bg-[#0d1628] text-slate-100"><main className="platform-shell cs-investigate-main space-y-5 py-6">
+    <section className="panel-strong p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="eyebrow">Investigation</p><h2 className="mt-2 text-2xl font-semibold text-white">One wallet. One evidence trail.</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Search once, inspect evidence, explore observed transfer paths, and review findings with explicit coverage limits.</p></div><span className="status-pill border-cyan-400/20 bg-cyan-400/[0.06] text-cyan-200">Evidence-first</span></div><form onSubmit={investigate} className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={address} onChange={event => setAddress(event.target.value)} className="soft-input min-w-0 flex-1 font-mono" placeholder="0x… Ethereum wallet address" aria-label="Ethereum wallet address" autoComplete="off" spellCheck="false" /><button className="primary-button sm:min-w-44" disabled={loading}>{loading ? 'Building intelligence…' : 'Investigate wallet'}</button></form>{error && <p role="alert" className="mt-3 text-sm text-amber-200">{error}</p>}</section>
+    {wallet && <WorkflowRail hasEvidence={Boolean(flow)} />}
     {wallet && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Investigation summary"><div className="panel p-4"><p className="eyebrow">Wallet</p><a href={`https://etherscan.io/address/${wallet}`} target="_blank" rel="noreferrer" className="mt-3 block font-mono text-sm text-cyan-300">{short(wallet)} ↗</a></div><div className="panel p-4"><p className="eyebrow">Native in</p><p className="mt-3 text-xl font-semibold text-emerald-300">{flow ? eth(flow.flow_summary?.observed_incoming_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Native out</p><p className="mt-3 text-xl font-semibold text-amber-200">{flow ? eth(flow.flow_summary?.observed_outgoing_wei) : '—'} ETH</p></div><div className="panel p-4"><p className="eyebrow">Token assets</p><p className="mt-3 text-xl font-semibold text-violet-200">{flow?.token_flow?.assets?.length ?? '—'}</p></div><div className="panel p-4"><p className="eyebrow">AI findings</p><p className="mt-3 text-xl font-semibold text-slate-100">{copilot?.claims?.length || 0}</p></div></section>}
     {wallet && <IntelligenceBrief wallet={wallet} flow={flow} report={report} coverage={coverage} copilot={copilot} />}
     {wallet && <Suspense fallback={<div className="panel p-6" role="status">Loading investigation graph…</div>}><UnifiedInvestigationGraph wallet={wallet} fundFlow={flow} /></Suspense>}
@@ -163,7 +163,7 @@ export default function AppV4() {
             <span aria-hidden="true">/</span>
             <strong>{workspace === 'monitor' ? 'Network monitor' : 'Wallet investigation'}</strong>
           </div>
-          <div className="cs-topbar-meta"><span className="cs-topbar-dot" aria-hidden="true" /> Ethereum · Mainnet <span className="cs-topbar-divider" /> Research environment</div>
+          <div className="cs-topbar-meta"><span className="cs-topbar-dot" aria-hidden="true" /> Ethereum mainnet <span className="cs-topbar-divider" /> Research prototype</div>
         </header>
         <div className="cs-mobile-navigation" aria-label="Workspace navigation">
           {areas.map(area => <button key={area.id} type="button" className={workspace === area.id ? 'cs-mobile-active' : ''} aria-current={workspace === area.id ? 'page' : undefined} onClick={() => setWorkspace(area.id)}>{area.title}</button>)}
@@ -177,7 +177,7 @@ export default function AppV4() {
                 ? 'Review recent Ethereum transfers, prioritize signals, and inspect the underlying evidence.'
                 : 'Follow observed transactions, examine counterparties, and verify each claim against source evidence.'}</p>
             </div>
-            <span className="cs-intro-tag">{workspace === 'monitor' ? 'Live data · bounded coverage' : 'Evidence-led workflow'}</span>
+            <span className="cs-intro-tag">{workspace === 'monitor' ? 'Recent blocks · verify freshness' : 'Observed transfers only'}</span>
           </div>
           {workspace === 'investigate' && <Investigation />}
           {workspace === 'monitor' && <div className="cs-monitor"><Suspense fallback={<div className="platform-shell" role="status">Loading network monitor…</div>}><App embedded /></Suspense></div>}

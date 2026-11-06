@@ -502,3 +502,54 @@ html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
 
 /* AA legibility for the small chain identifier in the network context panel. */
 .cs-sidebar-context .cs-chain-id { color: #b4c4cf; }
+
+
+/* Transaction table: prevent column collapse in the 236px-side-rail workstation.
+   Keep the horizontal scrollbar inside the data panel, never the entire page. */
+.cs-monitor .transaction-panel { min-width: 0; overflow: hidden; }
+.cs-transaction-scroll { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; }
+.cs-transaction-table {
+  width: 100%;
+  min-width: 1050px;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+.cs-transaction-table th,
+.cs-transaction-table td { text-align: left; vertical-align: middle; padding: 14px 13px; line-height: 1.4; }
+.cs-transaction-table thead { background: #132333 !important; }
+.cs-transaction-table thead th { padding-top: 13px; padding-bottom: 13px; font-weight: 650; white-space: nowrap; border-bottom: 1px solid #365064; }
+.cs-transaction-table thead th button { min-height: 34px; white-space: nowrap; }
+.cs-transaction-table tbody tr { border-bottom: 1px solid #2c3f50; }
+.cs-transaction-table tbody tr:last-child { border-bottom: 0; }
+.cs-transaction-table tbody tr:hover { background: #1e3141 !important; }
+.cs-transaction-table th:nth-child(1),.cs-transaction-table td:nth-child(1) { width: 16%; }
+.cs-transaction-table th:nth-child(2),.cs-transaction-table td:nth-child(2) { width: 16%; }
+.cs-transaction-table th:nth-child(3),.cs-transaction-table td:nth-child(3) { width: 29%; }
+.cs-transaction-table th:nth-child(4),.cs-transaction-table td:nth-child(4) { width: 13%; }
+.cs-transaction-table th:nth-child(5),.cs-transaction-table td:nth-child(5) { width: 15%; }
+.cs-transaction-table th:nth-child(6),.cs-transaction-table td:nth-child(6) { width: 11%; }
+.cs-transaction-time { font-size: 12px; color: #bac9d5; white-space: nowrap; }
+.cs-transaction-hash,.cs-transaction-path { min-width: 0; }
+.cs-transaction-hash { color: #dbe7ec; }
+.cs-transaction-link { display: block; width: fit-content; margin-top: 5px; font-size: 11px; color: #9bd8e0; text-decoration: none; white-space: nowrap; }
+.cs-transaction-link:hover { text-decoration: underline; }
+.cs-path-pair { display: grid; grid-template-columns: 36px minmax(0,1fr) 18px; align-items: center; column-gap: 7px; row-gap: 5px; }
+.cs-path-direction { font-size: 10px; color: #98b0c3; font-weight: 650; text-transform: uppercase; letter-spacing: .035em; }
+.cs-path-arrow { grid-column: 3; grid-row: 1 / span 2; color: #87b6bd; font-size: 18px; }
+.cs-path-pair > div:nth-of-type(1) { grid-column: 2; grid-row: 1; }
+.cs-path-pair > div:nth-of-type(2) { grid-column: 2; grid-row: 2; }
+.cs-transaction-value { font-size: 12px; font-weight: 650; color: #ecf3f7; overflow-wrap: break-word; }
+.cs-transaction-risk { position: relative; }
+.cs-score-button { max-width: 100%; gap: 5px; white-space: nowrap; }
+.cs-signal-summary { margin-top: 7px; max-width: 22ch; font-size: 11px; line-height: 1.45; color: #afbfcc; overflow-wrap: break-word; }
+.cs-factor-popout { max-width: 240px; margin-top: 10px; padding: 10px; background: #10212e; border: 1px solid #385365; border-radius: 7px; overflow-wrap: break-word; }
+.cs-details-button { display: inline-flex; flex-wrap: nowrap; min-width: 105px; min-height: 38px !important; padding: 8px 11px !important; gap: 6px; white-space: nowrap !important; font-size: 12px !important; font-weight: 650; color: #e2eef2 !important; }
+.cs-details-button:hover { background: #2b4557 !important; }
+.cs-transaction-mobile article { min-width: 0; }
+.cs-transaction-mobile .workspace-chip { white-space: nowrap; }
+@media (max-width: 1279px) {
+  .cs-transaction-mobile article { padding: 19px 20px; }
+}
+@media (max-width: 520px) {
+  .cs-transaction-mobile article { padding: 17px 15px; }
+}

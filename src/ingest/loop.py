@@ -30,6 +30,7 @@ from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
 from src.ingest.reorg import ensure_lineage_schema, record_lineage, recover_shallow_reorg
 from src.ingest.expired_catchup import jump_past_expired_history
+from src.ingest.checkpoint_reconcile import reconcile_competing_worker
 from src.storage_budget import LIVE_RETENTION_MINUTES, prune_lineage
 
 
@@ -104,7 +105,7 @@ def is_chain_integrity_failure(error: Exception) -> bool:
     )
 
 
-async def ingest_loop(interval_seconds: int = 15):
+async def ingest_loop(interval_seconds: int = 15, *, standalone: bool = False):
     logger.info(
         "🚀 Starting ingest loop (interval={}s, live_retention={}m)",
         interval_seconds,
@@ -339,6 +340,22 @@ async def ingest_loop(interval_seconds: int = 15):
                         logger.warning(f"Lineage cleanup error (non-fatal): {cleanup_err}")
 
             except Exception as e:
+                # Rolling deployments briefly overlap two API instances.
+                # The checkpoint CAS correctly rejects losing writes; a loser
+                # may resume only after verifying the saved winner's canonical
+                # hash on RPC. Any other integrity conflict still halts.
+                if "CHECKPOINT_CONFLICT:" in str(e):
+                    winner = await reconcile_competing_worker(
+                        db, client, last_processed_block
+                    )
+                    if winner is not None:
+                        last_processed_block, last_block_hash = winner
+                        logger.warning(
+                            "Rolling-deploy checkpoint race resolved against canonical block {}; "
+                            "resuming from verified winner",
+                            last_processed_block,
+                        )
+                        continue
                 logger.exception(f"❌ Error in iteration {iteration}: {e}")
                 if is_chain_integrity_failure(e):
                     logger.critical(
@@ -359,7 +376,10 @@ async def ingest_loop(interval_seconds: int = 15):
     finally:
         logger.info("🔌 Closing connections...")
         await client.close()
-        await close_db()
+        # FastAPI owns the shared DB pool. Closing it from a failed background
+        # ingestor would also break every healthy API endpoint.
+        if standalone:
+            await close_db()
         logger.success(f"✅ Ingest loop stopped after {iteration} iterations")
 
 
@@ -377,7 +397,7 @@ def main():
     signal.signal(signal.SIGTERM, _handle_shutdown)
 
     try:
-        asyncio.run(ingest_loop(interval_seconds=interval))
+        asyncio.run(ingest_loop(interval_seconds=interval, standalone=True))
     except KeyboardInterrupt:
         logger.info("👋 Goodbye!")
 

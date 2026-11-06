@@ -114,9 +114,76 @@ function Investigation() {
 
 export default function AppV4() {
   const [workspace, setWorkspace] = useState('monitor');
-  return <div className="min-h-screen bg-[#0d1628]">
-    <div className="sticky top-0 z-[80] border-b border-slate-800 bg-[#09111f]/95 px-3 py-2 backdrop-blur"><div className="mx-auto flex max-w-[1540px] flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="text-sm font-semibold tracking-[0.15em] text-cyan-300">CHAINSCOPE</span><span className="hidden text-xs text-slate-400 sm:inline">Investigation OS</span></div><nav className="flex max-w-full gap-1 overflow-x-auto" aria-label="Product workspace"><button onClick={() => setWorkspace('investigate')} aria-current={workspace === 'investigate' ? 'page' : undefined} className={`workspace-chip ${workspace === 'investigate' ? 'workspace-chip-active' : ''}`}>Investigate</button><button onClick={() => setWorkspace('monitor')} aria-current={workspace === 'monitor' ? 'page' : undefined} className={`workspace-chip ${workspace === 'monitor' ? 'workspace-chip-active' : ''}`}>Monitor</button></nav></div></div>
-    {workspace === 'investigate' && <Investigation />}
-    {workspace === 'monitor' && <Suspense fallback={<div className="platform-shell py-8" role="status">Loading Monitor…</div>}><App /></Suspense>}
-  </div>;
+  const areas = [
+    { id: 'monitor', index: '01', title: 'Network monitor', description: 'Live transaction review' },
+    { id: 'investigate', index: '02', title: 'Wallet investigation', description: 'Trace observed fund flows' },
+  ];
+  return (
+    <div className="cs-studio">
+      <a className="cs-skip" href="#cs-workspace">Skip to workspace</a>
+      <aside className="cs-sidebar" aria-label="ChainScope workspace">
+        <div className="cs-brand">
+          <span className="cs-brand-mark" aria-hidden="true"><span /><span /><span /></span>
+          <span className="cs-brand-copy"><strong>ChainScope</strong><small>Ethereum intelligence</small></span>
+        </div>
+        <div className="cs-sidebar-body">
+          <p className="cs-nav-label">Workspace</p>
+          <nav className="cs-workspace-nav" aria-label="Primary navigation">
+            {areas.map(area => (
+              <button
+                type="button"
+                key={area.id}
+                onClick={() => setWorkspace(area.id)}
+                aria-current={workspace === area.id ? 'page' : undefined}
+                className={`cs-nav-item ${workspace === area.id ? 'cs-nav-item-active' : ''}`}
+              >
+                <span className="cs-nav-index" aria-hidden="true">{area.index}</span>
+                <span><strong>{area.title}</strong><small>{area.description}</small></span>
+                <span className="cs-nav-caret" aria-hidden="true">›</span>
+              </button>
+            ))}
+          </nav>
+          <div className="cs-sidebar-context">
+            <p className="cs-nav-label">Analysis scope</p>
+            <div className="cs-network"><span className="cs-network-glyph" aria-hidden="true" /> Ethereum mainnet <span className="cs-chain-id">01</span></div>
+            <p>Observed transfers are evidence of activity—not proof of wallet ownership or fraudulent intent.</p>
+          </div>
+        </div>
+        <div className="cs-sidebar-foot">
+          <span className="cs-foot-rule" />
+          <span>CHAIN / 01</span>
+          <span>Evidence-first analysis</span>
+        </div>
+      </aside>
+
+      <div className="cs-content">
+        <header className="cs-topbar">
+          <div className="cs-breadcrumb">
+            <span className="cs-breadcrumb-root">Workspace</span>
+            <span aria-hidden="true">/</span>
+            <strong>{workspace === 'monitor' ? 'Network monitor' : 'Wallet investigation'}</strong>
+          </div>
+          <div className="cs-topbar-meta"><span className="cs-topbar-dot" aria-hidden="true" /> Ethereum · Mainnet <span className="cs-topbar-divider" /> Research environment</div>
+        </header>
+        <div className="cs-mobile-navigation" aria-label="Workspace navigation">
+          {areas.map(area => <button key={area.id} type="button" className={workspace === area.id ? 'cs-mobile-active' : ''} aria-current={workspace === area.id ? 'page' : undefined} onClick={() => setWorkspace(area.id)}>{area.title}</button>)}
+        </div>
+        <main id="cs-workspace" className="cs-workspace" tabIndex={-1}>
+          <div className="cs-page-intro">
+            <div>
+              <p className="cs-overline">CHAIN INTELLIGENCE <span aria-hidden="true">/</span> {workspace === 'monitor' ? 'LIVE OBSERVATION' : 'CASE WORKSPACE'}</p>
+              <h1>{workspace === 'monitor' ? 'Network monitor' : 'Wallet investigation'}</h1>
+              <p>{workspace === 'monitor'
+                ? 'Review recent Ethereum transfers, prioritize signals, and inspect the underlying evidence.'
+                : 'Follow observed transactions, examine counterparties, and verify each claim against source evidence.'}</p>
+            </div>
+            <span className="cs-intro-tag">{workspace === 'monitor' ? 'Live data · bounded coverage' : 'Evidence-led workflow'}</span>
+          </div>
+          {workspace === 'investigate' && <Investigation />}
+          {workspace === 'monitor' && <div className="cs-monitor"><Suspense fallback={<div className="platform-shell" role="status">Loading network monitor…</div>}><App /></Suspense></div>}
+        </main>
+        <footer className="cs-main-foot"><span>ChainScope / Research prototype</span><span>Review signals are not fraud verdicts.</span></footer>
+      </div>
+    </div>
+  );
 }

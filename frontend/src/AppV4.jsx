@@ -180,7 +180,7 @@ export default function AppV4() {
             <span className="cs-intro-tag">{workspace === 'monitor' ? 'Live data · bounded coverage' : 'Evidence-led workflow'}</span>
           </div>
           {workspace === 'investigate' && <Investigation />}
-          {workspace === 'monitor' && <div className="cs-monitor"><Suspense fallback={<div className="platform-shell" role="status">Loading network monitor…</div>}><App /></Suspense></div>}
+          {workspace === 'monitor' && <div className="cs-monitor"><Suspense fallback={<div className="platform-shell" role="status">Loading network monitor…</div>}><App embedded /></Suspense></div>}
         </main>
         <footer className="cs-main-foot"><span>ChainScope / Research prototype</span><span>Review signals are not fraud verdicts.</span></footer>
       </div>

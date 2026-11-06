@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 async function openInvestigation(page) {
   await page.goto('/app/');
   await page.getByRole('button', { name: /Wallet investigation/ }).first().click();
-  await expect(page.getByRole('heading', { name: 'One wallet. One evidence trail.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Start an investigation' })).toBeVisible();
 }
 
 test('workstation navigation, investigation validation and monitor views', async ({ page }) => {
@@ -16,7 +16,7 @@ test('workstation navigation, investigation validation and monitor views', async
   await page.getByRole('navigation', { name: 'Monitor views' }).getByRole('button', { name: 'System coverage' }).click();
   await expect(page.getByRole('heading', { name: 'System Coverage' })).toBeVisible();
   await page.getByRole('button', { name: /Wallet investigation/ }).first().click();
-  await expect(page.getByRole('heading', { name: 'One wallet. One evidence trail.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Start an investigation' })).toBeVisible();
 });
 
 test('graceful investigation failure never claims completed evidence', async ({ page }) => {

@@ -29,6 +29,7 @@ from src.ingest.address_retention import prune_addresses
 from src.ingest.storage_health import log_storage_health
 from src.ingest.health_monitor import log_ingestion_health
 from src.ingest.reorg import ensure_lineage_schema, record_lineage, recover_shallow_reorg
+from src.ingest.expired_catchup import jump_past_expired_history
 from src.storage_budget import LIVE_RETENTION_MINUTES, prune_lineage
 
 
@@ -185,6 +186,25 @@ async def ingest_loop(interval_seconds: int = 15):
                             'Reorg recovered; replay will resume from block {} (depth={})',
                             last_processed_block + 1,
                             recovery.depth,
+                        )
+
+                # A free-tier sleep can leave the durable cursor far behind tip.
+                # Canonical checkpoint verification above must succeed first.
+                # Skip only already-expired history, with an explicit gap ledger
+                # and a hash-anchored, atomic checkpoint transition.
+                if last_block_hash is not None:
+                    anchor = await jump_past_expired_history(
+                        db, client, last_processed_block, latest_block,
+                        is_expired=block_outside_live_retention,
+                    )
+                    if anchor is not None:
+                        previous_block = last_processed_block
+                        last_processed_block, last_block_hash = anchor
+                        logger.warning(
+                            "Audited expired-history gap: blocks {}..{} were NOT indexed; "
+                            "canonical ingestion re-anchored at block {}",
+                            previous_block + 1, last_processed_block - 1,
+                            last_processed_block,
                         )
 
                 pending = latest_block - last_processed_block

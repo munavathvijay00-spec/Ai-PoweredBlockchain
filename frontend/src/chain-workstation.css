@@ -356,3 +356,146 @@ html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
     padding: 8px !important;
   }
 }
+
+
+/* Analyst Studio v2 — restrained visual hierarchy, richer real-data canvas.
+   Designed as a research instrument, not a generic dark admin template.
+   Interactive graph carries the detail; surrounding controls stay quiet. */
+:root {
+  --cs-ink: #090e15;
+  --cs-side: #0f1823;
+  --cs-canvas: #101924;
+  --cs-surface: #172331;
+  --cs-surface-raised: #1d2c3b;
+  --cs-surface-low: #101c28;
+  --cs-border: #2a3d50;
+  --cs-border-soft: #243446;
+  --cs-primary: #f1f5f9;
+  --cs-secondary: #c2ceda;
+  --cs-muted: #9eafbf;
+  --cs-accent: #82cdd4;
+  --cs-warning: #e6bc85;
+  --cs-danger: #eaa5a7;
+  --cs-positive: #90cfb3;
+}
+.cs-studio { grid-template-columns: 236px minmax(0, 1fr); }
+.cs-sidebar { background: #101a27; border-right-color: #2b3b4b; }
+.cs-brand { padding: 19px 22px; min-height: 88px; }
+.cs-brand-mark { background: #153d47; border-color: #497984; }
+.cs-brand-mark span { border-color: #b2ebeb; }
+.cs-brand-copy strong { font-size: 18px; letter-spacing: -.045em; }
+.cs-brand-copy small { color: #a4b4c2; }
+.cs-nav-label { color: #91a6b5; }
+.cs-sidebar-body { padding: 28px 12px 15px; }
+.cs-nav-item { min-height: 64px; border-radius: 9px; padding: 10px 12px; }
+.cs-nav-item-active {
+  background: #1b3443;
+  border-color: #3c6772;
+  box-shadow: inset 3px 0 0 #86c9d4;
+}
+.cs-nav-item:hover { background: #20313e; }
+.cs-nav-item-active strong { color: #f4fbfd; }
+.cs-nav-item-active small { color: #b7d2da !important; }
+.cs-nav-item small { color: #a0afbd; }
+.cs-nav-item .cs-nav-index { color: #93a8b8; }
+.cs-nav-item-active .cs-nav-index { color: #8ed4dd; }
+.cs-sidebar-context { background: #13212e; border: 1px solid #2b3d4a; border-radius: 10px; padding: 19px 8px 16px; margin-top: 34px; }
+.cs-sidebar-context .cs-nav-label { margin-bottom: 16px; }
+.cs-sidebar-context > p:last-child { color: #afc0ca; }
+.cs-network { color: #deeaee; }
+.cs-topbar { min-height: 64px; background: rgba(16,25,36,.96); border-color: #2a3c4b; }
+.cs-topbar-dot { background: #529c98; border-color: #91dcd2; }
+.cs-workspace { max-width: 1740px; padding: 30px 36px 62px; }
+.cs-page-intro { padding: 7px 0 25px; margin-bottom: 26px; }
+.cs-page-intro h1 { font-size: clamp(30px,2.7vw,40px); font-weight: 640; line-height: 1.14; letter-spacing: -.055em; }
+.cs-page-intro > div > p:last-child { color: #b2c2ce; font-size: 14px; }
+.cs-overline { color: #9ccfd4; letter-spacing: .13em; font-size: 10px; }
+.cs-intro-tag { background: #172a36; border-color: #365466; color: #bddbe3; font-size: 11px; padding: 9px 13px; }
+.cs-main-foot { color: #a1b1bf; border-color: #2b3b4c; }
+.cs-workspace .panel,.cs-workspace .panel-strong,
+.cs-workspace .platform-card,.cs-workspace .metric-card,
+.cs-workspace .transaction-panel {
+  background: var(--cs-surface) !important;
+  border: 1px solid var(--cs-border) !important;
+  border-radius: 11px !important;
+}
+.cs-workspace .metric-card:hover { background: #213344 !important; border-color: #527a8a !important; }
+.cs-workspace .metric-label,.cs-workspace .eyebrow { color: #a9bcc9 !important; }
+.cs-workspace .text-slate-400 { color: #b4c2ce; }
+.cs-workspace .text-slate-500 { color: #9fb0c1 !important; }
+.cs-workspace .text-slate-300 { color: #d0dbe2; }
+.cs-workspace .bg-slate-950\/35,.cs-workspace .bg-slate-950\/40,.cs-workspace .bg-slate-900\/50 { background-color: #121f2d !important; }
+.cs-workspace .border-slate-700,.cs-workspace .border-slate-800 { border-color: #304759 !important; }
+.cs-workspace .text-cyan-300,.cs-workspace .text-sky-300 { color: #98d6df !important; }
+.cs-workspace .primary-button { background: #b6e2e6 !important; color: #10212b !important; border-radius: 7px !important; }
+.cs-workspace .primary-button:hover { background: #daf1f2 !important; }
+.cs-workspace .soft-input,.cs-workspace .cs-filter-input {
+  background: #0f1b27 !important; color: #eff7fb !important; border: 1px solid #416075 !important;
+}
+.cs-workspace .soft-input:focus,.cs-workspace .cs-filter-input:focus { border-color: #9ad8e0 !important; }
+.cs-workspace .cs-export-button { background: #1d3541 !important; border-color: #3d6873 !important; }
+.cs-workspace .cs-export-button:hover { background: #294656 !important; }
+.cs-workspace .cs-monitor-tab-active { color: #e7f7fa; border-color: #8dd9df; }
+.cs-workspace .cs-monitor-tab { font-size: 12px; }
+.cs-workspace .cs-queue-pill { background: #1c2c39; border-color: #405566; }
+.cs-workspace .cs-stat-value { color: #f3f8fc !important; }
+.cs-workspace .cs-stat-value.cs-stat-warning { color: #f3c68a !important; }
+
+/* Search is the primary analyst action. Avoid a second hero panel competing with the graph. */
+.cs-investigate-main { padding-top: 0 !important; }
+.cs-search-panel { padding: 26px 28px !important; border: 1px solid #36556a !important; background: #172635 !important; }
+.cs-search-panel h2 { font-size: 23px !important; font-weight: 635; letter-spacing: -.045em; }
+.cs-search-panel .eyebrow { color: #9dbbc8 !important; }
+.cs-search-panel form { gap: 12px; margin-top: 24px; }
+.cs-search-panel form input { min-height: 50px; font-size: 14px; }
+.cs-search-panel form button { min-height: 50px; padding-left: 24px; padding-right: 24px; }
+.cs-search-tag { display: inline-flex; align-items: center; border: 1px solid #456575; color: #c1dce4; font: 600 11px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing: .07em; padding: 8px 10px; border-radius: 5px; }
+.cs-intro-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; margin-top: 16px; }
+.cs-step { padding: 22px 22px 24px; background: #14212d; border: 1px solid #2a3b4a; border-radius: 10px; }
+.cs-step span { color: #8fcbd1; display: inline-block; font: 600 11px ui-monospace,SFMono-Regular,Menlo,monospace; margin-bottom: 23px; }
+.cs-step strong { display: block; color: #f0f5f7; letter-spacing: -.02em; font-size: 15px; }
+.cs-step p { margin-top: 9px; font-size: 12px; line-height: 1.7; color: #afc0cd; max-width: 34ch; }
+.cs-featured-graph {
+  background: #101c29;
+  border: 1px solid #365067;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.cs-featured-graph-heading {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap; padding: 23px 27px;
+  border-bottom: 1px solid #2c4355; background: #192a39;
+}
+.cs-graph-eyebrow { color: #9eced6; font: 650 10px ui-sans-serif,system-ui,sans-serif; letter-spacing: .11em; }
+.cs-featured-graph-heading h2 { font-weight: 635; letter-spacing: -.035em; font-size: 21px; color: #f4f8fb; margin-top: 6px; }
+.cs-featured-graph-heading p { color: #b9cad5; font-size: 12px; max-width: 35ch; }
+.cs-featured-graph > section { border: none !important; border-radius: 0 !important; }
+.cs-featured-graph .panel,.cs-featured-graph .panel-strong {
+  background: #121f2e !important; border-color: #304a5c !important;
+}
+.cs-featured-graph canvas { display: block; }
+.cs-workspace nav[aria-label="Investigation sections"] {
+  background: #132232 !important; border-color: #334b5e !important;
+}
+.cs-workspace nav[aria-label="Investigation sections"] a:hover { background: #234455 !important; }
+@media (max-width: 1180px) {
+  .cs-studio { grid-template-columns: 214px minmax(0,1fr); }
+  .cs-workspace { padding-left: 24px; padding-right: 24px; }
+  .cs-intro-steps { gap: 10px; }
+}
+@media (max-width: 850px) {
+  .cs-studio { display: block; }
+  .cs-workspace { padding: 23px 18px 45px; }
+  .cs-intro-steps { grid-template-columns: 1fr; }
+  .cs-step { padding: 16px 18px; }
+  .cs-step span { margin-bottom: 8px; }
+  .cs-search-panel { padding: 20px !important; }
+  .cs-featured-graph-heading { padding: 20px; }
+  .cs-topbar { position: relative; }
+}
+@media (max-width: 520px) {
+  .cs-workspace { padding-left: 14px; padding-right: 14px; }
+  .cs-page-intro h1 { font-size: 30px; }
+  .cs-search-panel form button { width: 100%; }
+  .cs-featured-graph-heading { align-items: flex-start; }
+}

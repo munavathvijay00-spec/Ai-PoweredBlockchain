@@ -168,7 +168,7 @@ export default function AppV4() {
         <div className="cs-mobile-navigation" aria-label="Workspace navigation">
           {areas.map(area => <button key={area.id} type="button" className={workspace === area.id ? 'cs-mobile-active' : ''} aria-current={workspace === area.id ? 'page' : undefined} onClick={() => setWorkspace(area.id)}>{area.title}</button>)}
         </div>
-        <main id="cs-workspace" className="cs-workspace" tabIndex={-1}>
+        <div id="cs-workspace" className="cs-workspace" tabIndex={-1}>
           <div className="cs-page-intro">
             <div>
               <p className="cs-overline">CHAIN INTELLIGENCE <span aria-hidden="true">/</span> {workspace === 'monitor' ? 'LIVE OBSERVATION' : 'CASE WORKSPACE'}</p>
@@ -181,7 +181,7 @@ export default function AppV4() {
           </div>
           {workspace === 'investigate' && <Investigation />}
           {workspace === 'monitor' && <div className="cs-monitor"><Suspense fallback={<div className="platform-shell" role="status">Loading network monitor…</div>}><App embedded /></Suspense></div>}
-        </main>
+        </div>
         <footer className="cs-main-foot"><span>ChainScope / Research prototype</span><span>Review signals are not fraud verdicts.</span></footer>
       </div>
     </div>

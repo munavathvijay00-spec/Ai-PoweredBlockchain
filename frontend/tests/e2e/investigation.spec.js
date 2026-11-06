@@ -1,15 +1,21 @@
 import { test, expect } from '@playwright/test';
 
-test('investigation home, validation, and workspace navigation', async ({ page }) => {
+async function openInvestigation(page) {
   await page.goto('/app/');
+  await page.getByRole('button', { name: /Wallet investigation/ }).first().click();
   await expect(page.getByRole('heading', { name: 'One wallet. One evidence trail.' })).toBeVisible();
+}
+
+test('workstation navigation, investigation validation and monitor views', async ({ page }) => {
+  await openInvestigation(page);
+  await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('button', { name: /Wallet investigation/ }).or(page.getByRole('button', { name: 'Wallet investigation', exact: true })).first()).toHaveAttribute('aria-current', 'page');
   await page.getByRole('button', { name: 'Investigate wallet' }).click();
   await expect(page.getByRole('alert')).toContainText('valid Ethereum address');
-  await page.getByRole('button', { name: 'Monitor', exact: true }).click();
-  await expect(page.getByRole('navigation', { name: 'Product workspace' }).getByRole('button', { name: 'Monitor' })).toHaveAttribute('aria-current', 'page');
-  await page.getByRole('button', { name: 'Cases', exact: true }).click();
-  await expect(page.getByRole('navigation', { name: 'Product workspace' }).getByRole('button', { name: 'Cases' })).toHaveAttribute('aria-current', 'page');
-  await page.getByRole('button', { name: 'Investigate', exact: true }).click();
+  await page.getByRole('button', { name: /Network monitor/ }).first().click();
+  await expect(page.getByRole('heading', { name: 'Network monitor' }).first()).toBeVisible();
+  await page.getByRole('navigation', { name: 'Monitor views' }).getByRole('button', { name: 'System coverage' }).click();
+  await expect(page.getByRole('heading', { name: 'System Coverage' })).toBeVisible();
+  await page.getByRole('button', { name: /Wallet investigation/ }).first().click();
   await expect(page.getByRole('heading', { name: 'One wallet. One evidence trail.' })).toBeVisible();
 });
 
@@ -17,7 +23,7 @@ test('graceful investigation failure never claims completed evidence', async ({ 
   await page.route('**/api/**', async route => {
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Investigation capacity is busy' }) });
   });
-  await page.goto('/app/');
+  await openInvestigation(page);
   await page.getByRole('textbox', { name: 'Ethereum wallet address' }).fill('0x1111111111111111111111111111111111111111');
   await page.getByRole('button', { name: 'Investigate wallet' }).click();
   await expect(page.getByRole('alert').first()).toBeVisible({ timeout: 20000 });
@@ -28,7 +34,7 @@ test('rate limiting surfaces an error rather than a success report', async ({ pa
     status: 429, headers: {'retry-after':'15'},
     contentType: 'application/json', body: JSON.stringify({detail:'Rate limit exceeded'})
   }));
-  await page.goto('/app/');
+  await openInvestigation(page);
   await page.getByRole('textbox',{name:'Ethereum wallet address'}).fill('0x1111111111111111111111111111111111111111');
   await page.getByRole('button',{name:'Investigate wallet'}).click();
   await expect(page.getByRole('alert').first()).toBeVisible();
@@ -40,7 +46,7 @@ test('slow backend keeps an explicit loading state', async ({ page }) => {
     await new Promise(resolve => setTimeout(resolve,1200));
     await route.fulfill({status:503, contentType:'application/json',body:JSON.stringify({detail:'Temporarily unavailable'})});
   });
-  await page.goto('/app/');
+  await openInvestigation(page);
   await page.getByRole('textbox',{name:'Ethereum wallet address'}).fill('0x1111111111111111111111111111111111111111');
   await page.getByRole('button',{name:'Investigate wallet'}).click();
   await expect(page.getByRole('button',{name:'Building intelligence…'})).toBeDisabled();
@@ -55,7 +61,7 @@ test('bounded empty evidence remains an explicit empty state', async ({ page }) 
     if(url.includes('/coverage-summary'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({coverage_grade:'bounded',coverage_statement:'Synthetic empty evidence fixture'})});
     return route.fulfill({status:200,contentType:'application/json',body:'{}'});
   });
-  await page.goto('/app/');
+  await openInvestigation(page);
   await page.getByRole('textbox',{name:'Ethereum wallet address'}).fill('0x1111111111111111111111111111111111111111');
   await page.getByRole('button',{name:'Investigate wallet'}).click();
   await expect(page.getByText('No graphable indexed transfers are currently available for this wallet.')).toBeVisible({timeout:30000});

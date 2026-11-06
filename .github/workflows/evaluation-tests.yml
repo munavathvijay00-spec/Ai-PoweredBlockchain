@@ -9,6 +9,11 @@ on:
       - 'src/api/historical_routes.py'
       - 'src/ingest/cursor.py'
       - 'src/ingest/loop.py'
+      - 'src/ingest/expired_catchup.py'
+      - 'tests/test_expired_catchup.py'
+      - 'src/ingest/checkpoint_reconcile.py'
+      - 'tests/test_competing_checkpoint.py'
+      - 'src/api/coverage_routes.py'
       - '.github/workflows/evaluation-tests.yml'
   workflow_dispatch:
 jobs:
@@ -23,4 +28,6 @@ jobs:
       - name: Install focused test dependencies
         run: pip install -r requirements.txt
       - name: Run baseline regression tests
-        run: python -m pytest tests/test_external_baseline.py tests/test_ingestion_resilience_regression.py tests/test_historical_evidence_regression.py -q
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: python -m pytest -c /dev/null --noconftest -p pytest_asyncio.plugin tests/test_external_baseline.py tests/test_ingestion_resilience_regression.py tests/test_historical_evidence_regression.py tests/test_expired_catchup.py tests/test_competing_checkpoint.py -q

@@ -296,11 +296,42 @@ export default function UnifiedInvestigationGraph({ wallet, fundFlow }) {
     if (!wallet) { setGraph(null); return undefined; }
     setLoading(true);
     setError('');
+    setGraph(null);
     setExpandedAddresses([]);
-    api.getWalletGraph(wallet)
-      .then(result => { if (!cancelled) setGraph(result); })
-      .catch(failure => { if (!cancelled) setError(failure.message || 'Interactive graph evidence is unavailable.'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    // The provider-backed indexed graph and locally retained native graph have
+    // different coverage. Fall back only to *actual* retained evidence; never
+    // synthesize connections to make the visualization look populated.
+    async function loadGraph() {
+      let providerError = null;
+      try {
+        const result = await api.getWalletGraph(wallet);
+        if (cancelled) return;
+        if ((result?.edges || []).length) {
+          setGraph(result);
+          return;
+        }
+        // Provider can legitimately return an empty bounded page; a retained
+        // native graph may still contain relevant recent observations.
+        setGraph(result);
+      } catch (failure) {
+        providerError = failure;
+      }
+      try {
+        const observed = await api.getObservedWalletGraph(wallet, 2, 150);
+        if (cancelled) return;
+        if ((observed?.edges || []).length) {
+          setGraph(observed);
+          setError('Showing retained native ETH evidence only. Provider-indexed historical coverage is unavailable or empty.');
+        } else if (providerError) {
+          setError('Could not retrieve the indexed wallet graph, and no retained native transfers are available. This is a data-availability problem, not proof that the wallet was inactive.');
+        }
+      } catch {
+        if (!cancelled && providerError) {
+          setError('Graph data sources are temporarily unavailable. Retry later or check System Coverage for ingestion status.');
+        }
+      }
+    }
+    loadGraph().finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [wallet]);
 
@@ -406,6 +437,6 @@ export default function UnifiedInvestigationGraph({ wallet, fundFlow }) {
         nodeContext={nodeContext}
       />
     </Suspense>}
-    {!loading && !transactions.length && !error && <div className="panel p-6 text-sm text-slate-400">No graphable indexed transfers are currently available for this wallet.</div>}
+    {!loading && !transactions.length && !error && <div className="panel p-6 text-sm text-slate-400"><p>No graphable indexed transfers are currently available for this wallet.</p><p className="mt-2">The live table retains only recent transactions; historical transfer coverage depends on the address-indexed provider. Try another wallet or check System Coverage.</p></div>}
   </section>;
 }

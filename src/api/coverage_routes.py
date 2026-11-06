@@ -125,6 +125,19 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
     except Exception:
         latest_evaluation = None
 
+    # A free-tier sleep may force a documented re-anchor across expired
+    # historical blocks. Missing history must remain visible to investigators.
+    try:
+        gap_summary = await repo.db.fetchrow("""
+            SELECT COUNT(*) AS events,
+                   COALESCE(SUM(last_unprocessed_block - first_unprocessed_block + 1),0) AS blocks,
+                   MAX(created_at) AS latest_at
+            FROM ingest_coverage_gaps
+            WHERE stream = 'ethereum_mainnet'
+        """)
+    except Exception:
+        gap_summary = None
+
     entity_records = int(entity_stats["records"] or 0) if entity_stats else 0
     entity_sources = int(entity_stats["sources"] or 0) if entity_stats else 0
     entity_addresses = int(entity_stats["addresses"] or 0) if entity_stats else 0
@@ -209,6 +222,13 @@ async def get_coverage(repo: TransactionRepository = Depends(get_transaction_rep
             "historical_cache_rows_current": persistent_history_rows,
             "raw_provider_payloads_persisted": False,
             "note": "Deep wallet history is provider-backed and re-fetchable; the local database stores only compact bounded evidence.",
+        },
+        "ingestion_coverage_gaps": {
+            "audit_available": gap_summary is not None,
+            "gap_events": int(gap_summary["events"]) if gap_summary else None,
+            "unindexed_expired_blocks": int(gap_summary["blocks"]) if gap_summary else None,
+            "latest_gap_at": gap_summary["latest_at"] if gap_summary else None,
+            "note": "These expired historical blocks were deliberately skipped to restore recent monitoring. Their transactions were not ingested; this is not continuous chain history.",
         },
         "native_transactions": {
             "status": "partial_recent_retained",

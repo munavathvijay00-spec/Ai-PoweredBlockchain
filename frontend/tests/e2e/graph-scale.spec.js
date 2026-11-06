@@ -19,6 +19,7 @@ for(const count of [100,500,1000]) {
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
     });
     await page.goto('/app/');
+    await page.getByRole('button', { name: /Wallet investigation/ }).first().click();
     await page.getByRole('textbox',{name:'Ethereum wallet address'}).fill(ROOT);
     await page.getByRole('button',{name:'Investigate wallet'}).click();
     await expect(page.getByText(count+' wallets', {exact:false})).toBeVisible({timeout:30000});

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './chain-workstation.css'
 import App from './AppV4.jsx'
 
 createRoot(document.getElementById('root')).render(

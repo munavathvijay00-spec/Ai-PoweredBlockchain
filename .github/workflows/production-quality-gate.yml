@@ -39,7 +39,8 @@ jobs:
           PY
 
   browser-quality:
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 does not support the ubuntu-26.04 runner image.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend

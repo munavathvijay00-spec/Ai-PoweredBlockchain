@@ -121,7 +121,7 @@ html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
 .cs-nav-item-active { background: #263734; color: #e2f4ee; border-color: #3c5c54; }
 .cs-nav-index { width: 23px; flex: 0 0 23px; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #81938f; }
 .cs-nav-item-active .cs-nav-index { color: var(--cs-accent); }
-.cs-nav-item-active small { color: #b4cbc4; }
+.cs-nav-item.cs-nav-item-active small { color: #b4cbc4; }
 .cs-nav-item strong { display: block; font-size: 13px; line-height: 1.5; font-weight: 600; white-space: nowrap; }
 .cs-nav-item small { display: block; font-size: 11px; color: var(--cs-muted); line-height: 1.5; white-space: nowrap; }
 .cs-nav-caret { margin-left: auto; font-size: 20px; font-weight: 300; color: #71837e; }

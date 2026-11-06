@@ -1,0 +1,219 @@
+/* ChainScope workstation — original visual direction adapted from the principles
+   of Unslop by Damir Sokolovsky (CC BY 4.0):
+   https://github.com/heydamir/unslop
+   Design identity: forensic instrument panel, graphite, oxidized teal,
+   restrained evidence-color semantics, and ledger-aligned data. */
+
+:root {
+  color-scheme: dark;
+  --cs-ink: #0e1113;
+  --cs-side: #111619;
+  --cs-canvas: #151a1d;
+  --cs-surface: #1c2225;
+  --cs-surface-raised: #222a2e;
+  --cs-surface-low: #171d20;
+  --cs-border: #303b3e;
+  --cs-border-soft: #293235;
+  --cs-primary: #eef2f0;
+  --cs-secondary: #b2c0bd;
+  --cs-muted: #8d9d9b;
+  --cs-accent: #81c7ba;
+  --cs-accent-dark: #163a35;
+  --cs-warning: #e2bd80;
+  --cs-danger: #e8a5a1;
+  --cs-positive: #91c5a9;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--cs-canvas);
+  color: var(--cs-primary);
+}
+html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
+::selection { background: #366c61; color: white; }
+:focus-visible { outline: 2px solid var(--cs-accent); outline-offset: 3px; }
+::-webkit-scrollbar-track { background: #121719; }
+::-webkit-scrollbar-thumb { background: #414e50; border-color: #121719; }
+
+/* Global components used by both native and legacy investigation views. */
+.platform-card, .metric-card, .transaction-panel, .panel, .panel-strong {
+  background: var(--cs-surface) !important;
+  border: 1px solid var(--cs-border) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+.metric-card { min-height: 106px; }
+.metric-label, .eyebrow {
+  color: var(--cs-muted) !important;
+  font-weight: 650;
+  letter-spacing: .055em;
+  font-size: 11px;
+}
+.transaction-panel-head { border-color: var(--cs-border); }
+.transaction-row { border-color: var(--cs-border-soft); }
+.transaction-row:hover { background: #283134 !important; }
+.search-shell, .filter-shell, .soft-input {
+  background: var(--cs-surface-low) !important;
+  border-color: var(--cs-border) !important;
+  border-radius: 8px !important;
+}
+.search-shell:focus-within, .soft-input:focus, input:focus-visible {
+  border-color: #6ca99e !important;
+}
+.primary-button {
+  background: #c6e5de !important;
+  color: #12211e !important;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+  font-weight: 650;
+}
+.primary-button:hover { background: #e0f0ec !important; }
+.secondary-button, .workspace-chip {
+  background: var(--cs-surface-low) !important;
+  border: 1px solid var(--cs-border) !important;
+  border-radius: 7px !important;
+  color: var(--cs-secondary) !important;
+}
+.secondary-button:hover, .workspace-chip:hover { background: #293235 !important; color: var(--cs-primary) !important; }
+.workspace-chip-active, .filter-tab-active {
+  background: #2a3f3d !important;
+  border-color: #4b736d !important;
+  color: #dcefeb !important;
+}
+.status-pill { background: var(--cs-surface-low) !important; border-color: var(--cs-border) !important; border-radius: 5px !important; }
+.coverage-row { background: var(--cs-surface-low) !important; border-color: var(--cs-border-soft) !important; }
+.section-heading { background: transparent !important; border: 0 !important; padding: 4px 0 12px !important; border-radius: 0 !important; }
+.section-heading h1 { font-size: 25px !important; letter-spacing: -.04em; }
+.section-heading p { color: var(--cs-secondary); }
+.text-slate-500, .text-slate-600, .text-slate-700, .placeholder\:text-slate-600::placeholder {
+  color: var(--cs-muted) !important;
+}
+.text-cyan-300, .text-sky-300, .text-blue-300, .text-violet-200 { color: var(--cs-accent) !important; }
+.text-emerald-300, .text-emerald-400 { color: var(--cs-positive) !important; }
+.text-amber-200, .text-amber-300 { color: var(--cs-warning) !important; }
+.text-red-300, .text-rose-300, .text-rose-400 { color: var(--cs-danger) !important; }
+.bg-\[\#0d1628\], .bg-\[\#09111f\] { background-color: var(--cs-canvas) !important; }
+
+/* Product-specific shell: fixed-width instrument rail, dedicated work surface. */
+.cs-studio { min-height: 100vh; display: grid; grid-template-columns: 256px minmax(0, 1fr); background: var(--cs-canvas); }
+.cs-skip { position: absolute; left: -9999px; top: 8px; padding: 12px 18px; z-index: 200; background: white; color: black; }
+.cs-skip:focus { left: 8px; }
+.cs-sidebar {
+  position: sticky; top: 0; align-self: start; height: 100dvh;
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--cs-side); border-right: 1px solid var(--cs-border-soft);
+}
+.cs-brand { display: flex; align-items: center; gap: 13px; min-height: 91px; padding: 20px 21px; border-bottom: 1px solid var(--cs-border-soft); }
+.cs-brand-mark { position: relative; display: block; width: 32px; height: 32px; border: 1px solid #547f76; border-radius: 8px; background: #1e3934; flex: 0 0 32px; }
+.cs-brand-mark span { position: absolute; width: 13px; height: 13px; border: 1.6px solid #b3e4d8; transform: rotate(45deg); border-radius: 3px; }
+.cs-brand-mark span:nth-child(1) { left: 6px; top: 6px; }
+.cs-brand-mark span:nth-child(2) { right: 6px; bottom: 6px; }
+.cs-brand-mark span:nth-child(3) { width: 5px; height: 5px; border: none; background: #e0efeb; left: 13px; top: 13px; border-radius: 1px; }
+.cs-brand-copy strong { display: block; font-size: 17px; line-height: 1.3; font-weight: 680; letter-spacing: -.035em; color: #eef3ef; }
+.cs-brand-copy small { display: block; margin-top: 3px; color: #829590; font-size: 11px; }
+.cs-sidebar-body { display: flex; flex-direction: column; flex: 1; gap: 0; padding: 27px 13px 15px; overflow-y: auto; }
+.cs-nav-label { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: #80928d; font-weight: 700; margin: 0 10px 13px; }
+.cs-workspace-nav { display: flex; flex-direction: column; gap: 4px; }
+.cs-nav-item {
+  width: 100%; min-height: 60px; display: flex; align-items: center; gap: 12px;
+  background: transparent; border: 1px solid transparent; border-radius: 7px;
+  text-align: left; color: var(--cs-secondary); padding: 10px 11px;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.cs-nav-item:hover { background: #222d2e; color: var(--cs-primary); }
+.cs-nav-item-active { background: #263734; color: #e2f4ee; border-color: #3c5c54; }
+.cs-nav-index { width: 23px; flex: 0 0 23px; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #81938f; }
+.cs-nav-item-active .cs-nav-index { color: var(--cs-accent); }
+.cs-nav-item strong { display: block; font-size: 13px; line-height: 1.5; font-weight: 600; white-space: nowrap; }
+.cs-nav-item small { display: block; font-size: 11px; color: var(--cs-muted); line-height: 1.5; white-space: nowrap; }
+.cs-nav-caret { margin-left: auto; font-size: 20px; font-weight: 300; color: #71837e; }
+.cs-nav-item-active .cs-nav-caret { color: #b4dfd4; }
+.cs-sidebar-context { margin-top: 38px; padding-top: 21px; border-top: 1px solid var(--cs-border-soft); }
+.cs-network { display: flex; align-items: center; gap: 8px; margin: 0 10px; font-size: 12px; color: #c6d2cf; }
+.cs-network-glyph { width: 8px; height: 8px; border: 1px solid #91b5a8; background: #2f5950; transform: rotate(45deg); }
+.cs-chain-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #718680; margin-left: auto; }
+.cs-sidebar-context>p:last-child { color: #91a39e; margin: 15px 10px 0; font-size: 11px; line-height: 1.7; }
+.cs-sidebar-foot { display: flex; flex-direction: column; gap: 6px; padding: 15px 23px 23px; font-size: 10px; color: #718680; }
+.cs-foot-rule { width: 100%; height: 1px; margin-bottom: 8px; background: var(--cs-border-soft); }
+.cs-content { display: flex; flex-direction: column; min-width: 0; }
+.cs-topbar {
+  min-height: 61px; padding: 0 33px; border-bottom: 1px solid var(--cs-border-soft);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #171d20;
+}
+.cs-breadcrumb { display: flex; align-items: center; gap: 10px; font-size: 12px; white-space: nowrap; }
+.cs-breadcrumb-root { color: #839591; }
+.cs-breadcrumb strong { font-weight: 600; color: #d9e5e0; }
+.cs-breadcrumb>span:nth-child(2) { color: #526461; }
+.cs-topbar-meta { display: flex; align-items: center; gap: 9px; white-space: nowrap; color: #a8b9b4; font-size: 11px; }
+.cs-topbar-dot { width: 7px; height: 7px; border: 1px solid #729a8c; background: #376759; border-radius: 50%; }
+.cs-topbar-divider { width: 1px; height: 13px; background: #3c4848; margin: 0 5px; }
+.cs-mobile-navigation { display: none; }
+.cs-workspace { flex: 1; padding: 36px 34px 60px; width: 100%; min-width: 0; max-width: 1770px; margin: 0 auto; }
+.cs-page-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--cs-border-soft); padding-bottom: 25px; margin-bottom: 25px; }
+.cs-overline { font-size: 10px; color: var(--cs-accent); letter-spacing: .11em; font-weight: 700; }
+.cs-overline span { margin: 0 7px; color: #5d716b; }
+.cs-page-intro h1 { margin-top: 9px; font-size: clamp(26px, 2.5vw, 35px); line-height: 1.17; letter-spacing: -.045em; font-weight: 630; color: #f0f4f1; }
+.cs-page-intro>div>p:last-child { max-width: 640px; margin-top: 10px; color: #a1b2ac; line-height: 1.6; font-size: 13px; }
+.cs-intro-tag { display: inline-flex; align-items: center; flex-shrink: 0; background: #1e2828; color: #b1c7bd; border: 1px solid #344741; border-radius: 4px; font-size: 11px; padding: 8px 10px; white-space: nowrap; }
+.cs-monitor .cs-embedded-monitor { background: transparent; min-height: 0; }
+.cs-monitor .platform-shell { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+.cs-monitor-subnav { display: flex; align-items: center; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--cs-border); margin-bottom: 21px; padding: 0 0 1px; }
+.cs-monitor-tab { flex-shrink: 0; border: 0; background: transparent; color: #9daea8; font-size: 12px; padding: 12px 13px 14px; border-bottom: 2px solid transparent; font-weight: 550; white-space: nowrap; }
+.cs-monitor-tab:hover { color: #edf2f0; }
+.cs-monitor-tab-active { border-color: #9cd7ca; color: #e8f5ef; }
+.cs-monitor-freshness { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 7px; font-size: 11px; padding: 0 10px; white-space: nowrap; }
+.cs-main-foot { display: flex; gap: 12px; justify-content: space-between; border-top: 1px solid var(--cs-border-soft); padding: 19px 34px; font-size: 11px; color: #7d918a; }
+.cs-monitor footer { display: none; }
+.cs-workspace > .min-h-screen { min-height: 0 !important; background: transparent !important; }
+.cs-workspace > .min-h-screen > .platform-shell { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+.cs-workspace > .min-h-screen > .platform-shell > section:first-child { background: var(--cs-surface) !important; border-color: var(--cs-border) !important; }
+/* Neutralize decorative effects inherited from the initial dashboard without
+   altering evidence charts, risk colors, or graph interactions. */
+.cs-monitor section[aria-label="Investigation pulse"] {
+  background: var(--cs-surface) !important;
+  border: 1px solid var(--cs-border) !important;
+  border-left: 3px solid #608f83 !important;
+  border-radius: 9px !important;
+}
+.cs-monitor section[aria-label="Investigation pulse"] .text-sky-300 { color: var(--cs-accent) !important; }
+.cs-monitor .rounded-xl { border-radius: 10px; }
+.cs-monitor .rounded-full { border-radius: 6px; }
+.cs-workspace .bg-gradient-to-r, .cs-workspace .bg-gradient-to-br, .cs-workspace .bg-gradient-to-l {
+  background-image: none !important;
+}
+.cs-workspace .shadow-xl, .cs-workspace .shadow-2xl { box-shadow: none !important; }
+.cs-workspace nav[aria-label="Investigation sections"] { padding: 8px 9px !important; background: var(--cs-surface-low) !important; }
+.cs-workspace nav[aria-label="Investigation sections"] a { background: transparent !important; border-color: transparent !important; color: #b7c7c1 !important; border-radius: 5px !important; }
+.cs-workspace nav[aria-label="Investigation sections"] a:hover { background: #2c3937 !important; border-color: #455b55 !important; color: #ecf4ee !important; }
+.cs-workspace table { font-variant-numeric: tabular-nums; }
+.cs-workspace table thead { background: #171e20 !important; }
+.cs-workspace table tbody tr:hover { background: #263032 !important; }
+.cs-workspace button { transition-duration: 160ms; }
+.cs-workspace .font-mono { font-variant-ligatures: none; }
+/* No false activity animations. Motion is only interaction feedback. */
+@media (max-width: 1180px) {
+  .cs-studio { grid-template-columns: 216px minmax(0, 1fr); }
+  .cs-sidebar { min-width: 0; }
+  .cs-workspace { padding-left: 24px; padding-right: 24px; }
+  .cs-topbar { padding-left: 24px; padding-right: 24px; }
+  .cs-nav-item { gap: 6px; }
+  .cs-nav-index { width: 18px; flex-basis: 18px; }
+  .cs-nav-item strong { font-size: 12px; }
+  .cs-nav-item small { font-size: 10px; }
+}
+@media (max-width: 850px) {
+  .cs-studio { display: block; }
+  .cs-sidebar { position: static; height: auto; display: block; }
+  .cs-brand { min-height: 60px; border-bottom: 0; padding: 13px 20px; }
+  .cs-sidebar-body, .cs-sidebar-foot { display: none; }
+  .cs-topbar { min-height: 47px; }
+  .cs-mobile-navigation { display: flex; overflow-x: auto; gap: 8px; padding: 11px 18px; background: var(--cs-side); border-bottom: 1px solid var(--cs-border-soft); }
+  .cs-mobile-navigation button { border-radius: 6px; border: 1px solid var(--cs-border); color: var(--cs-secondary); padding: 9px 13px; font-size: 12px; white-space: nowrap; }
+  .cs-mobile-navigation .cs-mobile-active { border-color: #54877b; background: #273c36; color: #e7f1ed; }
+  .cs-topbar-meta { display: none; }
+  .cs-workspace { padding: 24px 18px 45px; }
+  .cs-page-intro { align-items: flex-start; flex-direction: column; gap: 14px; padding-bottom: 22px; }
+  .cs-intro-tag { align-self: flex-start; }
+  .cs-monitor-freshness { display: none; }
+  .cs-main-foot { padding: 17px 18px; flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cs-studio *, .cs-studio *::before, .cs-studio *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

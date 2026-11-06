@@ -91,7 +91,8 @@ async def test_expired_gap_commits_atomically(monkeypatch):
 async def test_mismatched_parent_fails_closed():
     client, db = FakeClient(), FakeDb()
     async def inconsistent(block, *, full_transactions):
-        return {"number": block, "hash": H2, "parentHash": H2, "timestamp": 100}
+        return {"number": block, "hash": H2 if block == 964 else H1,
+                "parentHash": H2, "timestamp": 100}
     client.get_block = inconsistent
     with pytest.raises(RuntimeError, match="LINEAGE_CONFLICT"):
         await jump_past_expired_history(

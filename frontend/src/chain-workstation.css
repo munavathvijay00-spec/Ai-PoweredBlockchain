@@ -535,6 +535,8 @@ html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
 .cs-transaction-link:hover { text-decoration: underline; }
 .cs-path-pair { display: grid; grid-template-columns: 36px minmax(0,1fr) 18px; align-items: center; column-gap: 7px; row-gap: 5px; }
 .cs-path-direction { font-size: 10px; color: #98b0c3; font-weight: 650; text-transform: uppercase; letter-spacing: .035em; }
+.cs-path-direction:first-child { grid-column: 1; grid-row: 1; }
+.cs-path-direction:nth-of-type(3) { grid-column: 1; grid-row: 2; }
 .cs-path-arrow { grid-column: 3; grid-row: 1 / span 2; color: #87b6bd; font-size: 18px; }
 .cs-path-pair > div:nth-of-type(1) { grid-column: 2; grid-row: 1; }
 .cs-path-pair > div:nth-of-type(2) { grid-column: 2; grid-row: 2; }

@@ -499,3 +499,6 @@ html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
   .cs-search-panel form button { width: 100%; }
   .cs-featured-graph-heading { align-items: flex-start; }
 }
+
+/* AA legibility for the small chain identifier in the network context panel. */
+.cs-sidebar-context .cs-chain-id { color: #b4c4cf; }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { nearestEdgeAt } from '../utils/graphHitTest';
 
 const norm = value => String(value || '').toLowerCase();
 const short = value => value ? value.slice(0,8)+'…'+value.slice(-5) : '—';
@@ -14,7 +15,7 @@ function createRenderer(gl){
 }
 const headerClass='rounded-xl border border-slate-700 bg-[#0b1525] px-3 py-2 text-xs text-slate-200';
 export default function ScalableBubbleInvestigationGraph({transactions=[],rootAddress='',nodeContext={},expandedAddresses=[],onExpandAddress,expandingAddress=''}) {
- const canvasRef=useRef(null),sceneRef=useRef(null),camera=useRef({yaw:.1,pitch:-.12,zoom:1}),pointer=useRef(null),projected=useRef([]),lastFrame=useRef(0),labelRefs=useRef(new Map()),zoomTarget=useRef(null);
+ const canvasRef=useRef(null),camera=useRef({yaw:.1,pitch:-.12,zoom:1}),pointer=useRef(null),projected=useRef([]),lastFrame=useRef(0),labelRefs=useRef(new Map()),zoomTarget=useRef(null);
  const [motion,setMotion]=useState(()=>typeof window!=='undefined'?!window.matchMedia('(prefers-reduced-motion: reduce)').matches:false);
  const [layout,setLayout]=useState(null),[selected,setSelected]=useState(''),[selectedEdge,setSelectedEdge]=useState(null),[search,setSearch]=useState(''),[asset,setAsset]=useState('ALL'),[error,setError]=useState(''),[balance,setBalance]=useState(null),[loading,setLoading]=useState(false),[isolate,setIsolate]=useState(false);
  const root=norm(rootAddress);
@@ -114,7 +115,20 @@ export default function ScalableBubbleInvestigationGraph({transactions=[],rootAd
    raf=requestAnimationFrame(draw);
    return()=>{stopped=true;cancelAnimationFrame(raf);gl.deleteBuffer(renderer.buffer);gl.deleteProgram(renderer.points);gl.deleteProgram(renderer.lines);};
  },[layout,addresses,scoped,root,selected,asset,isolate,nodeContext,visibleSet,balance,motion]);
- const selectAt=event=>{if(!pointer.current)return;const dx=event.clientX-pointer.current.x,dy=event.clientY-pointer.current.y;const p=pointer.current;pointer.current=null;if(Math.abs(dx)+Math.abs(dy)>5)return;const rect=event.currentTarget.getBoundingClientRect();const x=event.clientX-rect.left,y=event.clientY-rect.top;const visible=projected.current.filter(node=>visibleSet.has(node.id));const hits=visible.filter(node=>Math.hypot(node.x-x,node.y-y)<=Math.max(9,node.hitRadius||10)).sort((a,b)=>b.depth-a.depth);if(hits.length)setSelected(hits[0].id);};
+ const selectAt=event=>{
+   if(!pointer.current)return;
+   const dx=event.clientX-pointer.current.x,dy=event.clientY-pointer.current.y;
+   pointer.current=null;
+   if(Math.abs(dx)+Math.abs(dy)>5)return;
+   const rect=event.currentTarget.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;
+   const visible=projected.current.filter(node=>visibleSet.has(node.id));
+   const hits=visible.filter(node=>Math.hypot(node.x-x,node.y-y)<=Math.max(9,node.hitRadius||10)).sort((a,b)=>b.depth-a.depth);
+   if(hits.length){setSelected(hits[0].id);setSelectedEdge(null);return;}
+   // Hit-test the actual projected segment, so a transfer can be inspected
+   // directly without requiring the analyst to find it in the sidebar first.
+   const nearest=nearestEdgeAt(projected.current,scoped,x,y);
+   if(nearest){setSelected(nearest.from);setSelectedEdge(nearest.id);}
+ };
  const focus=()=>{const q=norm(search);const match=addresses.find(a=>a.includes(q));if(q&&match)setSelected(match);};
  const selectedDetails=useMemo(()=>scoped.filter(e=>e.from===selected||e.to===selected).slice(0,20),[scoped,selected]);
  const currentEdge=selectedDetails.find(e=>e.id===selectedEdge);

@@ -12,6 +12,7 @@ globalThis.localStorage = {
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
 try {
   const { default: TransactionList } = await vite.ssrLoadModule('/src/components/TransactionList.jsx');
+  const { default: TransactionBrowserControls } = await vite.ssrLoadModule('/src/components/TransactionBrowserControls.jsx');
 
   const empty = renderToStaticMarkup(React.createElement(TransactionList, {
     transactions: [], totalMatches: 0, loading: false, error: null,
@@ -54,6 +55,15 @@ try {
   }));
   assert.match(failed, /upstream node timeout/);
   assert.match(failed, /Retry/);
+
+  const controls = renderToStaticMarkup(React.createElement(TransactionBrowserControls, {
+    search: '', minRisk: '', maxRisk: '', minValue: '', maxValue: '', sort: 'risk_desc', page: 1,
+    pageSize: 50, totalPages: 1, onReset: () => {}, onExport: () => {},
+  }));
+  assert.match(controls, /Find the evidence that matters/);
+  assert.match(controls, /aria-expanded="false"/);
+  assert.match(controls, /cs-advanced-fields[^" ]* gap-3 md:grid-cols-2 hidden/);
+  assert.match(controls, /Search transaction hash or address/);
 
   console.log('TransactionList component render checks passed.');
 } finally {

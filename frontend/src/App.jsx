@@ -93,6 +93,7 @@ export default function App({ embedded = false }) {
   const [browser, setBrowser] = useState({ transactions: [], total: 0, distribution: null });
   const [browserLoading, setBrowserLoading] = useState(true);
   const [browserError, setBrowserError] = useState(null);
+  const [browserVerifiedAt, setBrowserVerifiedAt] = useState(null);
   const [browserRefresh, setBrowserRefresh] = useState(0);
   const [reviewPaused, setReviewPaused] = useState(false);
   // Invalidate outstanding browser responses when the review snapshot is paused.
@@ -145,7 +146,7 @@ export default function App({ embedded = false }) {
       setBrowserError(null);
       try {
         const data = await api.getTransactionBrowser({ limit: pageSize, offset: (page - 1) * pageSize, search, min_risk: minRisk, max_risk: maxRisk, min_value_eth: minValue, max_value_eth: maxValue, sort });
-        if (active && epoch === queueRequestEpoch.current) { setBrowser(data); setLastUpdate(new Date()); }
+        if (active && epoch === queueRequestEpoch.current) { setBrowser(data); setBrowserVerifiedAt(new Date()); }
       } catch (error) {
         if (active && epoch === queueRequestEpoch.current) setBrowserError(error?.message || 'Unable to load transactions.');
       } finally {
@@ -220,6 +221,7 @@ export default function App({ embedded = false }) {
   const distinctBlocks = Number(browser?.distinct_blocks || 0);
   const pageDistinctBlocks = Number(browser?.page_distinct_blocks || 0);
   const singleBlockPopulation = Number(browser.total || 0) > 0 && distinctBlocks === 1;
+  const hasRetainedRows = (browser.transactions || []).length > 0;
 
   return (
     <div className={embedded ? "cs-embedded-monitor" : "min-h-screen bg-[#0d1628] text-slate-100"}>
@@ -236,14 +238,16 @@ export default function App({ embedded = false }) {
           <StatsBar stats={stats} coverage={coverage} onMetric={handleMetric} />
           <TransactionBrowserControls search={search} setSearch={v => updateFilter(setSearch, v)} minRisk={minRisk} setMinRisk={v => updateFilter(setMinRisk, v)} maxRisk={maxRisk} setMaxRisk={v => updateFilter(setMaxRisk, v)} minValue={minValue} setMinValue={v => updateFilter(setMinValue, v)} maxValue={maxValue} setMaxValue={v => updateFilter(setMaxValue, v)} sort={sort} setSort={v => updateFilter(setSort, v)} pageSize={pageSize} setPageSize={setPageSize} page={page} totalPages={totalPages} onPage={setPage} onReset={resetFilters} onExport={exportCurrent} onQueue={applyQueue} />
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
+          <details className="cs-evidence-scope"><summary><span><strong>Data scope &amp; methodology</strong><small>Retention, block range and signal distribution</small></span><span className="cs-scope-action">Inspect coverage +</span></summary><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
             <div className={`platform-card p-5 ${singleBlockPopulation ? 'border-amber-400/25' : ''}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="metric-label">Retained population scope</p><p className="mt-2 text-3xl font-semibold text-white">{Number(browser.total || 0).toLocaleString()}</p></div><span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide ${singleBlockPopulation ? 'border-amber-400/25 bg-amber-400/10 text-amber-200' : 'border-sky-400/20 bg-sky-400/[0.07] text-sky-300'}`}>{singleBlockPopulation ? 'single-block snapshot' : `${distinctBlocks.toLocaleString()} blocks`}</span></div><p className="mt-2 text-sm text-slate-400">{browser.population_scope || 'Retained transactions matching the active filters.'}</p><div className="mt-4 grid gap-3 text-xs text-slate-500 sm:grid-cols-2"><span>Block range: {browser.oldest_block ? Number(browser.oldest_block).toLocaleString() : '—'} → {browser.newest_block ? Number(browser.newest_block).toLocaleString() : '—'}</span><span>Distinct blocks: {distinctBlocks.toLocaleString()} · this page: {pageDistinctBlocks.toLocaleString()}</span><span>Oldest: {utcRange(browser.oldest_timestamp)}</span><span>Newest: {utcRange(browser.newest_timestamp)}</span></div>{pageDistinctBlocks === 1 && distinctBlocks > 1 && <p className="mt-3 rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">This page happens to contain one block, but the filtered retained population spans {distinctBlocks.toLocaleString()} blocks.</p>}</div>
             <RiskChart distribution={browser.distribution} asOf={lastUpdate} />
-          </div>
+          </div></details>
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-xs"><span className="text-slate-300">{reviewPaused ? 'Review snapshot held: automatic queue refresh paused to keep visible evidence stable.' : 'Live queue refreshes approximately every 15 seconds while this tab is visible.'}</span><button type="button" className="workspace-chip" aria-pressed={reviewPaused} onClick={() => { queueRequestEpoch.current += 1; setBrowserLoading(false); if (reviewPaused) setBrowserRefresh(value => value + 1); setReviewPaused(value => !value); }}>{reviewPaused ? 'Resume live updates' : 'Pause while reviewing'}</button></div>
           <ClusterTriage transactions={browser.transactions || []} onSelect={inspectTransaction} loading={browserLoading} sort={sort} page={page} onReviewFirst={() => { setSort('risk_desc'); setPage(1); }} />
-          <TransactionList transactions={browser.transactions || []} onSelect={inspectTransaction} totalMatches={browser.total} loading={browserLoading} error={browserError} onRetry={() => setBrowserRefresh(value => value + 1)} offset={(page - 1) * pageSize} sort={sort} onSort={value => updateFilter(setSort, value)} freshness={freshness} />
+          {browserLoading && hasRetainedRows && <div role="status" className="cs-cached-evidence">Updating transaction evidence… The rows below are the previous snapshot until the new request succeeds.</div>}
+          {browserError && hasRetainedRows && <div role="status" className="cs-cached-evidence">The latest transaction request failed. Showing the last successful filtered snapshot from {browserVerifiedAt ? browserVerifiedAt.toLocaleTimeString() : 'an earlier request'}. These rows may no longer match changed filters. <button type="button" onClick={() => setBrowserRefresh(value => value + 1)}>Retry update</button></div>}
+          <TransactionList transactions={browser.transactions || []} onSelect={inspectTransaction} totalMatches={browser.total} loading={browserLoading && !hasRetainedRows} error={hasRetainedRows ? null : browserError} onRetry={() => setBrowserRefresh(value => value + 1)} offset={(page - 1) * pageSize} sort={sort} onSort={value => updateFilter(setSort, value)} freshness={freshness} />
           <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-500"><span>Ethereum mainnet · Latest indexed block {latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</span><span>CSV/JSON exports preserve active filters and are bounded to 5,000 rows.</span></div>
         </div>}
 

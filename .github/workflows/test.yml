@@ -68,7 +68,7 @@ jobs:
           LLM_MODEL: llama3.2:1b
           OLLAMA_URL: http://localhost:11434
         run: |
-          pytest -p pytest_asyncio.plugin tests/unit/ -v --no-header
+          pytest tests/unit/ -v --no-header
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

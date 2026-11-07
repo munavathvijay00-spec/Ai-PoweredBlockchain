@@ -71,7 +71,9 @@ jobs:
         run: node tests/browser-smoke.mjs
 
   production-load-smoke:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Never send load or chaos requests to the public live service on every push.
+    # Operators must explicitly dispatch this job after checking service capacity.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,7 +83,7 @@ jobs:
       - name: Wait for hardened production deployment
         run: |
           for i in {1..60}; do
-            code=$(curl -sS -o /tmp/queue.json -w "%{http_code}" "https://ai-poweredblockchain-production.up.railway.app/api/transaction-browser?limit=10&clustered=true" || true)
+            code=$(curl -sS -o /tmp/queue.json -w "%{http_code}" "https://chainscope-api.onrender.com/api/transaction-browser?limit=10&clustered=true" || true)
             if [ "$code" = "200" ]; then
               python - <<'PY'
           import json
@@ -102,19 +104,19 @@ jobs:
       - name: Clustered queue load smoke
         run: >-
           python scripts/review_queue_load_test.py
-          https://ai-poweredblockchain-production.up.railway.app/api
+          https://chainscope-api.onrender.com/api
           --requests 120 --concurrency 12 --max-p95-ms 3000 --min-success-rate 0.98
       - name: Reset public rate-limit window
         run: sleep 65
       - name: Client-abort chaos smoke
         run: >-
           python scripts/review_queue_load_test.py
-          https://ai-poweredblockchain-production.up.railway.app/api
+          https://chainscope-api.onrender.com/api
           --requests 80 --concurrency 10 --chaos-rate 0.10 --max-p95-ms 3500 --min-success-rate 0.98
       - name: Live security and evidence smoke
         run: |
           set -euo pipefail
-          BASE="https://ai-poweredblockchain-production.up.railway.app"
+          BASE="https://chainscope-api.onrender.com"
           TX_HASH=$(python - <<'PY'
           import json
           with open('/tmp/queue.json') as handle:

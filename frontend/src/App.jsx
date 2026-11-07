@@ -19,6 +19,7 @@ const NAV = [
 ];
 
 function ageLabel(seconds) {
+  if (seconds == null || seconds === '') return 'Unknown';
   const value = Number(seconds);
   if (!Number.isFinite(value)) return 'Unknown';
   if (value < 60) return `${Math.max(0, Math.round(value))}s ago`;
@@ -77,6 +78,7 @@ export default function App({ embedded = false }) {
   const [flagged, setFlagged] = useState([]);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [globalError, setGlobalError] = useState(null);
+  const [coverageError, setCoverageError] = useState(false);
   const [selectedTx, setSelectedTx] = useState(null);
   const [view, setView] = useState('transactions');
 
@@ -106,7 +108,8 @@ export default function App({ embedded = false }) {
       if (!active) return;
       const [statsResult, coverageResult, flaggedResult] = results;
       if (statsResult.status === 'fulfilled') setStats(statsResult.value);
-      if (coverageResult.status === 'fulfilled') setCoverage(coverageResult.value);
+      if (coverageResult.status === 'fulfilled') { setCoverage(coverageResult.value); setCoverageError(false); }
+      else setCoverageError(true);
       if (flaggedResult.status === 'fulfilled') setFlagged(flaggedResult.value.transactions ?? []);
       const failures = results.filter(result => result.status === 'rejected');
       setGlobalError(failures.length ? 'Some services are temporarily unavailable. Last successful data remains visible.' : null);
@@ -201,7 +204,13 @@ export default function App({ embedded = false }) {
     }
   }
 
-  const freshness = coverage?.ingestion_health?.status || 'unknown';
+  // A cached server label must never imply live data after coverage polling fails
+  // or the checkpoint has aged beyond the live monitoring window.
+  const reportedFreshness = coverage?.ingestion_health?.status || 'unknown';
+  const checkpointSeconds = Number(coverage?.ingestion_health?.checkpoint_age_seconds);
+  const freshness = coverageError ? 'unknown' : Number.isFinite(checkpointSeconds) && checkpointSeconds >= 300
+    ? 'stale' : Number.isFinite(checkpointSeconds) && checkpointSeconds >= 90 && reportedFreshness === 'live'
+      ? 'delayed' : reportedFreshness;
   const status = statusMeta(freshness);
   const checkpointAge = coverage?.ingestion_health?.checkpoint_age_seconds;
   const latestIndexedBlock = coverage?.ingestion_health?.checkpoint_block || browser?.newest_block || null;
@@ -219,6 +228,7 @@ export default function App({ embedded = false }) {
       <main className="platform-shell">
         {!embedded && <div className="mb-5 flex gap-2 overflow-x-auto xl:hidden">{NAV.map(item => <button key={item.id} onClick={() => setView(item.id)} className={`workspace-chip ${view === item.id ? 'workspace-chip-active' : ''}`}>{item.label}</button>)}</div>}
         {globalError && <div className="mb-5 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-sm text-amber-200" role="status">{globalError}</div>}
+        {(freshness !== 'live' || browserError) && <div className="cs-freshness-alert" role="status" aria-live="polite"><div><strong>Evidence stream: {status.label.toLowerCase()}</strong><p>{coverageError ? 'Coverage verification failed. Previous records may be cached; live indexing is not confirmed.' : freshness === 'stale' ? 'The last indexed checkpoint is outside the expected live window. Treat displayed transactions as historical evidence.' : freshness === 'delayed' ? 'The indexer checkpoint is delayed. Recent transfers may not yet be represented.' : 'Live chain coverage has not been verified. Do not interpret an empty list as zero network activity.'}{browserError ? ` Transaction retrieval failed: ${browserError}` : ''}</p><small>Checkpoint age: {ageLabel(checkpointAge)} · Retained records are not complete chain history.</small></div><button type="button" className="workspace-chip" onClick={() => setBrowserRefresh(value => value + 1)}>Retry records</button></div>}
 
         {view === 'transactions' && <div className="space-y-6">
           <section className="overflow-hidden rounded-xl border border-sky-400/15 bg-gradient-to-r from-sky-400/[0.07] via-[#172338] to-violet-400/[0.06]" aria-label="Investigation pulse"><div className="flex flex-col gap-4 px-5 py-4 xl:flex-row xl:items-center xl:justify-between"><div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${status.dot}`} /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">Investigation Pulse</span></div><p className="mt-2 text-sm text-slate-400">Ethereum evidence stream · triage-first analyst workspace</p></div><div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-5"><div><p className="text-[10px] uppercase tracking-wider text-slate-500">Latest block</p><p className="mt-1 font-mono text-sm font-semibold text-white">{latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</p></div><div><p className="text-[10px] uppercase tracking-wider text-slate-500">Filtered</p><p className="mt-1 text-sm font-semibold text-sky-300">{Number(browser.total || 0).toLocaleString()}</p></div><div><p className="text-[10px] uppercase tracking-wider text-slate-500">Flagged</p><p className="mt-1 text-sm font-semibold text-amber-300">{flaggedCount.toLocaleString()}</p></div><div><p className="text-[10px] uppercase tracking-wider text-slate-500">High review</p><p className="mt-1 text-sm font-semibold text-orange-300">{highReviewCount.toLocaleString()}</p></div><div><p className="text-[10px] uppercase tracking-wider text-slate-500">Critical</p><p className="mt-1 text-sm font-semibold text-red-300">{criticalCount.toLocaleString()}</p></div></div><div className="shrink-0 text-left xl:text-right"><p className={`text-sm font-semibold ${status.text}`}>{status.label}</p><p className="mt-1 text-xs text-slate-500">checkpoint {ageLabel(checkpointAge)}</p></div></div></section>
@@ -233,7 +243,7 @@ export default function App({ embedded = false }) {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-xs"><span className="text-slate-300">{reviewPaused ? 'Review snapshot held: automatic queue refresh paused to keep visible evidence stable.' : 'Live queue refreshes approximately every 15 seconds while this tab is visible.'}</span><button type="button" className="workspace-chip" aria-pressed={reviewPaused} onClick={() => { queueRequestEpoch.current += 1; setBrowserLoading(false); if (reviewPaused) setBrowserRefresh(value => value + 1); setReviewPaused(value => !value); }}>{reviewPaused ? 'Resume live updates' : 'Pause while reviewing'}</button></div>
           <ClusterTriage transactions={browser.transactions || []} onSelect={inspectTransaction} loading={browserLoading} sort={sort} page={page} onReviewFirst={() => { setSort('risk_desc'); setPage(1); }} />
-          <TransactionList transactions={browser.transactions || []} onSelect={inspectTransaction} totalMatches={browser.total} loading={browserLoading} error={browserError} onRetry={() => setBrowserRefresh(value => value + 1)} offset={(page - 1) * pageSize} sort={sort} onSort={value => updateFilter(setSort, value)} />
+          <TransactionList transactions={browser.transactions || []} onSelect={inspectTransaction} totalMatches={browser.total} loading={browserLoading} error={browserError} onRetry={() => setBrowserRefresh(value => value + 1)} offset={(page - 1) * pageSize} sort={sort} onSort={value => updateFilter(setSort, value)} freshness={freshness} />
           <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-500"><span>Ethereum mainnet · Latest indexed block {latestIndexedBlock ? Number(latestIndexedBlock).toLocaleString() : '—'}</span><span>CSV/JSON exports preserve active filters and are bounded to 5,000 rows.</span></div>
         </div>}
 

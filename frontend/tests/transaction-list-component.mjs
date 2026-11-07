@@ -40,7 +40,8 @@ try {
   }));
   assert.match(rendered, /Transactions/);
   assert.match(rendered, /High review/);
-  assert.match(rendered, /Large ETH transfer/);
+  assert.match(rendered, /Show context/);
+  assert.doesNotMatch(rendered, /Large ETH transfer/); // Signal explanation is progressively disclosed.
   assert.match(rendered, /65/);
   assert.match(rendered, /Show recorded score factors/);
   assert.match(rendered, /etherscan[.]io[/]address/);

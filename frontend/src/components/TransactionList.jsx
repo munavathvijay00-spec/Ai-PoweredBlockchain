@@ -73,19 +73,20 @@ function SortHeader({ label, field, sort, onSort, className = '' }) {
   return <th scope="col" className={`px-4 py-3 ${className}`}><button type="button" onClick={() => onSort(next)} className="inline-flex min-h-11 items-center gap-1 hover:text-sky-300">{label}<span aria-hidden="true">{active ? (sort === desc ? '↓' : '↑') : '↕'}</span></button></th>;
 }
 
-export default function TransactionList({ transactions = [], onSelect, totalMatches = 0, loading = false, error = null, onRetry, offset = 0, sort = 'risk_desc', onSort = () => {} }) {
+export default function TransactionList({ transactions = [], onSelect, totalMatches = 0, loading = false, error = null, onRetry, offset = 0, sort = 'risk_desc', onSort = () => {}, freshness = 'unknown' }) {
   const [openScore, setOpenScore] = useState(null);
+  const [expandedRow, setExpandedRow] = useState(null);
   const shown = transactions.length;
   const total = Number(totalMatches || 0);
   const start = shown ? Number(offset) + 1 : 0;
   const end = shown ? Number(offset) + shown : 0;
 
   return <section className="transaction-panel" aria-labelledby="transactions-heading">
-    <div className="transaction-panel-head"><div><h2 id="transactions-heading" className="text-lg font-semibold text-white">Transactions</h2><p className="mt-1 text-sm text-slate-400">Showing {start.toLocaleString()}–{end.toLocaleString()} of {total.toLocaleString()} matching records</p></div><span className="hidden text-sm text-slate-400 sm:inline">Evidence-backed review · inspect score factors</span></div>
+    <div className="transaction-panel-head"><div><span className="cs-section-kicker">02 / EVIDENCE LEDGER</span><h2 id="transactions-heading" className="text-lg font-semibold text-white">Transactions</h2><p className="mt-1 text-sm text-slate-400">Showing {start.toLocaleString()}–{end.toLocaleString()} of {total.toLocaleString()} matching records</p></div><span className="hidden text-sm text-slate-400 sm:inline">Select a record for its source evidence</span></div>
 
     {loading && <div className="space-y-3 p-6" aria-live="polite" aria-label="Loading transactions">{[0,1,2,3].map(i => <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-800/70" />)}</div>}
     {!loading && error && <div className="py-14 text-center"><p className="text-sm text-rose-300">{error}</p>{onRetry && <button type="button" onClick={onRetry} className="workspace-chip mt-4">Retry</button>}</div>}
-    {!loading && !error && !shown && <div className="py-14 text-center text-sm text-slate-400">No transactions match the active filters.</div>}
+    {!loading && !error && !shown && <div className="py-14 px-5 text-center text-sm text-slate-400"><p>No transactions match the active filters.</p><p className="mt-2 text-xs">{freshness === 'live' ? 'Try clearing filters. This view covers only retained indexed records.' : 'Indexer freshness is unverified or delayed; this does not mean Ethereum has no activity.'}</p></div>}
 
     {!loading && !error && shown > 0 && <>
       <div className="cs-transaction-scroll hidden xl:block" role="region" aria-label="Transactions table" tabIndex={0}>
@@ -106,11 +107,12 @@ export default function TransactionList({ transactions = [], onSelect, totalMatc
               const risk = riskMeta(score);
               const amount = formatEth(tx);
               const reason = factorReason(tx);
-              return <tr key={tx.hash}>
+              return <tr key={tx.hash} className="cs-ledger-row">
                 <td className="cs-transaction-time" title={timeLabel(tx.timestamp)}>{timeLabel(tx.timestamp)}</td>
                 <td className="cs-transaction-hash" title={tx.hash}>
                   <span className="font-mono text-xs">{shortHash(tx.hash)}</span>
-                  <a href={`https://etherscan.io/tx/${encodeURIComponent(tx.hash)}`} target="_blank" rel="noopener noreferrer" className="cs-transaction-link" aria-label={`Inspect transaction ${tx.hash} on Etherscan`}>View on Etherscan ↗</a>
+                  <button type="button" className="cs-transaction-link text-left" aria-expanded={expandedRow === tx.hash} onClick={() => setExpandedRow(expandedRow === tx.hash ? null : tx.hash)}>{expandedRow === tx.hash ? 'Hide context −' : 'Show context +'}</button>
+                  {expandedRow === tx.hash && <div className="cs-inline-evidence"><p>Block {tx.block_number ?? '—'} · {tx.hash}</p><a href={`https://etherscan.io/tx/${encodeURIComponent(tx.hash)}`} target="_blank" rel="noopener noreferrer" aria-label={`Inspect transaction ${tx.hash} on Etherscan`}>Verify on Etherscan ↗</a></div>}
                 </td>
                 <td className="cs-transaction-path">
                   <div className="cs-path-pair">
@@ -124,7 +126,7 @@ export default function TransactionList({ transactions = [], onSelect, totalMatc
                 <td className="cs-transaction-value" title={amount.title}>{amount.text}</td>
                 <td className="cs-transaction-risk">
                   <button type="button" aria-expanded={openScore === tx.hash} onClick={() => setOpenScore(openScore === tx.hash ? null : tx.hash)} className={`cs-score-button inline-flex items-center rounded border px-2 py-1.5 text-xs font-semibold ${risk.cls}`} title="Show recorded score factors">{risk.label} · {score} <span aria-hidden="true">{openScore === tx.hash ? '▴' : '▾'}</span></button>
-                  <p className="cs-signal-summary" title={reason || 'No recorded signal'}>{reason || 'No recorded signal'}</p>
+                  {openScore === tx.hash && <p className="cs-signal-summary" title={reason || 'No recorded signal'}>{reason || 'No recorded signal'}</p>}
                   {openScore === tx.hash && <div className="cs-factor-popout text-xs text-slate-300">{Array.isArray(tx.risk_factors) && tx.risk_factors.length ? tx.risk_factors.map((factor, i) => <div key={i}>+{Number(factor.points) || 0}: {factor.reason || factor.factor || 'Recorded signal'}</div>) : 'No recorded score factors'}<p className="mt-2">Review score {score}/100 — not a fraud probability.</p></div>}
                 </td>
                 <td className="cs-transaction-action"><button type="button" onClick={() => onSelect(tx)} className="workspace-chip cs-details-button">View details <span aria-hidden="true">↗</span></button></td>

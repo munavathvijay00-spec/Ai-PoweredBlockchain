@@ -1,4 +1,5 @@
 from src.risk.evaluation import evaluate_predictions
+import pytest
 
 
 def test_independent_evaluation_keeps_abstention_explicit():
@@ -26,3 +27,23 @@ def test_duplicate_case_ids_are_rejected():
         pass
     else:
         raise AssertionError("duplicate case IDs must fail")
+
+
+@pytest.mark.parametrize("bad_label", [0.5, 1.0, 1.9, True, None, "", "false", -1, 2])
+def test_invalid_ground_truth_is_never_coerced(bad_label):
+    with pytest.raises(ValueError):
+        evaluate_predictions([{"case_id": "case-a", "label": bad_label, "prediction": "1"}])
+
+
+@pytest.mark.parametrize("bad_id", [None, 123, "", "  ", "\n"])
+def test_missing_case_identifiers_are_rejected(bad_id):
+    with pytest.raises(ValueError):
+        evaluate_predictions([{"case_id": bad_id, "label": 1, "prediction": "1"}])
+
+
+def test_whitespace_normalization_prevents_duplicate_cases():
+    with pytest.raises(ValueError):
+        evaluate_predictions([
+            {"case_id": "case-a", "label": 1, "prediction": 1},
+            {"case_id": " case-a ", "label": 0, "prediction": 0},
+        ])

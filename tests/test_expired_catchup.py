@@ -20,9 +20,10 @@ class FakeClient:
         self.calls = []
     async def get_block(self, block_number, *, full_transactions):
         self.calls.append((block_number, full_transactions))
-        if block_number == 1000 - 36:
+        anchor = choose_expired_anchor(600, 1000)
+        if block_number == anchor:
             return {"number": block_number, "hash": H2, "parentHash": H1, "timestamp": 100}
-        if block_number == 1000 - 37:
+        if block_number == anchor - 1:
             return {"number": block_number, "hash": H1, "parentHash": H1, "timestamp": 90}
         raise AssertionError(f"unexpected block: {block_number}")
 
@@ -44,7 +45,10 @@ class FakeDb:
 
 
 def test_anchor_only_for_large_backlog():
-    assert choose_expired_anchor(600, 1000) == 964
+    assert choose_expired_anchor(600, 1000) == 915
+    assert choose_expired_anchor(600, 1000, retention_minutes=5) == 965
+    with pytest.raises(ValueError):
+        choose_expired_anchor(600, 1000, retention_minutes=0)
     assert choose_expired_anchor(1000 - MIN_BACKLOG_BLOCKS + 1, 1000) is None
     assert choose_expired_anchor(None, 1000) is None
     assert choose_expired_anchor(1000, 1000) is None
@@ -59,7 +63,7 @@ async def test_unexpired_anchor_never_skips(monkeypatch):
     )
     assert result is None
     assert not db.commands
-    assert client.calls == [(964, False)]
+    assert client.calls == [(915, False)]
 
 
 @pytest.mark.asyncio
@@ -78,20 +82,20 @@ async def test_expired_gap_commits_atomically(monkeypatch):
         db, client, 600, 1000,
         is_expired=lambda header, **kw: header["timestamp"] < 120,
     )
-    assert result == (964, H2)
+    assert result == (915, H2)
     assert db.commands[0] == ("start",)
     assert db.commands[-1] == ("commit",)
     gap = next(x for x in db.commands if "INSERT INTO ingest_coverage_gaps" in x[0])
-    assert gap[1:] == (601, 963, 964, H2, "Expired live-window history skipped during free-tier recovery; not indexed.")
-    assert ("lineage", 964) in db.commands
-    assert ("checkpoint", 964, H2) in db.commands
+    assert gap[1:] == (601, 914, 915, H2, "Expired live-window history skipped during free-tier recovery; not indexed.")
+    assert ("lineage", 915) in db.commands
+    assert ("checkpoint", 915, H2) in db.commands
 
 
 @pytest.mark.asyncio
 async def test_mismatched_parent_fails_closed():
     client, db = FakeClient(), FakeDb()
     async def inconsistent(block, *, full_transactions):
-        return {"number": block, "hash": H2 if block == 964 else H1,
+        return {"number": block, "hash": H2 if block == 915 else H1,
                 "parentHash": H2, "timestamp": 100}
     client.get_block = inconsistent
     with pytest.raises(RuntimeError, match="LINEAGE_CONFLICT"):

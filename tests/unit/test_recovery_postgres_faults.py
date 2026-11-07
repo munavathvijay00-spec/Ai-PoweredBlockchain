@@ -6,6 +6,7 @@ current test connection, and the configured DB name must end with '_test'.
 
 import asyncio
 import os
+import time
 from urllib.parse import urlsplit
 
 import asyncpg
@@ -21,6 +22,19 @@ HASH_B = "0x" + "b" * 64
 
 class CanonicalRPC:
     async def get_block(self, height, *, full_transactions=False):
+        return {"number": height, "hash": HASH_B}
+
+
+class TransientFailureRPC:
+    def __init__(self, failures):
+        self.remaining = failures
+        self.attempts = 0
+
+    async def get_block(self, height, *, full_transactions=False):
+        self.attempts += 1
+        if self.remaining:
+            self.remaining -= 1
+            raise ConnectionError("isolated simulated RPC outage")
         return {"number": height, "hash": HASH_B}
 
 
@@ -72,6 +86,36 @@ async def test_postgres_interrupted_transaction_rolls_back_checkpoint():
 
         # A restarted worker can advance from the durable last committed state.
         await save_cursor_checkpoint(conn, 101, HASH_B)
+        assert await load_cursor_checkpoint(conn) == (101, HASH_B)
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_postgres_checkpoint_survives_rpc_outage_and_recovers():
+    """Real PostgreSQL checkpoint; simulated RPC failure; actual elapsed time.
+
+    This measures the isolated retry drill, NOT Render restart or live RPC uptime.
+    """
+    conn = await safe_test_connection()
+    try:
+        await save_cursor_checkpoint(conn, 100, HASH_A)
+        await save_cursor_checkpoint(conn, 101, HASH_B)
+        rpc = TransientFailureRPC(failures=2)
+        started = time.perf_counter()
+        for attempt in range(3):
+            try:
+                outcome = await reconcile_competing_worker(conn, rpc, 100)
+                break
+            except ConnectionError:
+                # Shortened delay solely for CI; never interpret as production MTTR.
+                await asyncio.sleep(0.02)
+        else:
+            pytest.fail("checkpoint did not recover after the transient RPC outage")
+        elapsed = time.perf_counter() - started
+        assert outcome == (101, HASH_B)
+        assert rpc.attempts == 3
+        assert elapsed >= 0.04
         assert await load_cursor_checkpoint(conn) == (101, HASH_B)
     finally:
         await conn.close()

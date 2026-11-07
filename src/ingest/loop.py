@@ -79,6 +79,13 @@ def catchup_sleep_seconds(pending_after_iteration: int, normal_interval: int) ->
     return normal_interval
 
 
+def ingestion_retry_delay(consecutive_failures: int, interval_seconds: int) -> int:
+    """Bound transient failure retries to avoid hammering RPC and storage."""
+    if consecutive_failures < 1 or interval_seconds < 1:
+        raise ValueError("retry count and interval must be positive")
+    return min(120, max(interval_seconds, 2) * (2 ** min(consecutive_failures - 1, 6)))
+
+
 def block_outside_live_retention(block: dict, *, retention_minutes: int = LIVE_RETENTION_MINUTES, now_ts: int | None = None) -> bool:
     """Return True only when a block is definitely older than the live window."""
     if retention_minutes < 1:
@@ -128,6 +135,7 @@ async def ingest_loop(interval_seconds: int = 15, *, standalone: bool = False):
     explainer = get_explainer()
 
     iteration = 0
+    consecutive_failures = 0
     total_inserted = 0
     total_flagged = 0
     total_header_only = 0
@@ -339,6 +347,8 @@ async def ingest_loop(interval_seconds: int = 15, *, standalone: bool = False):
                     except Exception as cleanup_err:
                         logger.warning(f"Lineage cleanup error (non-fatal): {cleanup_err}")
 
+                consecutive_failures = 0
+
             except Exception as e:
                 # Rolling deployments briefly overlap two API instances.
                 # The checkpoint CAS correctly rejects losing writes; a loser
@@ -350,6 +360,7 @@ async def ingest_loop(interval_seconds: int = 15, *, standalone: bool = False):
                     )
                     if winner is not None:
                         last_processed_block, last_block_hash = winner
+                        consecutive_failures = 0
                         logger.warning(
                             "Rolling-deploy checkpoint race resolved against canonical block {}; "
                             "resuming from verified winner",
@@ -362,10 +373,20 @@ async def ingest_loop(interval_seconds: int = 15, *, standalone: bool = False):
                         'Ingestion halted: integrity conflict exceeded automatic verification/recovery policy'
                     )
                     raise
+                consecutive_failures += 1
+                logger.warning(
+                    "Ingestion transient failure streak={} next_retry_delay={}s",
+                    consecutive_failures,
+                    ingestion_retry_delay(consecutive_failures, interval_seconds),
+                )
 
             if not _shutdown_requested:
                 remaining = max(0, latest_block - (last_processed_block or latest_block))
-                sleep_seconds = catchup_sleep_seconds(remaining, interval_seconds)
+                sleep_seconds = (
+                    ingestion_retry_delay(consecutive_failures, interval_seconds)
+                    if consecutive_failures
+                    else catchup_sleep_seconds(remaining, interval_seconds)
+                )
                 logger.debug(
                     "😴 Sleeping {}s (remaining_lag={} blocks)...",
                     sleep_seconds,

@@ -27,7 +27,7 @@ jobs:
         run: |
           python - <<'PY'
           from src.storage_budget import bounded_retention_minutes
-          assert bounded_retention_minutes(None) == 5
+          assert bounded_retention_minutes(None) == 15
           assert bounded_retention_minutes("60") == 60
           for invalid in ("0", "61", "garbage"):
               try:

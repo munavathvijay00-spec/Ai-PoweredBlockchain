@@ -15,19 +15,23 @@ from src.ingest.cursor import save_cursor_checkpoint
 from src.ingest.reorg import block_hash, record_lineage
 from src.storage_budget import LIVE_RETENTION_MINUTES
 
-# Ethereum mainnet target: leave about seven minutes between anchor and tip.
-# The timestamp check, not this estimate, is the actual safety guard.
-ANCHOR_BEHIND_HEAD_BLOCKS = 36
+# Ethereum mainnet targets 12s blocks. Leave the entire retention window plus
+# two minutes of headroom; actual block timestamps remain the safety guard.
+ESTIMATED_BLOCK_SECONDS = 12
+ANCHOR_SAFETY_MINUTES = 2
 MIN_BACKLOG_BLOCKS = 256
 
 
-def choose_expired_anchor(checkpoint: int | None, head: int) -> int | None:
+def choose_expired_anchor(checkpoint: int | None, head: int, *, retention_minutes: int = LIVE_RETENTION_MINUTES) -> int | None:
     """Never jump for ordinary short restarts or tip fluctuations."""
     if checkpoint is None or checkpoint < 0 or head < 0:
         return None
     if head - checkpoint < MIN_BACKLOG_BLOCKS:
         return None
-    target = head - ANCHOR_BEHIND_HEAD_BLOCKS
+    if retention_minutes < 1:
+        raise ValueError("retention_minutes must be positive")
+    anchor_lag_blocks = ((retention_minutes + ANCHOR_SAFETY_MINUTES) * 60 + ESTIMATED_BLOCK_SECONDS - 1) // ESTIMATED_BLOCK_SECONDS
+    target = head - anchor_lag_blocks
     return target if target > checkpoint + 1 else None
 
 

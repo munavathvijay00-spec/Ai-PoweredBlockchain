@@ -4,6 +4,18 @@ No metric is meaningful unless labels come from an independent source. Abstentio
 is kept explicit rather than silently converted to a benign prediction.
 """
 import math
+import re
+
+
+_CASE_ID = re.compile(r"\S")
+
+
+def _binary(value, field):
+    """Do not turn fractional, boolean, or missing labels into ground truth."""
+    if not ((type(value) is int and value in (0, 1)) or
+            (type(value) is str and value in ("0", "1"))):
+        raise ValueError(f"{field} must be exactly 0 or 1")
+    return int(value)
 
 
 def _ratio(num, den):
@@ -26,14 +38,17 @@ def evaluate_predictions(rows):
     counts = {"tp": 0, "fp": 0, "tn": 0, "fn": 0, "abstain_positive": 0, "abstain_negative": 0}
     seen = set()
     for row in rows:
-        case_id = str(row["case_id"])
-        if not case_id or case_id in seen:
+        raw_id = row["case_id"]
+        case_id = raw_id.strip() if isinstance(raw_id, str) else ""
+        if not _CASE_ID.search(case_id) or case_id in seen:
             raise ValueError("case_id must be nonempty and unique")
         seen.add(case_id)
-        label = int(row["label"])
-        prediction = str(row["prediction"])
-        if label not in (0, 1) or prediction not in {"0", "1", "abstain"}:
+        label = _binary(row["label"], "label")
+        raw_prediction = row["prediction"]
+        if not ((type(raw_prediction) is int and raw_prediction in (0, 1)) or
+                (type(raw_prediction) is str and raw_prediction in ("0", "1", "abstain"))):
             raise ValueError("invalid label or prediction")
+        prediction = str(raw_prediction)
         if prediction == "abstain":
             counts["abstain_positive" if label else "abstain_negative"] += 1
         elif prediction == "1":
@@ -65,6 +80,8 @@ def evaluate_predictions(rows):
         "false_negative_rate": _ratio(operational_fn, positive_support),
         "positive_support": positive_support,
         "negative_support": negative_support,
+        "observed_positive_fraction": _ratio(positive_support, total),
+        "predicted_positive_fraction": _ratio(predicted_positive, total),
         "confidence_intervals_95": {
             "precision": wilson_interval(tp, predicted_positive),
             "recall": wilson_interval(tp, positive_support),

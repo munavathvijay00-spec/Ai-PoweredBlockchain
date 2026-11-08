@@ -626,3 +626,110 @@ html, body, #root { background: var(--cs-canvas); color: var(--cs-primary); }
 @media (max-width: 520px) {
   .cs-transaction-mobile article { padding: 17px 15px; }
 }
+
+/* Classical Ledger — ChainScope's archival investigation edition.
+   The product's object is the transaction record: typography, a restrained
+   brass selection rule, and quiet ink-coloured surfaces replace neon chrome.
+   Only the presentation changes; risk, freshness and evidence semantics remain. */
+:root {
+  color-scheme: dark;
+  --cs-ink: #10100f;
+  --cs-side: #171715;
+  --cs-canvas: #1c1c1a;
+  --cs-surface: #22221f;
+  --cs-surface-raised: #292925;
+  --cs-surface-low: #1b1b19;
+  --cs-border: #3b3a35;
+  --cs-border-soft: #32322f;
+  --cs-primary: #f0eee7;
+  --cs-secondary: #c7c4b9;
+  --cs-muted: #aaa79d;
+  --cs-accent: #c2a773;
+  --cs-accent-dark: #3d3425;
+  --cs-warning: #d5b779;
+  --cs-danger: #e0a5a0;
+  --cs-positive: #a5c5ad;
+  font-family: "Public Sans", system-ui, -apple-system, sans-serif;
+}
+.cs-studio {
+  --cs-accent: #c2a773;
+  background: var(--cs-canvas);
+  font-family: "Public Sans", system-ui, -apple-system, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.cs-sidebar { background: var(--cs-side); border-color: var(--cs-border-soft); }
+.cs-brand { border-color: var(--cs-border-soft); }
+.cs-brand-mark { background: #2a2924; border: 1px solid #a38d61; border-radius: 2px; transform: none; box-shadow: none; }
+.cs-brand-mark span { border-color: #dbc89c; }
+.cs-brand-mark span:nth-child(3) { background: #dbc89c; }
+.cs-brand-copy strong { color: #f3f0e7; font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 600; letter-spacing: -.035em; }
+.cs-brand-copy small { color: #bbb5a4; text-transform: none; letter-spacing: .015em; font-size: 11px; }
+.cs-nav-label { color: #ada79a; text-transform: none; letter-spacing: 0; font-size: 12px; }
+.cs-nav-item { border-radius: 0; min-height: 55px; }
+.cs-nav-item:hover { background: #292925; }
+.cs-nav-item-active { background: #252520; border-color: transparent; box-shadow: inset 2px 0 #c2a773; color: #f4f1e8; }
+.cs-nav-item-active .cs-nav-index, .cs-nav-item-active .cs-nav-caret { color: #d8c18b; }
+.cs-nav-item.cs-nav-item-active small { color: #c2b9a4; }
+.cs-sidebar-context { background: transparent; border-radius: 0; }
+.cs-topbar { background: #20201d; border-color: var(--cs-border-soft); }
+.cs-breadcrumb strong { color: #e8e3d5; }
+.cs-page-intro { border-color: #4b4435; }
+.cs-page-intro h1, .cs-featured-graph-heading h2, .cs-search-panel h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500 !important;
+  letter-spacing: -.025em !important;
+  color: #f4f0e6;
+}
+.cs-page-intro h1 { font-size: clamp(26px, 2.25vw, 32px); }
+.cs-overline, .cs-graph-eyebrow, .cs-search-panel .eyebrow { color: #c8b17f !important; letter-spacing: .02em; }
+.cs-intro-tag, .cs-search-tag { border-radius: 2px; background: #29271f; border-color: #5b5038; color: #dfcfaa; letter-spacing: 0; }
+.cs-monitor-tab-active { border-color: #c2a773; color: #f4f0e6; }
+.cs-monitor-tab:hover { color: #f4f0e6; }
+.cs-monitor-freshness { color: #b8b3a5; }
+.cs-workspace .platform-card, .cs-workspace .transaction-panel,
+.cs-workspace .panel, .cs-workspace .panel-strong,
+.cs-workspace .metric-card {
+  background: var(--cs-surface) !important;
+  border-color: var(--cs-border-soft) !important;
+  border-radius: 3px !important;
+  box-shadow: none !important;
+}
+.cs-workspace .cs-filter-panel, .cs-search-panel, .cs-featured-graph {
+  background: var(--cs-surface) !important;
+  border: 1px solid var(--cs-border) !important;
+  border-radius: 3px !important;
+  box-shadow: none !important;
+}
+.cs-featured-graph-heading { background: #282720; border-color: #4a4233; border-left: 2px solid #c2a773; }
+.cs-featured-graph .panel, .cs-featured-graph .panel-strong { background: #20201d !important; border-color: #383630 !important; }
+.cs-step { background: #24231f; border: 1px solid #393630; border-radius: 3px; }
+.cs-step span { color: #c8b17f; }
+.cs-step strong { color: #f2eee3; }
+.cs-step p { color: #beb8a9; }
+.cs-workspace .transaction-panel-head { border-left: 2px solid #c2a773; }
+.cs-transaction-table thead { background: #25241f !important; }
+.cs-transaction-table thead th { color: #c7c1b2; border-color: #484135; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.cs-transaction-table tbody tr { border-color: #36342f; }
+.cs-transaction-table tbody tr:hover, .transaction-row:hover { background: #302e27 !important; }
+.cs-transaction-hash, .cs-transaction-value { color: #eee9de; }
+.cs-transaction-link, .cs-path-arrow { color: #d1b782; }
+.cs-transaction-time, .cs-signal-summary { color: #bdb8ad; }
+.cs-factor-popout, .cs-evidence-scope { background: #25241f; border-color: #494234; border-radius: 3px; }
+.cs-evidence-scope > summary strong { color: #f1ece1; }
+.cs-evidence-scope .cs-scope-action, .cs-advanced-toggle { color: #d3be91; }
+.cs-workspace nav[aria-label="Investigation sections"] { background: #22221f !important; border-color: #3b3831 !important; }
+.cs-workspace nav[aria-label="Investigation sections"] a:hover { background: #302e27 !important; }
+.primary-button { background: #d8c394 !important; color: #211e18 !important; border-radius: 3px !important; }
+.primary-button:hover { background: #edddb6 !important; }
+.secondary-button, .workspace-chip, .soft-input, .search-shell, .filter-shell { background: #24231f !important; border-color: #4a463d !important; border-radius: 3px !important; color: #e8e2d5 !important; }
+.secondary-button:hover, .workspace-chip:hover { background: #302e27 !important; }
+.workspace-chip-active, .filter-tab-active { background: #2a281f !important; border-color: #a58e5e !important; color: #f0e3c7 !important; }
+.metric-label, .eyebrow { color: #b8b0a0 !important; text-transform: none; letter-spacing: 0; font-size: 12px; }
+.cs-workspace .text-cyan-300, .cs-workspace .text-sky-300, .cs-workspace .text-blue-300, .cs-workspace .text-violet-200 { color: #d0b782 !important; }
+.cs-workspace .text-slate-500, .cs-workspace .text-slate-600, .cs-workspace .text-slate-700 { color: #b1ada4 !important; }
+.cs-cached-evidence { background: #30271d; border-color: #806844; color: #efdbb7; }
+.cs-main-foot { border-color: var(--cs-border-soft); color: #aaa596; }
+@media (max-width: 850px) {
+  .cs-topbar { background: #20201d; }
+  .cs-page-intro h1 { font-size: 27px; }
+}

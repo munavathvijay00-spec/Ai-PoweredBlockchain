@@ -67,6 +67,15 @@ class TransactionNormalizer:
         block_ts = block.get('timestamp', 0)
         timestamp = datetime.fromtimestamp(block_ts)
 
+        # Carry canonical provenance forward for the planned DB migration.
+        # Legacy unit callers may omit a header hash; live ingestion rejects
+        # those snapshots before normalization.
+        block_hash = None
+        if block.get('hash') is not None:
+            from src.ingest.cursor import validate_block_hash
+            block_hash = self._to_hex_string(block['hash']).lower()
+            validate_block_hash(block_hash)
+
         return {
             'hash': tx_hash,
             'from_address': from_addr,
@@ -75,6 +84,7 @@ class TransactionNormalizer:
             'gas_price': gas_price,
             'gas_used': int(raw_tx.get('gas', 0) or 0),
             'block_number': int(block.get('number', 0)),
+            'block_hash': block_hash,
             'timestamp': timestamp,
             'status': 'confirmed',
             'risk_score': 0,
